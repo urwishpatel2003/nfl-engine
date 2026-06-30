@@ -25,7 +25,7 @@ fetch_data.py ──▶ data/raw/*.parquet ──▶ engine/ build steps ──�
    - `engine/composite.py` → `composite_scores.parquet` — 0-100 player scores per (season, week)
    - `engine/styles.py` → `team_styles.parquet` — team offensive/defensive style profiles from PBP
    - `engine/conditions.py` → `conditions.parquet` — weather/surface/rest/altitude/home-field modifiers
-   - `engine/coaching_metrics.py` → `coaching_scores.parquet` + `coaching_flags.csv` (optional)
+   - `coaching_metrics.py` → `coaching_scores.parquet` + `coaching_flags.csv` (optional, top-level standalone script)
 3. **Predict** — `engine/predict.py` consumes the processed parquets + matchups to produce per-game predictions.
 4. **Use** — `weekly_picks.py` (ATS picks), `backtest.py` / `backtest_picks.py` (validation), `dashboard/`.
 
@@ -65,7 +65,8 @@ already-built processed data.
 ## Key directories / files
 
 - `engine/` — the model. `predict.py` is the heart (score formula, win prob, game script).
-  `composite.py`, `styles.py`, `conditions.py`, `matchups.py`, `coaching_metrics.py` are the inputs.
+  `composite.py`, `styles.py`, `conditions.py`, `matchups.py` are the imported build modules.
+  `coaching_metrics.py` and `update_styles_2025.py` live at top level (run as standalone scripts).
 - `data/raw/` — fetched source parquets (pbp_YYYY, rosters, injuries, ngs_*, pfr_*, schedules, weather, …).
 - `data/processed/` — built model outputs + predictions_{season}_wk##.parquet + rankings CSVs.
 - `dashboard/` — Flask `server.py` + `dashboard.html`.
@@ -86,9 +87,9 @@ weights, keep the comment explaining the *why* next to the number.
 
 ## Gotchas
 
-- **Duplicate files**: `coaching_metrics.py`, `update_styles_2025.py`, `ats.py` exist BOTH at top
-  level and (mostly) in `engine/`. `run_engine.py` imports the `engine/` copies. The top-level
-  copies may be stale — check which one is imported before editing.
+- **Standalone build scripts**: `coaching_metrics.py` and `update_styles_2025.py` are run directly
+  (`python coaching_metrics.py …`), not imported. They derive paths from `Path(__file__).parent`,
+  so they MUST stay at the repo root (the `engine/` copies were broken and have been removed).
 - **No future leakage**: composite uses `shift(1)` rolling means; `backtest_picks.py` rebuilds
   styles using only prior seasons. Preserve this when touching anything used in backtests.
 - **Schema drift**: `predict.load_engine_data()` has defensive normalization for nflverse

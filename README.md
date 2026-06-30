@@ -64,7 +64,7 @@ To rebuild only part of the engine, pass `--skip-composite`, `--skip-styles`, or
 | `engine/styles.py` | Team offensive/defensive style profiles |
 | `engine/conditions.py` | Weather / surface / rest / home-field modifiers |
 | `engine/matchups.py` | Positional matchup matrix for a game |
-| `engine/coaching_metrics.py` | Coach quality signals |
+| `coaching_metrics.py` | Coach quality signals |
 | `run_engine.py` | Orchestrates build steps 1-4 |
 | `weekly_picks.py` | ATS pick ranker for a contest (top-5/week) |
 | `backtest.py`, `backtest_picks.py` | Prediction & pick validation |
