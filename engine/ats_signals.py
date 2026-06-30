@@ -83,16 +83,17 @@ def compute_ats_signals(pred: dict, schedules: pd.DataFrame = None) -> dict:
             if pd.notna(vs):
                 vegas_spread = float(vs)
 
-    # nflverse spread_line convention: AWAY team perspective
-    #   Negative spread_line = away team favored
-    #   Positive spread_line = home team favored (away is underdog)
+    # nflverse spread_line convention: HOME team perspective (verified empirically)
+    #   Positive spread_line = home team favored (home expected to win by spread_line)
+    #   Negative spread_line = away team favored (home is underdog)
     # Our predicted_spread: away_score - home_score
     #   Negative = home wins
     #
-    # To compare apples-to-apples (both in away perspective):
-    #   model_vegas_diff = predicted_spread + spread_line
-    #   Positive = model thinks away is STRONGER than Vegas
-    #   Negative = model thinks home is STRONGER than Vegas
+    # To compare apples-to-apples (both in home perspective):
+    #   Vegas home margin = spread_line ; model home margin = -predicted_spread
+    #   model_vegas_diff  = (-predicted_spread) - spread_line
+    #   Positive = model thinks HOME is STRONGER than Vegas
+    #   Negative = model thinks AWAY is STRONGER than Vegas
 
     signals   = []
     confidence = 50.0
@@ -102,8 +103,8 @@ def compute_ats_signals(pred: dict, schedules: pd.DataFrame = None) -> dict:
     # Most meaningful signal: model picks different winner than Vegas implies.
     # Secondary: model thinks game is significantly closer than Vegas (dog covers).
     if vegas_spread is not None:
-        vegas_implies_home  = vegas_spread < 0       # negative = home favored
-        model_implies_home  = model_spread < 0       # negative = home wins
+        vegas_implies_home  = vegas_spread > 0       # positive spread_line = home favored
+        model_implies_home  = model_spread < 0       # predicted_spread<0 = home wins
         abs_vegas           = abs(vegas_spread)
         pred_margin_home    = -model_spread           # home perspective
 
@@ -192,7 +193,7 @@ def compute_ats_signals(pred: dict, schedules: pd.DataFrame = None) -> dict:
             else:
                 home_margin_last = float(hp["away_score"] or 0) - float(hp["home_score"] or 0)
 
-            if home_margin_last >= 17 and vegas_spread is not None and vegas_spread < -7:
+            if home_margin_last >= 17 and vegas_spread is not None and vegas_spread > 7:
                 # Home team won big last week and is a big favorite = letdown risk
                 if bet_side != "HOME":
                     signals.append(f"{home} letdown spot: won by {home_margin_last:.0f} last wk, big fav this wk")

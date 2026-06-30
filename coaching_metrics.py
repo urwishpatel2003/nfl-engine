@@ -155,28 +155,28 @@ def build_coaching_metrics(seasons: list) -> pd.DataFrame:
     for _, g in sched.iterrows():
         home = g["home_team"]
         away = g["away_team"]
-        spread = float(g["spread_line"])  # negative = home favored
+        spread = float(g["spread_line"])  # positive = home favored (home margin line)
         home_score = float(g["home_score"])
         away_score = float(g["away_score"])
         season = int(g["season"])
         actual_margin = home_score - away_score
 
-        # Home team ATS
-        home_covered = actual_margin > -spread
-        home_favored = spread < 0
+        # Home team ATS — home covers if home_margin > spread_line
+        home_covered = actual_margin > spread
+        home_favored = spread > 0
         ats_rows.append({
             "season": season, "team": home, "spread": spread,
             "covered": home_covered, "is_favorite": home_favored,
-            "margin": actual_margin, "spread_margin": actual_margin + spread
+            "margin": actual_margin, "spread_margin": actual_margin - spread
         })
 
-        # Away team ATS
-        away_covered = actual_margin < -spread
-        away_favored = spread > 0
+        # Away team ATS — away covers if home_margin < spread_line
+        away_covered = actual_margin < spread
+        away_favored = spread < 0
         ats_rows.append({
             "season": season, "team": away, "spread": -spread,
             "covered": away_covered, "is_favorite": away_favored,
-            "margin": -actual_margin, "spread_margin": -actual_margin - spread
+            "margin": -actual_margin, "spread_margin": spread - actual_margin
         })
 
     ats_df = pd.DataFrame(ats_rows)

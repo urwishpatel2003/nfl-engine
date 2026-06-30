@@ -51,14 +51,14 @@ def score_pick(pred: dict, game: pd.Series, week: int):
     vegas_spread = float(game.get("spread_line", 0) or 0)
 
     model_picks_home  = pred_margin > 0
-    vegas_favors_home = vegas_spread < 0
+    vegas_favors_home = vegas_spread > 0   # nflverse: positive spread_line = home favored
 
     if model_picks_home == vegas_favors_home:
         return None  # model agrees with Vegas — no signal
 
     pick_side = "home" if model_picks_home else "away"
     pick_team = home   if model_picks_home else away
-    gap = abs(pred_margin - (-vegas_spread))
+    gap = abs(pred_margin - vegas_spread)   # model home margin vs Vegas home margin
 
     gap_score  = min(40, gap * 2.5)
     wp_score   = min(20, abs(win_prob - 0.5) * 80)
@@ -80,8 +80,9 @@ def score_pick(pred: dict, game: pd.Series, week: int):
     covered = None
     if pd.notna(h_act) and pd.notna(a_act):
         actual_margin = float(h_act) - float(a_act)
-        covered = (actual_margin > -vegas_spread if pick_side=="home"
-                   else actual_margin < -vegas_spread)
+        # Home covers if home_margin > spread_line (positive = home favored)
+        covered = (actual_margin > vegas_spread if pick_side=="home"
+                   else actual_margin < vegas_spread)
 
     return {
         "pick_team": pick_team, "pick_side": pick_side,
