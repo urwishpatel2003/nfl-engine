@@ -51,14 +51,14 @@ def score_pick(pred: dict, game: pd.Series, week: int):
     vegas_spread = float(game.get("spread_line", 0) or 0)
 
     model_picks_home  = pred_margin > 0
-    vegas_favors_home = vegas_spread < 0
+    vegas_favors_home = vegas_spread > 0   # nflverse: positive spread_line = home favored
 
     if model_picks_home == vegas_favors_home:
         return None  # model agrees with Vegas — no signal
 
     pick_side = "home" if model_picks_home else "away"
     pick_team = home   if model_picks_home else away
-    gap = abs(pred_margin - (-vegas_spread))
+    gap = abs(pred_margin - vegas_spread)   # model home margin vs Vegas home margin
 
     gap_score  = min(40, gap * 2.5)
     wp_score   = min(20, abs(win_prob - 0.5) * 80)
@@ -80,8 +80,9 @@ def score_pick(pred: dict, game: pd.Series, week: int):
     covered = None
     if pd.notna(h_act) and pd.notna(a_act):
         actual_margin = float(h_act) - float(a_act)
-        covered = (actual_margin > -vegas_spread if pick_side=="home"
-                   else actual_margin < -vegas_spread)
+        # Home covers if home_margin > spread_line (positive = home favored)
+        covered = (actual_margin > vegas_spread if pick_side=="home"
+                   else actual_margin < vegas_spread)
 
     return {
         "pick_team": pick_team, "pick_side": pick_side,
@@ -129,7 +130,7 @@ def run_backtest(seasons: list, top_n: int = 5, min_gap: float = 0):
             continue
 
         print(f"\n  Season {test_season}  (styles from {train_seasons}):")
-        print(f"  {'─'*50}")
+        print(f"  {'-'*50}")
 
         # Build OOS styles — only prior seasons
         styles_oos = build_styles_for(train_seasons)
@@ -199,7 +200,7 @@ def run_backtest(seasons: list, top_n: int = 5, min_gap: float = 0):
     for s, res in season_totals.items():
         if res["total"] == 0:
             print(f"  {s}:  no data"); continue
-        bar = "█"*res["correct"] + "░"*(res["total"]-res["correct"])
+        bar = "#"*res["correct"] + "."*(res["total"]-res["correct"])
         print(f"  {s}: {res['correct']:2d}/{res['total']} = {res['pct']:.1%}"
               f"  [{res['status']}]  {bar}")
 
@@ -215,7 +216,7 @@ def run_backtest(seasons: list, top_n: int = 5, min_gap: float = 0):
         if sub:
             corr = sum(1 for p in sub if p["covered"])
             wpw  = len(sub) / max(len(seasons),1) / 18
-            print(f"    Gap ≥{thresh:2d}: {corr}/{len(sub)} = {corr/len(sub):.1%}"
+            print(f"    Gap >={thresh:2d}: {corr}/{len(sub)} = {corr/len(sub):.1%}"
                   f"  ({wpw:.1f}/week avg)")
 
     # Week by week for last test season
@@ -234,7 +235,7 @@ def run_backtest(seasons: list, top_n: int = 5, min_gap: float = 0):
         worst = sorted(all_weeks, key=lambda x: x[2]["correct"]/x[2]["total"])[:5]
         print(f"\n  WORST WEEKS:")
         for s,wk,wr in worst:
-            detail = ", ".join(f"{p['pick_team']}{'✓' if p['covered'] else '✗'}"
+            detail = ", ".join(f"{p['pick_team']}{'+' if p['covered'] else '-'}"
                                for p in wr["picks"])
             print(f"    {s} Wk{wk:2d}: {wr['correct']}/{wr['total']} = "
                   f"{wr['correct']/wr['total']:.0%}  [{detail}]")

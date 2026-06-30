@@ -45,9 +45,9 @@ for _, game in wk1.iterrows():
         home_p = pred.get("predicted_home_score", 0)
         away_p = pred.get("predicted_away_score", 0)
         pred_margin  = home_p - away_p
-        vegas_margin = -float(spread)  # negative spread = home favored
+        vegas_margin = float(spread)  # positive spread_line = home favored (home margin)
         model_home   = pred_margin > 0
-        vegas_home   = spread < 0
+        vegas_home   = spread > 0
         agrees = model_home == vegas_home
         print(f"  {away}@{home}")
         print(f"    Vegas spread: {spread:+.1f}  (home margin: {vegas_margin:+.1f})")
@@ -72,7 +72,7 @@ for _, game in wk3.iterrows():
         spread = float(game["spread_line"])
         pred_margin  = home_p - away_p
         model_home   = pred_margin > 0
-        vegas_home   = spread < 0
+        vegas_home   = spread > 0
         total += 1
         if model_home != vegas_home:
             disagree += 1
@@ -96,7 +96,7 @@ for _, game in wk3.iterrows():
         away_p = pred.get("predicted_away_score", 22)
         spread = float(game["spread_line"])
         pred_margin = home_p - away_p
-        if (pred_margin > 0) != (spread < 0):
+        if (pred_margin > 0) != (spread > 0):
             disagree_oos += 1
     except Exception as e:
         pass

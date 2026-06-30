@@ -85,6 +85,20 @@ Per team, starting from `LEAGUE_AVG_PTS = 24.8`, additively adjusted by:
 Most adjustments are hand-tuned magic numbers with inline rationale comments. When changing
 weights, keep the comment explaining the *why* next to the number.
 
+## ATS spread convention (do not get this wrong)
+
+nflverse `spread_line` is **home perspective, POSITIVE = home favored** (verified
+empirically: home wins ~67% of `spread_line > 0` games). Therefore:
+- Home covers ATS iff `(home_score - away_score) > spread_line`.
+- Vegas favors home iff `spread_line > 0`.
+- Model home margin = `predicted_home_score - predicted_away_score`.
+- Note `predict.py` reports `predicted_spread = away - home` (NEGATIVE = home favored) —
+  the opposite sign of `spread_line`. Keep them straight.
+
+This was inverted across the entire ATS/picks layer at one point, which faked an ~86%
+backtest cover rate (true OOS rate is ~49%). `tests/test_spread_convention.py` guards it —
+run `python tests/test_spread_convention.py` after touching any spread/cover logic.
+
 ## Gotchas
 
 - **Standalone build scripts**: `coaching_metrics.py` and `update_styles_2025.py` are run directly

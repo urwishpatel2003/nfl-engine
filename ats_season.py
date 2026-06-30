@@ -86,9 +86,10 @@ def run_season_ats(season: int, min_win_prob: float = 0.55):
                 else:
                     continue
 
-            # Did the model's pick cover?
+            # Did the model's pick cover? nflverse spread_line>0 = home favored;
+            # home covers if home_margin > spread_line.
             model_picks_home = signal["predicted_home_score"] > signal["predicted_away_score"]
-            actual_home_covers = actual_margin > -vegas_spread
+            actual_home_covers = actual_margin > vegas_spread
             ats_correct = (model_picks_home == actual_home_covers)
 
             bet_side = "HOME" if model_picks_home else "AWAY"

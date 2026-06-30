@@ -68,34 +68,34 @@ def score_game(pred: dict, game_row: pd.Series, week: int) -> dict:
     pred_margin  = home_pred - away_pred          # + = home favored by model
     win_prob     = pred.get("home_win_probability", 0.5)
 
-    # Vegas spread: negative = home favored (e.g. -7 means home -7)
+    # nflverse spread_line: home perspective, POSITIVE = home favored (e.g. +7 = home -7)
     vegas_spread = float(game_row.get("spread_line", 0) or 0)
-    # Vegas says home is favored by |vegas_spread| if negative
+    # Vegas implied home margin == spread_line.
     # pred_margin > 0 means model picks home, < 0 means model picks away
     # ATS pick: compare model direction to Vegas direction
 
     model_picks_home  = pred_margin > 0
-    vegas_favors_home = vegas_spread < 0   # home spread is negative = home favored
+    vegas_favors_home = vegas_spread > 0   # positive spread_line = home favored
 
     # Only generate a pick when model direction DISAGREES with Vegas
     if model_picks_home == vegas_favors_home:
         return None
 
-    # Who we're picking
+    # Who we're picking — cover_need is the line the pick must beat (home perspective)
     if model_picks_home:
         pick_team   = home
         pick_side   = "home"
-        cover_need  = vegas_spread        # home needs to beat spread
+        cover_need  = vegas_spread        # home must win by more than spread_line
     else:
         pick_team   = away
         pick_side   = "away"
-        cover_need  = -vegas_spread       # away needs to beat (home spread)
+        cover_need  = -vegas_spread       # away gets +spread_line; flip to away perspective
 
     # ── Component 1: Model-Vegas gap (40 pts max) ──────────────────
     # How far does our predicted margin deviate from the Vegas spread?
     # Larger gap = stronger disagreement = higher confidence
     model_implied_spread = pred_margin           # model's predicted home margin
-    gap = abs(model_implied_spread - (-vegas_spread))  # vs Vegas home margin
+    gap = abs(model_implied_spread - vegas_spread)  # vs Vegas home margin (= spread_line)
     gap_score = min(40, gap * 2.5)   # 16pt gap = 40 pts score
 
     # ── Component 2: Win probability conviction (20 pts max) ──────
@@ -246,19 +246,22 @@ def run_week(season: int, week: int, top_n: int = 5, show_all: bool = False):
             h_act = p["home_score_actual"]
             a_act = p["away_score_actual"]
             actual_margin = h_act - a_act
-            # Did the pick cover?
+            # Did the pick cover? Home covers if home_margin > spread_line.
             if p["pick_side"] == "home":
-                covered = actual_margin > -p["vegas_spread"]
+                covered = actual_margin > p["vegas_spread"]
             else:
-                covered = actual_margin < -p["vegas_spread"]
+                covered = actual_margin < p["vegas_spread"]
             result_str = f"  → {'✓ COVERED' if covered else '✗ MISSED'} ({int(a_act)}-{int(h_act)})"
 
         flag_str = "  " + " ".join(f"[{f}]" for f in p["flags"]) if p["flags"] else ""
 
-        vs_spread = f"+{abs(p['vegas_spread']):.1f}" if p['pick_side']=='away' and p['vegas_spread']<0 else f"-{abs(p['vegas_spread']):.1f}" if p['pick_side']=='home' and p['vegas_spread']<0 else f"+{abs(p['vegas_spread']):.1f}"
+        # Betting lines: home favorite of spread_line shows as -spread_line; away as +spread_line
+        home_line = -p['vegas_spread']
+        away_line =  p['vegas_spread']
+        pick_line = home_line if p['pick_side'] == 'home' else away_line
 
         print(f"\n  #{i}  PICK: {p['pick_team']} ATS  ({p['away_team']} @ {p['home_team']})")
-        print(f"       Vegas spread: {p['vs_team']} {p['vegas_spread']:+.1f}  |  Take: {p['pick_team']} {vs_spread}")
+        print(f"       Line: {p['home_team']} {home_line:+.1f} / {p['away_team']} {away_line:+.1f}  |  Take: {p['pick_team']} {pick_line:+.1f}")
         print(f"       Model:  {p['away_pred']}-{p['home_pred']}  |  Vegas gap: {p['gap']:.1f} pts  |  Win prob: {p['win_prob']:.1%}")
         print(f"       Confidence: {p['confidence']:.0f}/100  |  Est. accuracy: {p['est_accuracy']:.0%}{flag_str}")
 

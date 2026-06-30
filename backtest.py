@@ -106,19 +106,19 @@ def run_backtest(seasons: list, rebuild: bool = False) -> pd.DataFrame:
                 model_picks_home = pred_margin > 0
 
                 # Step 2: Did that team cover the spread?
-                # spread_line is home perspective: negative = home favored
-                # Home covers if actual_margin > -spread_line
-                # Away covers if actual_margin < -spread_line
-                actual_home_covers = actual_margin > -vegas_spread
+                # nflverse spread_line is home perspective: POSITIVE = home favored
+                # Home covers if actual_margin > spread_line
+                # Away covers if actual_margin < spread_line
+                actual_home_covers = actual_margin > vegas_spread
                 ats_correct = (model_picks_home == actual_home_covers)
 
-                # Model-Vegas gap: how much our predicted margin differs
-                # from the Vegas implied margin (-spread_line = home cover line)
-                vegas_cover_line = -vegas_spread   # home must beat this to cover
+                # Model-Vegas gap: how much our predicted home margin differs
+                # from the Vegas implied home margin (= spread_line)
+                vegas_cover_line = vegas_spread   # home must beat this to cover
                 model_vegas_diff = round(pred_margin - vegas_cover_line, 1)
 
                 # Signal: only flag when model disagrees with Vegas on winner
-                vegas_picks_home = vegas_spread < 0
+                vegas_picks_home = vegas_spread > 0
                 if model_picks_home != vegas_picks_home:
                     ats_signal = "BET HOME" if model_picks_home else "BET AWAY"
                 else:
