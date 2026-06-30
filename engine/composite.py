@@ -658,10 +658,21 @@ def build_composite(season: int = None, week: int = None) -> pd.DataFrame:
             print(f"  WARN: player_stats has no season {season}, using {stat_season} as proxy")
 
         stats        = stats[stats["season"] == stat_season]
-        available_sea_seasons = sorted(seasonal["season"].unique())
-        sea_season = season if season in available_sea_seasons else (
-            max(available_sea_seasons) if available_sea_seasons else season)
-        seasonal     = seasonal[seasonal["season"] == sea_season]
+        # rank_score is a PRIOR-season signal: a player's established positional skill
+        # ENTERING the season. Ranking on the current season's full aggregates would leak
+        # future games into every week (week 1 would already "know" the whole season).
+        # So rank from completed prior seasons only; current-season form is captured
+        # leak-free by efficiency_score (rolling, shift(1)).
+        prior_seasonal = seasonal[seasonal["season"] < season]
+        if not prior_seasonal.empty:
+            seasonal = prior_seasonal          # recency-weighted across prior seasons
+        else:
+            # Earliest season in the dataset — no priors exist. Fall back to current
+            # season (an unavoidable leak for the very first year of data only).
+            available_sea_seasons = sorted(seasonal["season"].unique())
+            sea_season = season if season in available_sea_seasons else (
+                max(available_sea_seasons) if available_sea_seasons else season)
+            seasonal = seasonal[seasonal["season"] == sea_season]
         rosters_seas = rosters_seas[rosters_seas["season"] == season] if season in rosters_seas["season"].values else rosters_seas[rosters_seas["season"] == rosters_seas["season"].max()]
         snaps        = snaps[snaps["season"] == season] if season in snaps["season"].values else snaps[snaps["season"] == snaps["season"].max()]
         rosters      = rosters[rosters["season"] == season] if season in rosters["season"].values else rosters[rosters["season"] == rosters["season"].max()]
@@ -731,6 +742,11 @@ def build_composite(season: int = None, week: int = None) -> pd.DataFrame:
         seasonal["recency_weight"] = 1.0
 
     rank_df   = build_rank_score(seasonal, rosters_seas)
+    # Broadcast the prior-season rank onto the target season's weekly rows.
+    # rank_df is labeled with each player's latest *prior* season; stamp the target
+    # season so the player_id+season merge below lands on this season's rows.
+    if season and not rank_df.empty:
+        rank_df["season"] = season
     eff_df    = build_efficiency_score(
                     stats,
                     pfr_passing   = pfr_passing   if not pfr_passing.empty   else None,
