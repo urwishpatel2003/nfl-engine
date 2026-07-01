@@ -32,11 +32,62 @@ RAW = Path(__file__).parent.parent / "data" / "raw"
 PROC = Path(__file__).parent.parent / "data" / "processed"
 
 _UNITS = None
+W25_MAX = 0.40       # max weight on 2025 performance (so 2026 talent is always >= 60%)
+PPG_SCALE = 4.5      # points/game per unit-talent z-score
 
 
 def _z(s: pd.Series) -> pd.Series:
     sd = s.std(ddof=0)
     return (s - s.mean()) / sd if sd > 1e-9 else s * 0.0
+
+
+def _squad_zunits() -> pd.DataFrame:
+    """Per-team 2026 roster-talent phase z-scores (from ml.squad unit components)."""
+    from ml.squad import squad_ratings
+    _, g = squad_ratings(breakdown=True)
+    z = g.apply(_z)
+    out = pd.DataFrame(index=g.index)
+    out["t_off_pass"] = _z(0.60 * z.qb + 0.25 * z.skill + 0.15 * z.ol)
+    out["t_off_rush"] = _z(0.50 * z.skill + 0.50 * z.ol)
+    out["t_def_pass"] = _z(0.55 * z.rush + 0.45 * z.cover)     # rush = pass rush
+    out["t_def_rush"] = _z(0.60 * z.rush + 0.40 * z.cover)     # front-7 proxy for run D
+    out["t_off"] = _z(0.5 * out.t_off_pass + 0.5 * out.t_off_rush)
+    out["t_def"] = _z(0.5 * out.t_def_pass + 0.5 * out.t_def_rush)
+    out["t_coach"] = z.coach
+    return out
+
+
+def _continuity() -> pd.DataFrame:
+    """Per-team share of 2025 production still on the 2026 roster (offense & defense)."""
+    p = pd.read_parquet(RAW / "pbp_2025.parquet")
+    p = p[p["week"] <= 18]
+    rost = pd.read_parquet(RAW / "rosters_2026.parquet")[["player_id", "team"]]
+
+    # offense: pass attempts + targets + carries, by player & 2025 team
+    ev = []
+    ev.append(p[p.pass_attempt == 1][["passer_player_id", "posteam"]].rename(columns={"passer_player_id": "pid"}))
+    ev.append(p[(p.pass_attempt == 1) & p.receiver_player_id.notna()][["receiver_player_id", "posteam"]].rename(columns={"receiver_player_id": "pid"}))
+    ev.append(p[p.rush_attempt == 1][["rusher_player_id", "posteam"]].rename(columns={"rusher_player_id": "pid"}))
+    off = pd.concat(ev).dropna(subset=["pid"]).assign(w=1).groupby(["pid", "posteam"], as_index=False)["w"].sum()
+    off = off.merge(rost, left_on="pid", right_on="player_id", how="left")
+    off["ret"] = off["team"] == off["posteam"]
+    cont_off = off.assign(rw=off.w * off.ret).groupby("posteam").apply(
+        lambda x: x.rw.sum() / max(1.0, x.w.sum()), include_groups=False)
+
+    # defense: tackles/coverage credited to a defender, by player & 2025 team (defteam)
+    tk = []
+    for c in ["solo_tackle_1_player_id", "solo_tackle_2_player_id"]:
+        if c in p.columns:
+            tk.append(p[[c, "defteam"]].rename(columns={c: "pid"}))
+    if tk:
+        dfe = pd.concat(tk).dropna(subset=["pid"]).assign(w=1).groupby(["pid", "defteam"], as_index=False)["w"].sum()
+        dfe = dfe.merge(rost, left_on="pid", right_on="player_id", how="left")
+        dfe["ret"] = dfe["team"] == dfe["defteam"]
+        cont_def = dfe.assign(rw=dfe.w * dfe.ret).groupby("defteam").apply(
+            lambda x: x.rw.sum() / max(1.0, x.w.sum()), include_groups=False)
+    else:
+        cont_def = cont_off * 0 + 0.6
+    return pd.DataFrame({"cont_off": cont_off, "cont_def": cont_def}).fillna(0.6)
 
 
 def team_units() -> pd.DataFrame:
@@ -84,9 +135,31 @@ def team_units() -> pd.DataFrame:
     u["coaching"] = u.get("coaching", pd.Series(50.0, index=u.index)).fillna(50.0)
 
     u = u.fillna(u.mean(numeric_only=True))
-    # league-relative z-scores for the phase metrics
+    lg_pf = float(u["pf"].mean())
+    # 2025-performance z-scores (defense: higher = worse, i.e. more EPA allowed)
     for col in ["off_pass", "off_rush", "def_pass", "def_rush", "st", "coaching"]:
-        u[f"z_{col}"] = _z(u[col])
+        u[f"z25_{col}"] = _z(u[col])
+
+    # ── blend: majority 2026 roster talent, 2025 weighted by unit continuity ──
+    tal = _squad_zunits().reindex(u.index).fillna(0.0)
+    con = _continuity().reindex(u.index).fillna(0.6)
+    w_off = (W25_MAX * con["cont_off"]).clip(0, W25_MAX)
+    w_def = (W25_MAX * con["cont_def"]).clip(0, W25_MAX)
+
+    u["z_off_pass"] = (1 - w_off) * tal["t_off_pass"] + w_off * u["z25_off_pass"]
+    u["z_off_rush"] = (1 - w_off) * tal["t_off_rush"] + w_off * u["z25_off_rush"]
+    # defense talent is "good = high"; flip to the "EPA-allowed" convention (high = worse)
+    u["z_def_pass"] = (1 - w_def) * (-tal["t_def_pass"]) + w_def * u["z25_def_pass"]
+    u["z_def_rush"] = (1 - w_def) * (-tal["t_def_rush"]) + w_def * u["z25_def_rush"]
+    u["z_st"] = u["z25_st"]                          # ST has high continuity (kickers)
+    u["z_coaching"] = tal["t_coach"]                 # coaching already multi-year in squad
+
+    # blend points-for / points-against toward the 2026-talent expectation
+    pf26 = lg_pf + tal["t_off"] * PPG_SCALE
+    pa26 = lg_pf - tal["t_def"] * PPG_SCALE
+    u["pf"] = (1 - w_off) * pf26 + w_off * u["pf"]
+    u["pa"] = (1 - w_def) * pa26 + w_def * u["pa"]
+    u["cont_off"] = con["cont_off"]; u["cont_def"] = con["cont_def"]
     _UNITS = u
     return u
 
