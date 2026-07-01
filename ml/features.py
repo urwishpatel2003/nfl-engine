@@ -109,6 +109,22 @@ def prior_season_aggregates(panel: pd.DataFrame) -> pd.DataFrame:
 
 
 # ── 3. per-game feature matrix ──────────────────────────────────────
+COACH_COLS = ["coaching_score", "adjusted_penalty_rate"]
+STYLE_COLS = ["pace", "avg_air_yards", "avg_yac", "sack_rate", "stuff_rate",
+              "scramble_rate", "pass_rate_early_down", "qb_scramble_epa"]
+
+
+def _prior_team_season(path: Path, cols: list, prefix: str) -> pd.DataFrame:
+    """Load a per-(team,season) table and shift it to season+1 (prior-season, leak-free)."""
+    if not path.exists():
+        return None
+    df = pd.read_parquet(path)
+    cols = [c for c in cols if c in df.columns]
+    df = df[["team", "season"] + cols].copy()
+    df["season"] = df["season"] + 1                      # season N uses N-1's values
+    return df.rename(columns={c: f"{prefix}_{c}" for c in cols}), cols
+
+
 def _implied_prob(ml):
     try:
         ml = float(ml)
@@ -187,6 +203,24 @@ def build_game_features(seasons: list = None) -> pd.DataFrame:
             g[f"{side_}_qb_comp"] = g.apply(lambda r: qmap.get((r[tcol], r["season"], r["week"]), (np.nan, np.nan))[0], axis=1)
             g[f"{side_}_off_comp"] = g.apply(lambda r: qmap.get((r[tcol], r["season"], r["week"]), (np.nan, np.nan))[1], axis=1)
 
+    # ── coaching + style (prior season, leak-free) ────────────────────
+    added_ptc = []
+    for path, cols, pfx in [(PROC / "coaching_scores.parquet", COACH_COLS, "coach"),
+                            (PROC / "team_styles.parquet", STYLE_COLS, "style")]:
+        loaded = _prior_team_season(path, cols, pfx)
+        if loaded is None:
+            continue
+        tbl, used = loaded
+        pcols = [f"{pfx}_{c}" for c in used]
+        added_ptc += pcols
+        for side_, tcol in [("h", "home_team"), ("a", "away_team")]:
+            g = g.merge(tbl.rename(columns={c: f"{side_}_{c}" for c in pcols}),
+                        left_on=[tcol, "season"], right_on=["team", "season"], how="left")
+            if "team" in g.columns:
+                g = g.drop(columns=["team"])
+        for c in pcols:
+            g[f"d_{c}"] = g[f"h_{c}"] - g[f"a_{c}"]
+
     # market + situational + targets
     g["mkt_spread"] = g["spread_line"].astype(float)          # home margin (positive=home fav)
     g["mkt_total"]  = pd.to_numeric(g["total_line"], errors="coerce")
@@ -216,7 +250,8 @@ def build_game_features(seasons: list = None) -> pd.DataFrame:
                  "home_margin", "total", "mkt_spread", "mkt_total", "mkt_home_impl"]
     feat_cols = [c for c in g.columns if c.startswith(("h_td_", "a_td_", "h_prior_",
                  "a_prior_", "d_td_", "d_prior_", "d_qb_comp", "d_off_comp",
-                 "h_qb_comp", "a_qb_comp", "h_off_comp", "a_off_comp"))]
+                 "h_qb_comp", "a_qb_comp", "h_off_comp", "a_off_comp",
+                 "h_coach_", "a_coach_", "d_coach_", "h_style_", "a_style_", "d_style_"))]
     situ = ["rest_diff", "is_div", "is_dome", "is_turf", "temp", "wind", "week_num"]
     out = g[keep_meta + situ + feat_cols].copy()
     return out
