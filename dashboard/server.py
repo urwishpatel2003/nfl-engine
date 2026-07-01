@@ -129,6 +129,27 @@ def api_power_rankings():
     return jsonify(recs)
 
 
+_DEPTH_CACHE = {}
+
+
+@app.route('/api/team')
+def api_team():
+    """Full 2026 depth chart for a team with per-player 2025 position-percentile ratings."""
+    team = request.args.get('team', '').upper()
+    if not team:
+        return jsonify({"error": "team required"}), 400
+    if team not in _DEPTH_CACHE:
+        from ml.squad import team_depth_chart
+        _DEPTH_CACHE[team] = team_depth_chart(team)
+    m = team_meta().get(team, {})
+    qb = qb1_2026().get(team, "")
+    return jsonify({
+        "team": team, "name": m.get("team_name", team),
+        "color": m.get("team_color") or "#334155", "logo": m.get("team_logo_espn", ""),
+        "qb": qb, "groups": _DEPTH_CACHE[team],
+    })
+
+
 @app.route('/api/matchup')
 def api_matchup():
     """Predict any matchup from current team strength."""

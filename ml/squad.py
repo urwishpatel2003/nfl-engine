@@ -182,6 +182,76 @@ def squad_ratings(breakdown: bool = False) -> pd.DataFrame:
     return (out if breakdown else out[["rank", "team", "rating"]]), g
 
 
+# ── team depth chart + per-player ratings (for the dashboard team page) ──
+# The depth chart uses granular slots (LT, RG, LDE, RCB, ...); map them to groups.
+GROUP_MAP = {"QB": "QB", "RB": "RB", "FB": "RB", "WR": "WR", "TE": "TE",
+             "C": "OL", "LG": "OL", "RG": "OL", "LT": "OL", "RT": "OL",
+             "LDE": "DL", "RDE": "DL", "LDT": "DL", "RDT": "DL", "NT": "DL",
+             "MLB": "LB", "LILB": "LB", "RILB": "LB", "SLB": "LB", "WLB": "LB",
+             "LCB": "DB", "RCB": "DB", "NB": "DB", "FS": "DB", "SS": "DB",
+             "PK": "K", "P": "P", "LS": "LS"}
+POS_ORDER = ["QB", "RB", "WR", "TE", "OL", "DL", "LB", "DB", "K", "P", "LS"]
+POS_LABEL = {"QB": "Quarterback", "RB": "Running Back", "WR": "Wide Receiver",
+             "TE": "Tight End", "OL": "Offensive Line", "DL": "Defensive Line",
+             "LB": "Linebacker", "DB": "Defensive Back", "K": "Kicker",
+             "P": "Punter", "LS": "Long Snapper"}
+
+
+_PCT_CACHE = None
+
+
+def _player_pct():
+    """Per-player 0-100 rating = percentile within position (2025). Comparable across
+    positions: 90+=elite, ~60-80=solid starter, <40=depth. Returns lookups by id/key."""
+    global _PCT_CACHE
+    if _PCT_CACHE is not None:
+        return _PCT_CACHE
+    comp = _composite_2025()
+    comp["pct"] = comp.groupby("position")["adjusted_score"].rank(pct=True) * 100
+    skill = comp.set_index("player_id")["pct"]                       # WR/RB/TE (+QB fallback)
+    qb = _qb_value_table(); qb_pct = qb.rank(pct=True) * 100         # QB by multi-year EPA
+    dl = pd.read_csv(PROC / "dl_rankings_2025.csv"); dl["k"] = dl["name"].map(_key)
+    dl["prod"] = dl.get("def_sacks", 0).fillna(0) + 0.5 * dl.get("def_pressures", 0).fillna(0)
+    dl_pct = dl.groupby("k")["prod"].max().rank(pct=True) * 100      # DL by pass-rush
+    pf = pd.read_parquet(RAW / "pfr_defense.parquet"); pf = pf[pf.season == 2025]
+    cov = pf.groupby("pfr_player_name").agg(tgt=("def_targets", "sum"),
+                                            rate=("def_passer_rating_allowed", "mean")).reset_index()
+    cov = cov[cov.tgt >= 20]; cov["k"] = cov["pfr_player_name"].map(_key)
+    cov_pct = (-cov.groupby("k")["rate"].mean()).rank(pct=True) * 100  # DB/LB by coverage
+    _PCT_CACHE = (skill, qb_pct, dl_pct, cov_pct)
+    return _PCT_CACHE
+
+
+def team_depth_chart(team: str) -> list:
+    dc = pd.read_parquet(RAW / "depth_2026_current.parquet").copy()
+    dc["pos_rank"] = pd.to_numeric(dc["pos_rank"], errors="coerce")
+    dc = dc[(dc.team == team) & dc.player_name.notna()].copy()
+    dc["grp"] = dc["pos_abb"].map(GROUP_MAP)
+    skill, qb_pct, dl_pct, cov_pct = _player_pct()
+
+    def rate(grp, gid, name):
+        k = _key(name)
+        if grp == "QB":       v = qb_pct.get(gid, skill.get(gid))
+        elif grp in ("WR", "RB", "TE"): v = skill.get(gid)
+        elif grp == "DL":     v = dl_pct.get(k)
+        elif grp in ("DB", "LB"): v = cov_pct.get(k)
+        else:                 v = None
+        return None if v is None or pd.isna(v) else int(round(v))
+
+    groups = []
+    for grp in POS_ORDER:
+        # starters first (rank 1 of each slot), then depth; group like slots together
+        sub = dc[dc.grp == grp].sort_values(["pos_rank", "pos_abb"])
+        if sub.empty:
+            continue
+        players = [{"name": r.player_name, "slot": r.pos_abb,
+                    "rank": int(r.pos_rank) if pd.notna(r.pos_rank) else None,
+                    "rating": rate(grp, r.gsis_id, r.player_name)}
+                   for r in sub.itertuples()]
+        groups.append({"pos": grp, "label": POS_LABEL.get(grp, grp), "players": players})
+    return groups
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--breakdown", action="store_true")

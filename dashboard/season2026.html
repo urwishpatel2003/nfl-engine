@@ -62,6 +62,20 @@
   .meta div .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
   .meta div .v{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px}
   .loading{color:var(--muted);font-size:13px;padding:10px 0}
+
+  /* depth chart */
+  .rk{cursor:pointer}
+  .depth{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+  .grp{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .grp .gh{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;
+           letter-spacing:.5px;margin-bottom:8px}
+  .pl{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px}
+  .pl .dr{width:26px;color:var(--muted);font-size:10px;text-align:right}
+  .pl .pn{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pl.starter .pn{font-weight:600}
+  .pl .rt{width:30px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;font-size:12px}
+  .pl .rb{width:44px;height:6px;border-radius:3px;background:#0e1626;overflow:hidden}
+  .pl .rb i{display:block;height:100%;border-radius:3px}
 </style>
 </head>
 <body>
@@ -110,6 +124,18 @@
   </div>
 </div>
 
+<div style="padding:0 26px 40px">
+  <div class="card">
+    <h2 style="display:flex;align-items:center;gap:10px">
+      <img id="tLogo" style="width:26px;height:26px;object-fit:contain">
+      <span id="tName">Team Depth Chart</span>
+      <span>2026 roster · 2025 player ratings</span>
+      <select id="teamPick" style="margin-left:auto;max-width:230px"></select>
+    </h2>
+    <div id="depth" class="depth"><div class="loading">Pick a team (or click one in the rankings).</div></div>
+  </div>
+</div>
+
 <script>
 const SEASON = 2025;  // latest data -> "entering 2026"
 let META = {};
@@ -127,7 +153,7 @@ async function loadRankings(){
     META[d.team] = d;
     const w = Math.max(4, Math.abs(d.rating)/max*100);
     const prev = (d.prev!=null) ? `2025: ${d.prev>0?'+':''}${d.prev.toFixed(1)}` : '';
-    return `<div class="rk" title="${prev}">
+    return `<div class="rk" title="${prev}" onclick="loadTeam('${d.team}')">
       <div class="n">${d.rank}</div>
       <img src="${d.logo}" onerror="this.style.visibility='hidden'">
       <div class="tm"><div class="ab">${d.team}</div>${d.qb?`<div class="qb">${d.qb}</div>`:''}</div>
@@ -135,10 +161,41 @@ async function loadRankings(){
       <div class="val">${d.rating>0?'+':''}${d.rating.toFixed(1)}</div>
     </div>`;
   }).join('');
-  // populate matchup selects (alphabetical)
+  // populate matchup + team selects (alphabetical)
   const teams = [...data].sort((a,b)=>a.team.localeCompare(b.team));
   fillSelect(document.getElementById('home'), teams, data[0].team);
   fillSelect(document.getElementById('away'), teams, data[data.length-1].team);
+  fillSelect(document.getElementById('teamPick'), teams, data[0].team);
+  loadTeam(data[0].team);
+}
+
+function ratingColor(r){
+  if(r==null) return '#3a465e';
+  const h = Math.round(r*1.2);              // 0=red -> 120=green
+  return `hsl(${h},60%,50%)`;
+}
+
+async function loadTeam(team){
+  document.getElementById('teamPick').value = team;
+  document.getElementById('depth').innerHTML = '<div class="loading">Loading…</div>';
+  const t = await j(`/api/team?team=${team}`);
+  document.getElementById('tName').textContent = `${t.name}`;
+  const lg = document.getElementById('tLogo'); lg.src = t.logo;
+  document.getElementById('depth').innerHTML = t.groups.map(g=>`
+    <div class="grp">
+      <div class="gh">${g.label}</div>
+      ${g.players.map(p=>{
+        const r = p.rating;
+        const bar = r==null ? '' : `<div class="rb"><i style="width:${r}%;background:${ratingColor(r)}"></i></div>`;
+        const tag = (p.slot && p.slot!==g.pos) ? p.slot : (p.rank??'');
+        return `<div class="pl ${p.rank===1?'starter':''}">
+          <div class="dr">${tag}</div>
+          <div class="pn">${p.name}</div>
+          ${bar}
+          <div class="rt" style="color:${ratingColor(r)}">${r==null?'—':r}</div>
+        </div>`;
+      }).join('')}
+    </div>`).join('');
 }
 
 async function predict(){
@@ -164,6 +221,7 @@ async function predict(){
 }
 
 document.getElementById('go').addEventListener('click', predict);
+document.getElementById('teamPick').addEventListener('change', e=>loadTeam(e.target.value));
 loadRankings();
 </script>
 </body>
