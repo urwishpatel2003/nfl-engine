@@ -178,14 +178,14 @@ def _native(obj):
 
 @app.route('/api/matchup')
 def api_matchup():
-    """Predict any matchup from the roster-talent ratings (consistent with the rankings)."""
-    from ml.squad import predict_matchup
+    """Predict a matchup with the unit-vs-unit engine (differentiated total + unit edges)."""
+    from ml.matchup_engine import project_game
     home = request.args.get('home')
     away = request.args.get('away')
     neutral = request.args.get('neutral', '0') == '1'
     if not home or not away:
         return jsonify({"error": "home and away required"}), 400
-    res = predict_matchup(home.upper(), away.upper(), neutral)
+    res = project_game(home.upper(), away.upper(), neutral)
     if "error" in res:
         return jsonify(res), 404
     meta = team_meta()
@@ -194,7 +194,7 @@ def api_matchup():
         res[f"{side}_name"] = m.get("team_name", res[side])
         res[f"{side}_color"] = m.get("team_color") or "#334155"
         res[f"{side}_logo"] = m.get("team_logo_espn", "")
-    return jsonify({k: safe_json(v) for k, v in res.items()})
+    return jsonify(_native(res))
 
 
 @app.route('/api/weeks')

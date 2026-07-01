@@ -127,76 +127,102 @@ def team_volume() -> dict:
     }
 
 
+# QB starters (depth chart) and a rookie/replacement prior
+_QB_START = None
+
+
+def _qb_starters() -> dict:
+    """{team: (gsis_id, name)} for the current depth-chart QB1."""
+    global _QB_START
+    if _QB_START is None:
+        dc = pd.read_parquet(RAW / "depth_2026_current.parquet")
+        dc["pos_rank"] = pd.to_numeric(dc["pos_rank"], errors="coerce")
+        qb1 = dc[(dc.pos_abb == "QB") & (dc.pos_rank == 1)].drop_duplicates("team")
+        _QB_START = {r.team: (r.gsis_id, r.player_name) for r in qb1.itertuples()}
+    return _QB_START
+
+
+# league-average starter line (used for rookies / no-2025-usage starters)
+ROOKIE_QB = {"cmp_pct": 0.62, "ypa": 6.4, "ptd_pa": 0.036, "int_pa": 0.028, "carry_pg": 3.0, "ypc": 4.0}
+
+
 # ── 4. distribute team volume to players for a matchup ──────────────
-def _distribute(team: str, team_pa: float, team_ra: float, off_tds: float,
-                prof: pd.DataFrame) -> dict:
-    """Allocate a team's projected pass/rush volume to its current players."""
+def _distribute(team: str, team_pa: float, team_ra: float, off_tds: float, prof: pd.DataFrame,
+                pass_factor: float = 1.0, rush_factor: float = 1.0) -> dict:
+    """Allocate a team's projected pass/rush volume to its current players, with the
+    opponent-defense adjustment (pass_factor for the air game, rush_factor for the ground)."""
     roster = prof[prof.team == team]
-    pass_tds = off_tds * 0.62          # ~62% of offensive TDs are passing
-    rush_tds = off_tds - pass_tds
+    pass_tds = off_tds * 0.62 * pass_factor
+    rush_tds = off_tds - off_tds * 0.62          # ground TDs unaffected by pass factor
 
-    # QB: the highest-usage passer on the roster gets the team's pass attempts
-    qbs = roster[(roster.position == "QB") & (roster.att_pg > 3)].nlargest(1, "att_pg")
-    qb_line = None
-    if not qbs.empty:
-        q = qbs.iloc[0]
-        qb_line = {"name": q.player_name, "pos": "QB",
+    # QB: the depth-chart starter (rookie/no-2025 -> replacement prior, not a backup's noise)
+    sid, sname = _qb_starters().get(team, (None, None))
+    qrow = roster[roster.player_id == sid]
+    q = qrow.iloc[0] if not qrow.empty else None
+    if q is None:
+        # rookie / unknown starter — use the depth-chart name with a replacement line
+        rk = ROOKIE_QB
+        qb_line = {"name": sname or "Starter", "pos": "QB", "rookie": True,
+                   "pass_att": round(team_pa), "cmp": round(team_pa * rk["cmp_pct"]),
+                   "pass_yds": round(team_pa * rk["ypa"] * pass_factor), "pass_td": round(pass_tds, 1),
+                   "int": round(team_pa * rk["int_pa"], 1), "rush_yds": round(rk["carry_pg"] * rk["ypc"])}
+    else:
+        qb_line = {"name": q.player_name, "pos": "QB", "rookie": False,
                    "pass_att": round(team_pa), "cmp": round(team_pa * q.cmp_pct),
-                   "pass_yds": round(team_pa * q.ypa), "pass_td": round(pass_tds, 1),
-                   "int": round(team_pa * q.int_pa, 1),
-                   "rush_yds": round(q.carry_pg * q.ypc)}   # QB scramble yards approx
+                   "pass_yds": round(team_pa * q.ypa * pass_factor), "pass_td": round(pass_tds, 1),
+                   "int": round(team_pa * q.int_pa, 1), "rush_yds": round(q.carry_pg * q.ypc)}
 
-    # Rushers: normalize carry_pg among rostered RBs (+ mobile QB) to team_ra
-    rbs = roster[roster.position.isin(["RB"])].copy()
-    rbs = rbs[rbs.carry_pg > 1]
+    # Rushers: concentrate carries on the actual backfield (top 4), scaled by run matchup
+    rbs = roster[(roster.position == "RB") & (roster.carry_pg > 1)].sort_values(
+        "carry_pg", ascending=False).head(4).copy()
     rush_lines = []
     if not rbs.empty:
-        w = rbs["carry_pg"] / rbs["carry_pg"].sum()
-        for _, r in rbs.sort_values("carry_pg", ascending=False).head(4).iterrows():
-            car = team_ra * (r.carry_pg / rbs["carry_pg"].sum())
+        denom = rbs["carry_pg"].sum(); tdw = max(1e-6, (rbs.carry_pg * rbs.rtd_carry).sum())
+        for _, r in rbs.iterrows():
+            car = team_ra * (r.carry_pg / denom)
             rush_lines.append({"name": r.player_name, "pos": "RB",
-                               "carries": round(car), "rush_yds": round(car * r.ypc),
-                               "rush_td": round(rush_tds * (r.carry_pg * r.rtd_carry) /
-                                                max(1e-6, (rbs.carry_pg * rbs.rtd_carry).sum()), 1),
+                               "carries": round(car), "rush_yds": round(car * r.ypc * rush_factor),
+                               "rush_td": round(rush_tds * (r.carry_pg * r.rtd_carry) / tdw, 1),
                                "targets": round(r.tgt_pg), "rec": round(r.tgt_pg * r.catch_pct),
-                               "rec_yds": round(r.tgt_pg * r.ypt)})
+                               "rec_yds": round(r.tgt_pg * r.ypt * pass_factor), "rec_td": 0})
 
-    # Receivers: normalize tgt_pg among WR/TE/RB to the team's pass attempts (~95%)
-    recs = roster[roster.position.isin(["WR", "TE", "RB"])].copy()
-    recs = recs[recs.tgt_pg > 0.5]
+    # Receivers: concentrate targets on the actual pass-catchers (top 6), scaled by pass matchup
+    recs = roster[roster.position.isin(["WR", "TE", "RB"]) & (roster.tgt_pg > 0.5)].sort_values(
+        "tgt_pg", ascending=False).head(6).copy()
     rec_lines = []
-    tgt_pool = team_pa * 0.95
     if not recs.empty:
-        share = recs["tgt_pg"] / recs["tgt_pg"].sum()
-        td_wt = (recs.tgt_pg * recs.rectd_tgt)
-        for _, r in recs.sort_values("tgt_pg", ascending=False).head(6).iterrows():
-            tg = tgt_pool * (r.tgt_pg / recs["tgt_pg"].sum())
+        denom = recs["tgt_pg"].sum(); tdw = max(1e-6, (recs.tgt_pg * recs.rectd_tgt).sum())
+        for _, r in recs.iterrows():
+            tg = team_pa * 0.95 * (r.tgt_pg / denom)
             rec_lines.append({"name": r.player_name, "pos": r.position,
                               "targets": round(tg), "rec": round(tg * r.catch_pct),
-                              "rec_yds": round(tg * r.ypt),
-                              "rec_td": round(pass_tds * (r.tgt_pg * r.rectd_tgt) /
-                                              max(1e-6, td_wt.sum()), 1)})
+                              "rec_yds": round(tg * r.ypt * pass_factor),
+                              "rec_td": round(pass_tds * (r.tgt_pg * r.rectd_tgt) / tdw, 1)})
     return {"qb": qb_line, "rush": rush_lines, "rec": rec_lines}
 
 
 def project_matchup(home: str, away: str, neutral: bool = False) -> dict:
-    """Full matchup: predicted score + each team's projected player stat lines."""
-    from ml.squad import predict_matchup       # same ratings as the power rankings
-    pred = predict_matchup(home, away, neutral=neutral)
+    """Full matchup: unit-vs-unit score + opponent-adjusted player stat lines."""
+    from ml.matchup_engine import project_game, team_units
+    pred = project_game(home, away, neutral=neutral)
+    u = team_units()
     tv = team_volume()
     prof = player_profiles()
     points = {home: pred["pred_home_score"], away: pred["pred_away_score"]}
     margin = {home: pred["pred_margin"], away: -pred["pred_margin"]}
 
     teams = {}
-    for team in (home, away):
+    for team, opp in [(home, away), (away, home)]:
         vol = tv["by_team"].get(team, {"pa_pg": tv["lg_pa"], "ra_pg": tv["lg_ra"]})
         # game script: trailing team throws more (each point of deficit ~0.35 plays pass-ward)
         shift = float(np.clip(-margin[team] * 0.35, -6, 6))
         team_pa = vol["pa_pg"] + shift
         team_ra = max(12.0, vol["ra_pg"] - shift)
         off_tds = max(0.0, (points[team] - 1.2) / 7.0)   # approx offensive TDs
-        teams[team] = _distribute(team, team_pa, team_ra, off_tds, prof)
+        # opponent-defense adjustment: bad D (positive z_def EPA allowed) -> more player yards
+        pass_factor = float(np.clip(1 + 0.14 * u.loc[opp, "z_def_pass"], 0.75, 1.30)) if opp in u.index else 1.0
+        rush_factor = float(np.clip(1 + 0.14 * u.loc[opp, "z_def_rush"], 0.75, 1.30)) if opp in u.index else 1.0
+        teams[team] = _distribute(team, team_pa, team_ra, off_tds, prof, pass_factor, rush_factor)
 
     return {"home": home, "away": away, "pred": pred, "teams": teams}
 

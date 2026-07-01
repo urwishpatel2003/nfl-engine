@@ -77,6 +77,17 @@
   .pl .rb{width:44px;height:6px;border-radius:3px;background:#0e1626;overflow:hidden}
   .pl .rb i{display:block;height:100%;border-radius:3px}
 
+  /* unit-vs-unit matchup */
+  .units{margin-top:18px}
+  .uh{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;text-align:center}
+  .ur{display:grid;grid-template-columns:34px 1fr 88px 1fr 34px;align-items:center;gap:6px;margin:5px 0;font-size:11px}
+  .ur .uv{font-variant-numeric:tabular-nums;color:var(--muted)}
+  .ur .ul{text-align:center;color:var(--txt);font-size:10.5px;text-transform:uppercase;letter-spacing:.3px}
+  .ur .ub{height:8px;background:#0e1626;border-radius:4px;position:relative;overflow:hidden}
+  .ur .ub i{position:absolute;top:0;bottom:0;border-radius:4px}
+  .ur .ba i{right:0}      /* away fills from right */
+  .ur .bh i{left:0}       /* home fills from left */
+
   /* projected box score */
   .box{margin-top:18px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
   @media(max-width:520px){.box{grid-template-columns:1fr}}
@@ -131,6 +142,7 @@
         <div><div class="k">Total</div><div class="v" id="mTotal">–</div></div>
         <div><div class="k">Favorite</div><div class="v" id="mFav">–</div></div>
       </div>
+      <div id="units" class="units"></div>
       <div id="box" class="box"></div>
     </div>
   </div>
@@ -230,7 +242,27 @@ async function predict(){
   document.getElementById('mSpread').textContent = `${fav} -${Math.abs(r.pred_margin).toFixed(1)}`;
   document.getElementById('mTotal').textContent = r.pred_total.toFixed(1);
   document.getElementById('mFav').textContent = fav;
+  renderUnits(r);
   loadBox(home, away);
+}
+
+const UNIT_ROWS = [['pass_off','Pass Off'],['rush_off','Rush Off'],['pass_def','Pass Def'],['rush_def','Rush Def'],['st','Spec Teams'],['coach','Coaching']];
+function renderUnits(r){
+  const uEl = document.getElementById('units');
+  if(!r.units || !r.units[r.away]){ uEl.innerHTML=''; return; }
+  const aw=r.units[r.away], hm=r.units[r.home], ac=r.away_color, hc=r.home_color;
+  const w = z => Math.max(3, Math.min(100, (z+2)/4*100));
+  uEl.innerHTML = `<div class="uh">${r.away} &nbsp;vs&nbsp; ${r.home} — unit ratings (league z-score)</div>` +
+    UNIT_ROWS.map(([k,lbl])=>{
+      const az=aw[k]??0, hz=hm[k]??0;
+      return `<div class="ur">
+        <div class="uv" style="text-align:right">${az>0?'+':''}${az.toFixed(1)}</div>
+        <div class="ub ba"><i style="width:${w(az)}%;background:${ac}"></i></div>
+        <div class="ul">${lbl}</div>
+        <div class="ub bh"><i style="width:${w(hz)}%;background:${hc}"></i></div>
+        <div class="uv">${hz>0?'+':''}${hz.toFixed(1)}</div>
+      </div>`;
+    }).join('');
 }
 
 function boxTeam(tm, t){
