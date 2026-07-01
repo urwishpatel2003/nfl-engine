@@ -78,16 +78,23 @@ def api_team_meta():
 
 @app.route('/api/power_rankings')
 def api_power_rankings():
-    """Standalone-model power ratings for the upcoming season (entering `season`+1)."""
-    season = int(request.args.get('season', 2025))
-    from ml.rank import power_ratings
-    r = power_ratings(season)
+    """Team power ratings. mode=preseason regresses the prior season toward the mean
+    to project the (unplayed) upcoming season; mode=final gives raw prior-season ratings."""
+    season = int(request.args.get('season', 2025))     # last completed season
+    mode = request.args.get('mode', 'preseason')
     meta = team_meta()
+    if mode == 'preseason':
+        from ml.preseason import project
+        r = project(season).rename(columns={"projected": "rating"})
+    else:
+        from ml.rank import power_ratings
+        r = power_ratings(season)
     recs = []
     for _, row in r.iterrows():
         m = meta.get(row["team"], {})
         recs.append({
             "rank": int(row["rank"]), "team": row["team"], "rating": float(row["rating"]),
+            "prev": float(row["rating_prev"]) if "rating_prev" in r.columns else None,
             "name": m.get("team_name", row["team"]),
             "color": m.get("team_color") or "#334155",
             "logo": m.get("team_logo_espn", ""),

@@ -68,13 +68,14 @@
   <span class="tag">Power Rankings &amp; Matchup Predictions — standalone model</span>
 </header>
 <div class="note">
-  Model-based team strength entering 2026 (fit on 2021–2025, leak-free). A standalone
-  predictor for analysis — <b>not</b> a betting model; NFL game markets are efficient.
+  <b>2026 preseason projection</b> — the 2025 model rating (squad + EPA + coaching) regressed
+  ~65% toward the mean, because NFL team strength carries over year-to-year at only r=0.35.
+  A humble, validated projection for an unplayed season — <b>not</b> a betting model.
 </div>
 
 <div class="wrap">
   <div class="card">
-    <h2>Power Rankings <span>entering 2026 · neutral field</span></h2>
+    <h2>Power Rankings <span>2026 projection · regressed</span></h2>
     <div id="rankings"><div class="loading">Training model &amp; rating teams…</div></div>
   </div>
 
@@ -123,7 +124,8 @@ async function loadRankings(){
   document.getElementById('rankings').innerHTML = data.map(d=>{
     META[d.team] = d;
     const w = Math.max(4, Math.abs(d.rating)/max*100);
-    return `<div class="rk">
+    const prev = (d.prev!=null) ? `2025: ${d.prev>0?'+':''}${d.prev.toFixed(1)}` : '';
+    return `<div class="rk" title="${prev}">
       <div class="n">${d.rank}</div>
       <img src="${d.logo}" onerror="this.style.visibility='hidden'">
       <div class="ab">${d.team}</div>
