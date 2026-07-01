@@ -76,6 +76,25 @@ def api_team_meta():
     return jsonify(team_meta())
 
 
+# ── 2026 projected starting QB (informational; does NOT affect ratings) ─────
+_QB1 = None
+
+
+def qb1_2026() -> dict:
+    global _QB1
+    if _QB1 is None:
+        p = RAW / "depth_2026_current.parquet"
+        if not p.exists():
+            _QB1 = {}
+            return _QB1
+        d = pd.read_parquet(p)
+        d = d[d["pos_abb"] == "QB"].copy()
+        d["pos_rank"] = pd.to_numeric(d["pos_rank"], errors="coerce")
+        starters = d[d["pos_rank"] == 1].drop_duplicates("team")
+        _QB1 = dict(zip(starters["team"], starters["player_name"]))
+    return _QB1
+
+
 @app.route('/api/power_rankings')
 def api_power_rankings():
     """Team power ratings. mode=preseason regresses the prior season toward the mean
@@ -89,6 +108,7 @@ def api_power_rankings():
     else:
         from ml.rank import power_ratings
         r = power_ratings(season)
+    qbs = qb1_2026() if mode == 'preseason' else {}
     recs = []
     for _, row in r.iterrows():
         m = meta.get(row["team"], {})
@@ -98,6 +118,7 @@ def api_power_rankings():
             "name": m.get("team_name", row["team"]),
             "color": m.get("team_color") or "#334155",
             "logo": m.get("team_logo_espn", ""),
+            "qb": qbs.get(row["team"], ""),
         })
     return jsonify(recs)
 

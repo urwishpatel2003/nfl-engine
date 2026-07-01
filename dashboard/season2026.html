@@ -30,7 +30,9 @@
   .rk:last-child{border:0}
   .rk .n{width:24px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums;font-size:13px}
   .rk img{width:26px;height:26px;object-fit:contain}
-  .rk .ab{width:42px;font-weight:600;font-size:13px}
+  .rk .tm{width:118px;display:flex;flex-direction:column;line-height:1.15}
+  .rk .ab{font-weight:600;font-size:13px}
+  .rk .qb{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .rk .barwrap{flex:1;height:16px;background:#0e1626;border-radius:6px;overflow:hidden}
   .rk .bar{height:100%;border-radius:6px}
   .rk .val{width:46px;text-align:right;font-variant-numeric:tabular-nums;font-size:13px}
@@ -128,7 +130,7 @@ async function loadRankings(){
     return `<div class="rk" title="${prev}">
       <div class="n">${d.rank}</div>
       <img src="${d.logo}" onerror="this.style.visibility='hidden'">
-      <div class="ab">${d.team}</div>
+      <div class="tm"><div class="ab">${d.team}</div>${d.qb?`<div class="qb">${d.qb}</div>`:''}</div>
       <div class="barwrap"><div class="bar" style="width:${w}%;background:${d.color}"></div></div>
       <div class="val">${d.rating>0?'+':''}${d.rating.toFixed(1)}</div>
     </div>`;
