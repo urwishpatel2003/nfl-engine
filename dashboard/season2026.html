@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NFL 2026 — Power Rankings & Predictions</title>
+<style>
+  :root{
+    --bg:#0b1120; --panel:#131c2e; --panel2:#1b263f; --line:#26324d;
+    --txt:#e8edf7; --muted:#8ea0c0; --accent:#3b82f6; --good:#22c55e; --bad:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+       background:var(--bg);color:var(--txt);}
+  header{padding:22px 26px;border-bottom:1px solid var(--line);
+         display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  header h1{font-size:20px;margin:0;letter-spacing:.3px}
+  header .tag{color:var(--muted);font-size:13px}
+  .note{background:#1a2338;border:1px solid var(--line);color:var(--muted);
+        font-size:12.5px;padding:8px 14px;border-radius:8px;margin:14px 26px}
+  .wrap{display:grid;grid-template-columns:minmax(340px,1fr) minmax(360px,1.1fr);
+        gap:20px;padding:8px 26px 40px}
+  @media(max-width:840px){.wrap{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}
+  .card h2{margin:0 0 14px;font-size:15px;font-weight:600;color:var(--txt)}
+  .card h2 span{color:var(--muted);font-weight:400;font-size:12px;margin-left:6px}
+
+  /* rankings */
+  .rk{display:flex;align-items:center;gap:10px;padding:6px 4px;border-bottom:1px solid #1c2740}
+  .rk:last-child{border:0}
+  .rk .n{width:24px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums;font-size:13px}
+  .rk img{width:26px;height:26px;object-fit:contain}
+  .rk .ab{width:42px;font-weight:600;font-size:13px}
+  .rk .barwrap{flex:1;height:16px;background:#0e1626;border-radius:6px;overflow:hidden}
+  .rk .bar{height:100%;border-radius:6px}
+  .rk .val{width:46px;text-align:right;font-variant-numeric:tabular-nums;font-size:13px}
+
+  /* matchup */
+  .selrow{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;margin-bottom:14px}
+  select{width:100%;background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+         border-radius:9px;padding:10px;font-size:14px}
+  .at{color:var(--muted);font-size:12px}
+  button{background:var(--accent);color:#fff;border:0;border-radius:9px;padding:11px 16px;
+         font-size:14px;font-weight:600;cursor:pointer;width:100%}
+  button:hover{filter:brightness(1.08)}
+  .opts{display:flex;gap:8px;align-items:center;margin:10px 0 4px;color:var(--muted);font-size:12.5px}
+
+  .result{margin-top:18px;display:none}
+  .score{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;text-align:center}
+  .score .tm{display:flex;flex-direction:column;align-items:center;gap:6px}
+  .score img{width:52px;height:52px;object-fit:contain}
+  .score .pts{font-size:34px;font-weight:700;font-variant-numeric:tabular-nums}
+  .score .ab{font-size:13px;color:var(--muted)}
+  .score .vs{color:var(--muted);font-size:12px}
+  .prob{margin-top:16px}
+  .probbar{height:26px;border-radius:8px;overflow:hidden;display:flex;font-size:12px;font-weight:600}
+  .probbar .h{background:var(--accent);display:flex;align-items:center;padding-left:10px}
+  .probbar .a{background:#475569;display:flex;align-items:center;justify-content:flex-end;padding-right:10px}
+  .meta{display:flex;justify-content:space-around;margin-top:16px;text-align:center}
+  .meta div .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+  .meta div .v{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px}
+  .loading{color:var(--muted);font-size:13px;padding:10px 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>🏈 NFL 2026</h1>
+  <span class="tag">Power Rankings &amp; Matchup Predictions — standalone model</span>
+</header>
+<div class="note">
+  Model-based team strength entering 2026 (fit on 2021–2025, leak-free). A standalone
+  predictor for analysis — <b>not</b> a betting model; NFL game markets are efficient.
+</div>
+
+<div class="wrap">
+  <div class="card">
+    <h2>Power Rankings <span>entering 2026 · neutral field</span></h2>
+    <div id="rankings"><div class="loading">Training model &amp; rating teams…</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Matchup Simulator <span>pick two teams</span></h2>
+    <div class="selrow">
+      <select id="away"></select>
+      <span class="at">@</span>
+      <select id="home"></select>
+    </div>
+    <div class="opts">
+      <input type="checkbox" id="neutral"><label for="neutral">Neutral field (remove home advantage)</label>
+    </div>
+    <button id="go">Predict</button>
+    <div class="result" id="result">
+      <div class="score">
+        <div class="tm"><img id="rAwayLogo"><div class="pts" id="rAwayPts">–</div><div class="ab" id="rAwayAb"></div></div>
+        <div class="vs">@</div>
+        <div class="tm"><img id="rHomeLogo"><div class="pts" id="rHomePts">–</div><div class="ab" id="rHomeAb"></div></div>
+      </div>
+      <div class="prob">
+        <div class="probbar"><div class="h" id="probH"></div><div class="a" id="probA"></div></div>
+      </div>
+      <div class="meta">
+        <div><div class="k">Spread</div><div class="v" id="mSpread">–</div></div>
+        <div><div class="k">Total</div><div class="v" id="mTotal">–</div></div>
+        <div><div class="k">Favorite</div><div class="v" id="mFav">–</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const SEASON = 2025;  // latest data -> "entering 2026"
+let META = {};
+
+async function j(u){ const r = await fetch(u); return r.json(); }
+
+function fillSelect(sel, teams, def){
+  sel.innerHTML = teams.map(t => `<option value="${t.team}" ${t.team===def?'selected':''}>${t.team} — ${t.name}</option>`).join('');
+}
+
+async function loadRankings(){
+  const data = await j(`/api/power_rankings?season=${SEASON}`);
+  const max = Math.max(...data.map(d=>Math.abs(d.rating)), 1);
+  document.getElementById('rankings').innerHTML = data.map(d=>{
+    META[d.team] = d;
+    const w = Math.max(4, Math.abs(d.rating)/max*100);
+    return `<div class="rk">
+      <div class="n">${d.rank}</div>
+      <img src="${d.logo}" onerror="this.style.visibility='hidden'">
+      <div class="ab">${d.team}</div>
+      <div class="barwrap"><div class="bar" style="width:${w}%;background:${d.color}"></div></div>
+      <div class="val">${d.rating>0?'+':''}${d.rating.toFixed(1)}</div>
+    </div>`;
+  }).join('');
+  // populate matchup selects (alphabetical)
+  const teams = [...data].sort((a,b)=>a.team.localeCompare(b.team));
+  fillSelect(document.getElementById('home'), teams, data[0].team);
+  fillSelect(document.getElementById('away'), teams, data[data.length-1].team);
+}
+
+async function predict(){
+  const home = document.getElementById('home').value;
+  const away = document.getElementById('away').value;
+  const neutral = document.getElementById('neutral').checked ? 1 : 0;
+  if(home===away){ alert('Pick two different teams'); return; }
+  const r = await j(`/api/matchup?home=${home}&away=${away}&season=${SEASON}&neutral=${neutral}`);
+  if(r.error){ alert(r.error); return; }
+  document.getElementById('result').style.display='block';
+  document.getElementById('rHomeLogo').src=r.home_logo; document.getElementById('rAwayLogo').src=r.away_logo;
+  document.getElementById('rHomePts').textContent=r.pred_home_score.toFixed(1);
+  document.getElementById('rAwayPts').textContent=r.pred_away_score.toFixed(1);
+  document.getElementById('rHomeAb').textContent=r.home; document.getElementById('rAwayAb').textContent=r.away;
+  const hp=Math.round(r.home_win_prob*100), ap=100-hp;
+  const pH=document.getElementById('probH'), pA=document.getElementById('probA');
+  pH.style.width=hp+'%'; pH.style.background=r.home_color; pH.textContent=hp+'% '+r.home;
+  pA.style.width=ap+'%'; pA.style.background=r.away_color; pA.textContent=r.away+' '+ap+'%';
+  const fav = r.pred_margin>=0 ? r.home : r.away;
+  document.getElementById('mSpread').textContent = `${fav} -${Math.abs(r.pred_margin).toFixed(1)}`;
+  document.getElementById('mTotal').textContent = r.pred_total.toFixed(1);
+  document.getElementById('mFav').textContent = fav;
+}
+
+document.getElementById('go').addEventListener('click', predict);
+loadRankings();
+</script>
+</body>
+</html>

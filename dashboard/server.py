@@ -44,7 +44,77 @@ def df_to_json(df: pd.DataFrame) -> list:
 
 @app.route('/')
 def index():
+    return send_from_directory(str(Path(__file__).parent), 'season2026.html')
+
+
+@app.route('/legacy')
+def legacy():
     return send_from_directory(str(Path(__file__).parent), 'dashboard.html')
+
+
+# ── Team metadata (colors + logos) ─────────────────────────────────
+_TEAM_META = None
+
+
+def team_meta() -> dict:
+    global _TEAM_META
+    if _TEAM_META is None:
+        p = RAW / "team_info.parquet"
+        if not p.exists():
+            _TEAM_META = {}
+            return _TEAM_META
+        ti = pd.read_parquet(p)
+        cols = [c for c in ["team_abbr", "team_name", "team_color", "team_color2",
+                            "team_logo_espn"] if c in ti.columns]
+        _TEAM_META = (ti[cols].drop_duplicates("team_abbr")
+                      .set_index("team_abbr").to_dict("index"))
+    return _TEAM_META
+
+
+@app.route('/api/team_meta')
+def api_team_meta():
+    return jsonify(team_meta())
+
+
+@app.route('/api/power_rankings')
+def api_power_rankings():
+    """Standalone-model power ratings for the upcoming season (entering `season`+1)."""
+    season = int(request.args.get('season', 2025))
+    from ml.rank import power_ratings
+    r = power_ratings(season)
+    meta = team_meta()
+    recs = []
+    for _, row in r.iterrows():
+        m = meta.get(row["team"], {})
+        recs.append({
+            "rank": int(row["rank"]), "team": row["team"], "rating": float(row["rating"]),
+            "name": m.get("team_name", row["team"]),
+            "color": m.get("team_color") or "#334155",
+            "logo": m.get("team_logo_espn", ""),
+        })
+    return jsonify(recs)
+
+
+@app.route('/api/matchup')
+def api_matchup():
+    """Predict any matchup from current team strength."""
+    from ml.rank import predict_matchup
+    home = request.args.get('home')
+    away = request.args.get('away')
+    season = int(request.args.get('season', 2025))
+    neutral = request.args.get('neutral', '0') == '1'
+    if not home or not away:
+        return jsonify({"error": "home and away required"}), 400
+    res = predict_matchup(home.upper(), away.upper(), season, neutral)
+    if "error" in res:
+        return jsonify(res), 404
+    meta = team_meta()
+    for side in ("home", "away"):
+        m = meta.get(res[side], {})
+        res[f"{side}_name"] = m.get("team_name", res[side])
+        res[f"{side}_color"] = m.get("team_color") or "#334155"
+        res[f"{side}_logo"] = m.get("team_logo_espn", "")
+    return jsonify({k: safe_json(v) for k, v in res.items()})
 
 
 @app.route('/api/weeks')
@@ -166,7 +236,7 @@ def get_teams():
 
 
 if __name__ == '__main__':
-    print("NFL Engine Dashboard")
-    print("Open: http://localhost:5000")
+    print("NFL 2026 Dashboard — power rankings + matchup predictions")
+    print("Open: http://localhost:5000   (legacy engine dashboard at /legacy)")
     print()
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5000, use_reloader=False)

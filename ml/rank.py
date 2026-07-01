@@ -56,31 +56,71 @@ def team_state(df: pd.DataFrame, bases: list, season: int) -> pd.DataFrame:
     return allrows.groupby("team").tail(1).set_index("team")[bases]
 
 
-def power_ratings(season: int) -> pd.DataFrame:
+_CACHE = {}
+
+
+def service(season: int) -> dict:
+    """Train the margin + total models once and cache team state (for reuse by the API)."""
+    if season in _CACHE:
+        return _CACHE[season]
     df, feats, bases = load()
-    model = _model()
-    model.fit(df[feats], df["home_margin"])
-
+    margin = _model(); margin.fit(df[feats], df["home_margin"])
+    total  = _model(); total.fit(df[feats], df["total"])
     state = team_state(df, bases, season)
-    league_avg = state.mean()
+    svc = {"df": df, "feats": feats, "bases": bases, "margin": margin, "total": total,
+           "state": state, "league_avg": state.mean(),
+           "temp_med": float(df["temp"].median()),
+           "latest_week": int(df[df["season"] == season]["week"].max())}
+    _CACHE[season] = svc
+    return svc
 
-    latest_week = int(df[df["season"] == season]["week"].max())
-    ratings = []
-    for team, srow in state.iterrows():
-        row = {}
-        for b in bases:
-            row[f"h_{b}"] = srow[b]
-            row[f"a_{b}"] = league_avg[b]
-            row[f"d_{b}"] = srow[b] - league_avg[b]
-        row.update({"rest_diff": 0, "is_div": 0, "is_dome": 0, "is_turf": 0,
-                    "temp": float(df["temp"].median()), "wind": 0.0,
-                    "week_num": latest_week})
-        ratings.append({"team": team,
-                        "rating": float(model.predict(pd.DataFrame([row])[feats])[0])})
+
+def _row(svc, home_state, away_state, situ):
+    """Assemble one model feature row from two team state vectors + situational dict."""
+    row = {}
+    for b in svc["bases"]:
+        row[f"h_{b}"] = home_state[b]
+        row[f"a_{b}"] = away_state[b]
+        row[f"d_{b}"] = home_state[b] - away_state[b]
+    row.update(situ)
+    return pd.DataFrame([row])[svc["feats"]]
+
+
+def power_ratings(season: int) -> pd.DataFrame:
+    svc = service(season)
+    avg = svc["league_avg"]
+    situ = {"rest_diff": 0, "is_div": 0, "is_dome": 0, "is_turf": 0,
+            "temp": svc["temp_med"], "wind": 0.0, "week_num": svc["latest_week"]}
+    ratings = [{"team": t, "rating": float(svc["margin"].predict(_row(svc, s, avg, situ))[0])}
+               for t, s in svc["state"].iterrows()]
     out = pd.DataFrame(ratings).sort_values("rating", ascending=False).reset_index(drop=True)
     out.insert(0, "rank", out.index + 1)
     out["rating"] = out["rating"].round(1)
     return out
+
+
+def predict_matchup(home: str, away: str, season: int = 2025, neutral: bool = False) -> dict:
+    """Predict a single game from current team strength (HFA learned from data unless neutral)."""
+    svc = service(season)
+    st = svc["state"]
+    if home not in st.index or away not in st.index:
+        return {"error": f"unknown team(s); have {sorted(st.index)[:6]}..."}
+    situ = {"rest_diff": 0, "is_div": 0, "is_dome": 0, "is_turf": 0,
+            "temp": svc["temp_med"], "wind": 0.0, "week_num": 1}
+    margin = float(svc["margin"].predict(_row(svc, st.loc[home], st.loc[away], situ))[0])
+    total  = float(svc["total"].predict(_row(svc, st.loc[home], st.loc[away], situ))[0])
+    if neutral:  # strip the learned home-field edge (avg home margin in train ~+2)
+        margin -= 2.0
+    wp = float(1 / (1 + np.exp(-margin / 13.5 * np.pi / np.sqrt(3))))
+    return {
+        "home": home, "away": away,
+        "pred_home_score": round((total + margin) / 2, 1),
+        "pred_away_score": round((total - margin) / 2, 1),
+        "pred_margin": round(margin, 1),       # home perspective (positive = home favored)
+        "pred_total": round(total, 1),
+        "home_win_prob": round(wp, 3),
+        "away_win_prob": round(1 - wp, 3),
+    }
 
 
 def predict_week(season: int, week: int):
