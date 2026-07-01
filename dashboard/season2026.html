@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NFL 2026 — Power Rankings & Predictions</title>
+<style>
+  :root{
+    --bg:#0b1120; --panel:#131c2e; --panel2:#1b263f; --line:#26324d;
+    --txt:#e8edf7; --muted:#8ea0c0; --accent:#3b82f6; --good:#22c55e; --bad:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+       background:var(--bg);color:var(--txt);}
+  header{padding:22px 26px;border-bottom:1px solid var(--line);
+         display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  header h1{font-size:20px;margin:0;letter-spacing:.3px}
+  header .tag{color:var(--muted);font-size:13px}
+  .note{background:#1a2338;border:1px solid var(--line);color:var(--muted);
+        font-size:12.5px;padding:8px 14px;border-radius:8px;margin:14px 26px}
+  .wrap{display:grid;grid-template-columns:minmax(340px,1fr) minmax(360px,1.1fr);
+        gap:20px;padding:8px 26px 40px}
+  @media(max-width:840px){.wrap{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}
+  .card h2{margin:0 0 14px;font-size:15px;font-weight:600;color:var(--txt)}
+  .card h2 span{color:var(--muted);font-weight:400;font-size:12px;margin-left:6px}
+
+  /* rankings */
+  .rk{display:flex;align-items:center;gap:10px;padding:6px 4px;border-bottom:1px solid #1c2740}
+  .rk:last-child{border:0}
+  .rk .n{width:24px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums;font-size:13px}
+  .rk img{width:26px;height:26px;object-fit:contain}
+  .rk .tm{width:118px;display:flex;flex-direction:column;line-height:1.15}
+  .rk .ab{font-weight:600;font-size:13px}
+  .rk .qb{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rk .barwrap{flex:1;height:16px;background:#0e1626;border-radius:6px;overflow:hidden}
+  .rk .bar{height:100%;border-radius:6px}
+  .rk .val{width:46px;text-align:right;font-variant-numeric:tabular-nums;font-size:13px}
+
+  /* matchup */
+  .selrow{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;margin-bottom:14px}
+  select{width:100%;background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+         border-radius:9px;padding:10px;font-size:14px}
+  .at{color:var(--muted);font-size:12px}
+  button{background:var(--accent);color:#fff;border:0;border-radius:9px;padding:11px 16px;
+         font-size:14px;font-weight:600;cursor:pointer;width:100%}
+  button:hover{filter:brightness(1.08)}
+  .opts{display:flex;gap:8px;align-items:center;margin:10px 0 4px;color:var(--muted);font-size:12.5px}
+
+  .result{margin-top:18px;display:none}
+  .score{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;text-align:center}
+  .score .tm{display:flex;flex-direction:column;align-items:center;gap:6px}
+  .score img{width:52px;height:52px;object-fit:contain}
+  .score .pts{font-size:34px;font-weight:700;font-variant-numeric:tabular-nums}
+  .score .ab{font-size:13px;color:var(--muted)}
+  .score .vs{color:var(--muted);font-size:12px}
+  .prob{margin-top:16px}
+  .probbar{height:26px;border-radius:8px;overflow:hidden;display:flex;font-size:12px;font-weight:600}
+  .probbar .h{background:var(--accent);display:flex;align-items:center;padding-left:10px}
+  .probbar .a{background:#475569;display:flex;align-items:center;justify-content:flex-end;padding-right:10px}
+  .meta{display:flex;justify-content:space-around;margin-top:16px;text-align:center}
+  .meta div .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+  .meta div .v{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px}
+  .loading{color:var(--muted);font-size:13px;padding:10px 0}
+
+  /* depth chart */
+  .rk{cursor:pointer}
+  .depth{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+  .grp{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .grp .gh{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;
+           letter-spacing:.5px;margin-bottom:8px}
+  .pl{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px}
+  .pl .dr{width:26px;color:var(--muted);font-size:10px;text-align:right}
+  .pl .pn{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pl.starter .pn{font-weight:600}
+  .pl .rt{width:30px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;font-size:12px}
+  .pl .rb{width:44px;height:6px;border-radius:3px;background:#0e1626;overflow:hidden}
+  .pl .rb i{display:block;height:100%;border-radius:3px}
+
+  /* unit-vs-unit matchup */
+  .units{margin-top:18px}
+  .uh{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;text-align:center}
+  .ur{display:grid;grid-template-columns:34px 1fr 88px 1fr 34px;align-items:center;gap:6px;margin:5px 0;font-size:11px}
+  .ur .uv{font-variant-numeric:tabular-nums;color:var(--muted)}
+  .ur .ul{text-align:center;color:var(--txt);font-size:10.5px;text-transform:uppercase;letter-spacing:.3px}
+  .ur .ub{height:8px;background:#0e1626;border-radius:4px;position:relative;overflow:hidden}
+  .ur .ub i{position:absolute;top:0;bottom:0;border-radius:4px}
+  .ur .ba i{right:0}      /* away fills from right */
+  .ur .bh i{left:0}       /* home fills from left */
+
+  /* projected box score */
+  .box{margin-top:18px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:520px){.box{grid-template-columns:1fr}}
+  .bxt{}
+  .bxt .bh{font-size:12px;font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+  .bxt .bh img{width:18px;height:18px;object-fit:contain}
+  .bxs{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin:8px 0 3px}
+  .bxr{display:flex;justify-content:space-between;font-size:11.5px;padding:2px 0;gap:6px}
+  .bxr .bn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bxr .bs{color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<header>
+  <h1>🏈 NFL 2026</h1>
+  <span class="tag">Power Rankings &amp; Matchup Predictions — standalone model</span>
+</header>
+<div class="note">
+  <b>2026 roster-talent ranking</b> — rates each team by the players currently on its roster
+  (QB by multi-year EPA, skill/OL/pass-rush/coverage) + coaching, <b>not</b> by last year's
+  results. Correlates 0.80 with ESPN FPI. A preseason projection, not a betting model.
+</div>
+
+<div class="wrap">
+  <div class="card">
+    <h2>Power Rankings <span>2026 · roster talent</span></h2>
+    <div id="rankings"><div class="loading">Training model &amp; rating teams…</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Matchup Simulator <span>pick two teams</span></h2>
+    <div class="selrow">
+      <select id="away"></select>
+      <span class="at">@</span>
+      <select id="home"></select>
+    </div>
+    <div class="opts">
+      <input type="checkbox" id="neutral"><label for="neutral">Neutral field (remove home advantage)</label>
+    </div>
+    <button id="go">Predict</button>
+    <div class="result" id="result">
+      <div class="score">
+        <div class="tm"><img id="rAwayLogo"><div class="pts" id="rAwayPts">–</div><div class="ab" id="rAwayAb"></div></div>
+        <div class="vs">@</div>
+        <div class="tm"><img id="rHomeLogo"><div class="pts" id="rHomePts">–</div><div class="ab" id="rHomeAb"></div></div>
+      </div>
+      <div class="prob">
+        <div class="probbar"><div class="h" id="probH"></div><div class="a" id="probA"></div></div>
+      </div>
+      <div class="meta">
+        <div><div class="k">Spread</div><div class="v" id="mSpread">–</div></div>
+        <div><div class="k">Total</div><div class="v" id="mTotal">–</div></div>
+        <div><div class="k">Favorite</div><div class="v" id="mFav">–</div></div>
+      </div>
+      <div id="units" class="units"></div>
+      <div id="box" class="box"></div>
+    </div>
+  </div>
+</div>
+
+<div style="padding:0 26px 40px">
+  <div class="card">
+    <h2 style="display:flex;align-items:center;gap:10px">
+      <img id="tLogo" style="width:26px;height:26px;object-fit:contain">
+      <span id="tName">Team Depth Chart</span>
+      <span>2026 roster · 2025 player ratings</span>
+      <select id="teamPick" style="margin-left:auto;max-width:230px"></select>
+    </h2>
+    <div id="depth" class="depth"><div class="loading">Pick a team (or click one in the rankings).</div></div>
+  </div>
+</div>
+
+<script>
+const SEASON = 2025;  // latest data -> "entering 2026"
+let META = {};
+
+async function j(u){ const r = await fetch(u); return r.json(); }
+
+function fillSelect(sel, teams, def){
+  sel.innerHTML = teams.map(t => `<option value="${t.team}" ${t.team===def?'selected':''}>${t.team} — ${t.name}</option>`).join('');
+}
+
+async function loadRankings(){
+  const data = await j(`/api/power_rankings?season=${SEASON}`);
+  const max = Math.max(...data.map(d=>Math.abs(d.rating)), 1);
+  document.getElementById('rankings').innerHTML = data.map(d=>{
+    META[d.team] = d;
+    const w = Math.max(4, Math.abs(d.rating)/max*100);
+    const prev = (d.prev!=null) ? `2025: ${d.prev>0?'+':''}${d.prev.toFixed(1)}` : '';
+    return `<div class="rk" title="${prev}" onclick="loadTeam('${d.team}')">
+      <div class="n">${d.rank}</div>
+      <img src="${d.logo}" onerror="this.style.visibility='hidden'">
+      <div class="tm"><div class="ab">${d.team}</div>${d.qb?`<div class="qb">${d.qb}</div>`:''}</div>
+      <div class="barwrap"><div class="bar" style="width:${w}%;background:${d.color}"></div></div>
+      <div class="val">${d.rating>0?'+':''}${d.rating.toFixed(1)}</div>
+    </div>`;
+  }).join('');
+  // populate matchup + team selects (alphabetical)
+  const teams = [...data].sort((a,b)=>a.team.localeCompare(b.team));
+  fillSelect(document.getElementById('home'), teams, data[0].team);
+  fillSelect(document.getElementById('away'), teams, data[data.length-1].team);
+  fillSelect(document.getElementById('teamPick'), teams, data[0].team);
+  loadTeam(data[0].team);
+}
+
+function ratingColor(r){
+  if(r==null) return '#3a465e';
+  const h = Math.round(r*1.2);              // 0=red -> 120=green
+  return `hsl(${h},60%,50%)`;
+}
+
+async function loadTeam(team){
+  document.getElementById('teamPick').value = team;
+  document.getElementById('depth').innerHTML = '<div class="loading">Loading…</div>';
+  const t = await j(`/api/team?team=${team}`);
+  document.getElementById('tName').textContent = `${t.name}`;
+  const lg = document.getElementById('tLogo'); lg.src = t.logo;
+  document.getElementById('depth').innerHTML = t.groups.map(g=>`
+    <div class="grp">
+      <div class="gh">${g.label}</div>
+      ${g.players.map(p=>{
+        const r = p.rating;
+        const bar = r==null ? '' : `<div class="rb"><i style="width:${r}%;background:${ratingColor(r)}"></i></div>`;
+        const tag = (p.slot && p.slot!==g.pos) ? p.slot : (p.rank??'');
+        return `<div class="pl ${p.rank===1?'starter':''}">
+          <div class="dr">${tag}</div>
+          <div class="pn">${p.name}</div>
+          ${bar}
+          <div class="rt" style="color:${ratingColor(r)}">${r==null?'—':r}</div>
+        </div>`;
+      }).join('')}
+    </div>`).join('');
+}
+
+async function predict(){
+  const home = document.getElementById('home').value;
+  const away = document.getElementById('away').value;
+  const neutral = document.getElementById('neutral').checked ? 1 : 0;
+  if(home===away){ alert('Pick two different teams'); return; }
+  const r = await j(`/api/matchup?home=${home}&away=${away}&season=${SEASON}&neutral=${neutral}`);
+  if(r.error){ alert(r.error); return; }
+  document.getElementById('result').style.display='block';
+  document.getElementById('rHomeLogo').src=r.home_logo; document.getElementById('rAwayLogo').src=r.away_logo;
+  document.getElementById('rHomePts').textContent=r.pred_home_score.toFixed(1);
+  document.getElementById('rAwayPts').textContent=r.pred_away_score.toFixed(1);
+  document.getElementById('rHomeAb').textContent=r.home; document.getElementById('rAwayAb').textContent=r.away;
+  const hp=Math.round(r.home_win_prob*100), ap=100-hp;
+  const pH=document.getElementById('probH'), pA=document.getElementById('probA');
+  pH.style.width=hp+'%'; pH.style.background=r.home_color; pH.textContent=hp+'% '+r.home;
+  pA.style.width=ap+'%'; pA.style.background=r.away_color; pA.textContent=r.away+' '+ap+'%';
+  const fav = r.pred_margin>=0 ? r.home : r.away;
+  document.getElementById('mSpread').textContent = `${fav} -${Math.abs(r.pred_margin).toFixed(1)}`;
+  document.getElementById('mTotal').textContent = r.pred_total.toFixed(1);
+  document.getElementById('mFav').textContent = fav;
+  renderUnits(r);
+  loadBox(home, away);
+}
+
+const UNIT_ROWS = [['pass_off','Pass Off'],['rush_off','Rush Off'],['pass_def','Pass Def'],['rush_def','Rush Def'],['st','Spec Teams'],['coach','Coaching']];
+function renderUnits(r){
+  const uEl = document.getElementById('units');
+  if(!r.units || !r.units[r.away]){ uEl.innerHTML=''; return; }
+  const aw=r.units[r.away], hm=r.units[r.home], ac=r.away_color, hc=r.home_color;
+  const w = z => Math.max(3, Math.min(100, (z+2)/4*100));
+  uEl.innerHTML = `<div class="uh">${r.away} &nbsp;vs&nbsp; ${r.home} — unit ratings (league z-score)</div>` +
+    UNIT_ROWS.map(([k,lbl])=>{
+      const az=aw[k]??0, hz=hm[k]??0;
+      return `<div class="ur">
+        <div class="uv" style="text-align:right">${az>0?'+':''}${az.toFixed(1)}</div>
+        <div class="ub ba"><i style="width:${w(az)}%;background:${ac}"></i></div>
+        <div class="ul">${lbl}</div>
+        <div class="ub bh"><i style="width:${w(hz)}%;background:${hc}"></i></div>
+        <div class="uv">${hz>0?'+':''}${hz.toFixed(1)}</div>
+      </div>`;
+    }).join('');
+}
+
+function boxTeam(tm, t){
+  const m = META[tm] || {};
+  const rbs = (t.rush||[]);
+  const wrs = (t.rec||[]).filter(x=>x.pos!=='RB');
+  const q = t.qb;
+  let h = `<div class="bxt"><div class="bh"><img src="${m.logo||''}" onerror="this.style.display='none'">${tm}</div>`;
+  if(q){ h += `<div class="bxs">Passing</div><div class="bxr"><span class="bn">${q.name}</span><span class="bs">${q.cmp}/${q.pass_att}, ${q.pass_yds} yd, ${q.pass_td} TD, ${q.int} INT</span></div>`; }
+  if(rbs.length){ h += `<div class="bxs">Rushing</div>` + rbs.map(x=>`<div class="bxr"><span class="bn">${x.name}</span><span class="bs">${x.carries} car, ${x.rush_yds} yd, ${x.rush_td} TD</span></div>`).join(''); }
+  const recAll = [...rbs.filter(x=>x.rec>0).map(x=>({name:x.name,rec:x.rec,targets:x.targets,rec_yds:x.rec_yds,rec_td:x.rec_td||0})), ...wrs];
+  if(recAll.length){ h += `<div class="bxs">Receiving</div>` + recAll.map(x=>`<div class="bxr"><span class="bn">${x.name}</span><span class="bs">${x.rec}/${x.targets}, ${x.rec_yds} yd, ${x.rec_td} TD</span></div>`).join(''); }
+  return h + `</div>`;
+}
+
+async function loadBox(home, away){
+  const box = document.getElementById('box');
+  box.innerHTML = '<div class="loading" style="grid-column:1/-1">Projecting player stat lines…</div>';
+  const p = await j(`/api/matchup_players?home=${home}&away=${away}`);
+  if(p.error){ box.innerHTML=''; return; }
+  box.innerHTML = boxTeam(away, p.teams[away]) + boxTeam(home, p.teams[home]);
+}
+
+document.getElementById('go').addEventListener('click', predict);
+document.getElementById('teamPick').addEventListener('change', e=>loadTeam(e.target.value));
+loadRankings();
+</script>
+</body>
+</html>

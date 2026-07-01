@@ -44,7 +44,157 @@ def df_to_json(df: pd.DataFrame) -> list:
 
 @app.route('/')
 def index():
+    return send_from_directory(str(Path(__file__).parent), 'season2026.html')
+
+
+@app.route('/legacy')
+def legacy():
     return send_from_directory(str(Path(__file__).parent), 'dashboard.html')
+
+
+# ── Team metadata (colors + logos) ─────────────────────────────────
+_TEAM_META = None
+
+
+def team_meta() -> dict:
+    global _TEAM_META
+    if _TEAM_META is None:
+        p = RAW / "team_info.parquet"
+        if not p.exists():
+            _TEAM_META = {}
+            return _TEAM_META
+        ti = pd.read_parquet(p)
+        cols = [c for c in ["team_abbr", "team_name", "team_color", "team_color2",
+                            "team_logo_espn"] if c in ti.columns]
+        _TEAM_META = (ti[cols].drop_duplicates("team_abbr")
+                      .set_index("team_abbr").to_dict("index"))
+    return _TEAM_META
+
+
+@app.route('/api/team_meta')
+def api_team_meta():
+    return jsonify(team_meta())
+
+
+# ── 2026 projected starting QB (informational; does NOT affect ratings) ─────
+_QB1 = None
+
+
+def qb1_2026() -> dict:
+    global _QB1
+    if _QB1 is None:
+        p = RAW / "depth_2026_current.parquet"
+        if not p.exists():
+            _QB1 = {}
+            return _QB1
+        d = pd.read_parquet(p)
+        d = d[d["pos_abb"] == "QB"].copy()
+        d["pos_rank"] = pd.to_numeric(d["pos_rank"], errors="coerce")
+        starters = d[d["pos_rank"] == 1].drop_duplicates("team")
+        _QB1 = dict(zip(starters["team"], starters["player_name"]))
+    return _QB1
+
+
+_SQUAD = None
+
+
+@app.route('/api/power_rankings')
+def api_power_rankings():
+    """2026 team ratings. mode=preseason (default) = current roster-talent + coaching
+    (the season hasn't been played); mode=final = prior-season results-based ratings."""
+    global _SQUAD
+    season = int(request.args.get('season', 2025))
+    mode = request.args.get('mode', 'preseason')
+    meta = team_meta()
+    if mode == 'preseason':
+        if _SQUAD is None:
+            from ml.squad import squad_ratings
+            _SQUAD = squad_ratings()[0]
+        r = _SQUAD
+    else:
+        from ml.rank import power_ratings
+        r = power_ratings(season)
+    qbs = qb1_2026() if mode == 'preseason' else {}
+    recs = []
+    for _, row in r.iterrows():
+        m = meta.get(row["team"], {})
+        recs.append({
+            "rank": int(row["rank"]), "team": row["team"], "rating": float(row["rating"]),
+            "prev": float(row["rating_prev"]) if "rating_prev" in r.columns else None,
+            "name": m.get("team_name", row["team"]),
+            "color": m.get("team_color") or "#334155",
+            "logo": m.get("team_logo_espn", ""),
+            "qb": qbs.get(row["team"], ""),
+        })
+    return jsonify(recs)
+
+
+_DEPTH_CACHE = {}
+
+
+@app.route('/api/team')
+def api_team():
+    """Full 2026 depth chart for a team with per-player 2025 position-percentile ratings."""
+    team = request.args.get('team', '').upper()
+    if not team:
+        return jsonify({"error": "team required"}), 400
+    if team not in _DEPTH_CACHE:
+        from ml.squad import team_depth_chart
+        _DEPTH_CACHE[team] = team_depth_chart(team)
+    m = team_meta().get(team, {})
+    qb = qb1_2026().get(team, "")
+    return jsonify({
+        "team": team, "name": m.get("team_name", team),
+        "color": m.get("team_color") or "#334155", "logo": m.get("team_logo_espn", ""),
+        "qb": qb, "groups": _DEPTH_CACHE[team],
+    })
+
+
+_PROJ_CACHE = {}
+
+
+@app.route('/api/matchup_players')
+def api_matchup_players():
+    """Projected per-player stat lines for a matchup (SportsLine-style box score)."""
+    home = (request.args.get('home') or '').upper()
+    away = (request.args.get('away') or '').upper()
+    if not home or not away or home == away:
+        return jsonify({"error": "two different teams required"}), 400
+    key = (home, away)
+    if key not in _PROJ_CACHE:
+        from ml.projections import project_matchup
+        _PROJ_CACHE[key] = project_matchup(home, away)
+    return jsonify(_native(_PROJ_CACHE[key]))
+
+
+def _native(obj):
+    """Recursively convert numpy types / NaN to JSON-native values."""
+    if isinstance(obj, dict):
+        return {k: _native(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_native(v) for v in obj]
+    return safe_json(obj)
+
+
+@app.route('/api/matchup')
+def api_matchup():
+    """Predict a matchup with the unit-vs-unit engine (differentiated total + unit edges)."""
+    from ml.matchup_engine import project_game
+    home = request.args.get('home')
+    away = request.args.get('away')
+    neutral = request.args.get('neutral', '0') == '1'
+    if not home or not away:
+        return jsonify({"error": "home and away required"}), 400
+    res = project_game(home.upper(), away.upper(), neutral)
+    if "error" in res:
+        return jsonify(res), 404
+    meta = team_meta()
+    for side in ("home", "away"):
+        m = meta.get(res[side], {})
+        res[f"{side}_name"] = m.get("team_name", res[side])
+        res[f"{side}_color"] = m.get("team_color") or "#334155"
+        res[f"{side}_logo"] = m.get("team_logo_espn", "")
+    return jsonify(_native(res))
 
 
 @app.route('/api/weeks')
@@ -166,7 +316,7 @@ def get_teams():
 
 
 if __name__ == '__main__':
-    print("NFL Engine Dashboard")
-    print("Open: http://localhost:5000")
+    print("NFL 2026 Dashboard — power rankings + matchup predictions")
+    print("Open: http://localhost:5000   (legacy engine dashboard at /legacy)")
     print()
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5000, use_reloader=False)
