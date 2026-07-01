@@ -182,6 +182,30 @@ def squad_ratings(breakdown: bool = False) -> pd.DataFrame:
     return (out if breakdown else out[["rank", "team", "rating"]]), g
 
 
+HFA = 2.0            # home-field points
+SPREAD_SCALE = 0.9   # map roster-talent rating difference to a point spread
+
+
+def predict_matchup(home: str, away: str, neutral: bool = False) -> dict:
+    """Predict a matchup from the SAME roster-talent ratings as the power rankings,
+    so a #1 team is favored over a #16 team (previously it used a separate SRS model)."""
+    out, _ = squad_ratings()
+    r = out.set_index("team")["rating"]
+    if home not in r.index or away not in r.index:
+        return {"error": "unknown team(s)"}
+    hfa = 0.0 if neutral else HFA
+    margin = float(np.clip((r[home] - r[away]) * SPREAD_SCALE + hfa, -18, 18))
+    total = 44.0        # league-average total; scores split around the margin
+    home_pts, away_pts = (total + margin) / 2, (total - margin) / 2
+    wp = float(1 / (1 + np.exp(-margin / 13.5 * np.pi / np.sqrt(3))))
+    return {
+        "home": home, "away": away,
+        "pred_home_score": round(home_pts, 1), "pred_away_score": round(away_pts, 1),
+        "pred_margin": round(margin, 1), "pred_total": round(total, 1),
+        "home_win_prob": round(wp, 3), "away_win_prob": round(1 - wp, 3),
+    }
+
+
 # ── team depth chart + per-player ratings (for the dashboard team page) ──
 # The depth chart uses granular slots (LT, RG, LDE, RCB, ...); map them to groups.
 GROUP_MAP = {"QB": "QB", "RB": "RB", "FB": "RB", "WR": "WR", "TE": "TE",

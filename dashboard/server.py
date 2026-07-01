@@ -178,15 +178,14 @@ def _native(obj):
 
 @app.route('/api/matchup')
 def api_matchup():
-    """Predict any matchup from current team strength."""
-    from ml.rank import predict_matchup
+    """Predict any matchup from the roster-talent ratings (consistent with the rankings)."""
+    from ml.squad import predict_matchup
     home = request.args.get('home')
     away = request.args.get('away')
-    season = int(request.args.get('season', 2025))
     neutral = request.args.get('neutral', '0') == '1'
     if not home or not away:
         return jsonify({"error": "home and away required"}), 400
-    res = predict_matchup(home.upper(), away.upper(), season, neutral)
+    res = predict_matchup(home.upper(), away.upper(), neutral)
     if "error" in res:
         return jsonify(res), 404
     meta = team_meta()

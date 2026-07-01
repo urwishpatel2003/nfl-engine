@@ -181,8 +181,8 @@ def _distribute(team: str, team_pa: float, team_ra: float, off_tds: float,
 
 def project_matchup(home: str, away: str, neutral: bool = False) -> dict:
     """Full matchup: predicted score + each team's projected player stat lines."""
-    from ml.ratings import predict_matchup
-    pred = predict_matchup(home, away, 2025, neutral=neutral, project=True)
+    from ml.squad import predict_matchup       # same ratings as the power rankings
+    pred = predict_matchup(home, away, neutral=neutral)
     tv = team_volume()
     prof = player_profiles()
     points = {home: pred["pred_home_score"], away: pred["pred_away_score"]}
