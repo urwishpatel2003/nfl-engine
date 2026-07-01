@@ -76,6 +76,17 @@
   .pl .rt{width:30px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;font-size:12px}
   .pl .rb{width:44px;height:6px;border-radius:3px;background:#0e1626;overflow:hidden}
   .pl .rb i{display:block;height:100%;border-radius:3px}
+
+  /* projected box score */
+  .box{margin-top:18px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:520px){.box{grid-template-columns:1fr}}
+  .bxt{}
+  .bxt .bh{font-size:12px;font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+  .bxt .bh img{width:18px;height:18px;object-fit:contain}
+  .bxs{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin:8px 0 3px}
+  .bxr{display:flex;justify-content:space-between;font-size:11.5px;padding:2px 0;gap:6px}
+  .bxr .bn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bxr .bs{color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
@@ -120,6 +131,7 @@
         <div><div class="k">Total</div><div class="v" id="mTotal">–</div></div>
         <div><div class="k">Favorite</div><div class="v" id="mFav">–</div></div>
       </div>
+      <div id="box" class="box"></div>
     </div>
   </div>
 </div>
@@ -218,6 +230,28 @@ async function predict(){
   document.getElementById('mSpread').textContent = `${fav} -${Math.abs(r.pred_margin).toFixed(1)}`;
   document.getElementById('mTotal').textContent = r.pred_total.toFixed(1);
   document.getElementById('mFav').textContent = fav;
+  loadBox(home, away);
+}
+
+function boxTeam(tm, t){
+  const m = META[tm] || {};
+  const rbs = (t.rush||[]);
+  const wrs = (t.rec||[]).filter(x=>x.pos!=='RB');
+  const q = t.qb;
+  let h = `<div class="bxt"><div class="bh"><img src="${m.logo||''}" onerror="this.style.display='none'">${tm}</div>`;
+  if(q){ h += `<div class="bxs">Passing</div><div class="bxr"><span class="bn">${q.name}</span><span class="bs">${q.cmp}/${q.pass_att}, ${q.pass_yds} yd, ${q.pass_td} TD, ${q.int} INT</span></div>`; }
+  if(rbs.length){ h += `<div class="bxs">Rushing</div>` + rbs.map(x=>`<div class="bxr"><span class="bn">${x.name}</span><span class="bs">${x.carries} car, ${x.rush_yds} yd, ${x.rush_td} TD</span></div>`).join(''); }
+  const recAll = [...rbs.filter(x=>x.rec>0).map(x=>({name:x.name,rec:x.rec,targets:x.targets,rec_yds:x.rec_yds,rec_td:x.rec_td||0})), ...wrs];
+  if(recAll.length){ h += `<div class="bxs">Receiving</div>` + recAll.map(x=>`<div class="bxr"><span class="bn">${x.name}</span><span class="bs">${x.rec}/${x.targets}, ${x.rec_yds} yd, ${x.rec_td} TD</span></div>`).join(''); }
+  return h + `</div>`;
+}
+
+async function loadBox(home, away){
+  const box = document.getElementById('box');
+  box.innerHTML = '<div class="loading" style="grid-column:1/-1">Projecting player stat lines…</div>';
+  const p = await j(`/api/matchup_players?home=${home}&away=${away}`);
+  if(p.error){ box.innerHTML=''; return; }
+  box.innerHTML = boxTeam(away, p.teams[away]) + boxTeam(home, p.teams[home]);
 }
 
 document.getElementById('go').addEventListener('click', predict);

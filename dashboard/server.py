@@ -150,6 +150,32 @@ def api_team():
     })
 
 
+_PROJ_CACHE = {}
+
+
+@app.route('/api/matchup_players')
+def api_matchup_players():
+    """Projected per-player stat lines for a matchup (SportsLine-style box score)."""
+    home = (request.args.get('home') or '').upper()
+    away = (request.args.get('away') or '').upper()
+    if not home or not away or home == away:
+        return jsonify({"error": "two different teams required"}), 400
+    key = (home, away)
+    if key not in _PROJ_CACHE:
+        from ml.projections import project_matchup
+        _PROJ_CACHE[key] = project_matchup(home, away)
+    return jsonify(_native(_PROJ_CACHE[key]))
+
+
+def _native(obj):
+    """Recursively convert numpy types / NaN to JSON-native values."""
+    if isinstance(obj, dict):
+        return {k: _native(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_native(v) for v in obj]
+    return safe_json(obj)
+
+
 @app.route('/api/matchup')
 def api_matchup():
     """Predict any matchup from current team strength."""
