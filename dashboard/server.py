@@ -95,16 +95,22 @@ def qb1_2026() -> dict:
     return _QB1
 
 
+_SQUAD = None
+
+
 @app.route('/api/power_rankings')
 def api_power_rankings():
-    """Team power ratings. mode=preseason regresses the prior season toward the mean
-    to project the (unplayed) upcoming season; mode=final gives raw prior-season ratings."""
-    season = int(request.args.get('season', 2025))     # last completed season
+    """2026 team ratings. mode=preseason (default) = current roster-talent + coaching
+    (the season hasn't been played); mode=final = prior-season results-based ratings."""
+    global _SQUAD
+    season = int(request.args.get('season', 2025))
     mode = request.args.get('mode', 'preseason')
     meta = team_meta()
     if mode == 'preseason':
-        from ml.preseason import project
-        r = project(season).rename(columns={"projected": "rating"})
+        if _SQUAD is None:
+            from ml.squad import squad_ratings
+            _SQUAD = squad_ratings()[0]
+        r = _SQUAD
     else:
         from ml.rank import power_ratings
         r = power_ratings(season)
