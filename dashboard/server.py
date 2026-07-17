@@ -315,8 +315,440 @@ def get_teams():
     return jsonify(df_to_json(df[cols]))
 
 
+# ═══════════════════════════════════════════════════════════════════
+#  RESEARCH FEATURES — team profile, trends, full matchup
+#  All read the parquet already in the repo; no network at request time.
+# ═══════════════════════════════════════════════════════════════════
+
+# ── lazy dataframe caches ───────────────────────────────────────────
+_STYLES = None
+_INJ = None
+_SCHED = None
+_PBP_CACHE = {}
+
+
+def styles_df() -> pd.DataFrame:
+    global _STYLES
+    if _STYLES is None:
+        _STYLES = pd.read_parquet(PROC / "team_styles.parquet")
+    return _STYLES
+
+
+def injuries_df() -> pd.DataFrame:
+    global _INJ
+    if _INJ is None:
+        p = RAW / "injuries.parquet"
+        _INJ = pd.read_parquet(p) if p.exists() else pd.DataFrame()
+    return _INJ
+
+
+def schedules_df() -> pd.DataFrame:
+    global _SCHED
+    if _SCHED is None:
+        p = RAW / "schedules.parquet"
+        _SCHED = pd.read_parquet(p) if p.exists() else pd.DataFrame()
+    return _SCHED
+
+
+def pbp_season(season: int) -> pd.DataFrame:
+    if season not in _PBP_CACHE:
+        p = RAW / f"pbp_{season}.parquet"
+        _PBP_CACHE[season] = pd.read_parquet(p) if p.exists() else pd.DataFrame()
+    return _PBP_CACHE[season]
+
+
+def latest_style_season() -> int:
+    s = styles_df()
+    return int(s["season"].max()) if len(s) else 2025
+
+
+# ── team strengths / weaknesses via league percentiles ──────────────
+# (column, human label, higher_is_better) — direction-normalised so a high
+# percentile always means "good".
+_PROFILE_METRICS = [
+    ("off_epa_per_play",     "Offense EPA/play",     True),
+    ("off_epa_per_pass",     "Passing offense",      True),
+    ("off_epa_per_rush",     "Rushing offense",      True),
+    ("off_success_rate",     "Offensive efficiency", True),
+    ("rz_td_rate",           "Red-zone TD rate",     True),
+    ("two_min_epa",          "Two-minute offense",   True),
+    ("def_epa_per_play",     "Defense EPA/play",     False),
+    ("def_epa_per_pass",     "Pass defense",         False),
+    ("def_epa_per_rush",     "Run defense",          False),
+    ("def_success_rate",     "Defensive efficiency", False),
+    ("pressure_rate_gen",    "Pass-rush pressure",   True),
+    ("sack_rate_gen",        "Sack rate",            True),
+    ("third_down_stop_rate", "Third-down defense",   True),
+    ("def_quality_score",    "Overall defense grade", True),
+]
+
+# boolean archetype flags in team_styles → human tendency labels
+_FLAG_LABELS = {
+    "run_heavy_off": "Run-heavy offense", "pass_heavy_off": "Pass-heavy offense",
+    "deep_pass_off": "Deep passing attack", "short_pass_off": "Short passing game",
+    "fast_pace": "Fast tempo", "slow_pace": "Slow tempo",
+    "blitz_heavy_def": "Blitz-heavy defense", "high_play_action": "High play-action",
+    "motion_heavy_off": "Heavy pre-snap motion", "mobile_qb_offense": "Mobile QB",
+    "elite_mobile_qb": "Elite mobile QB", "fourth_down_aggressive": "Aggressive on 4th down",
+    "elite_rz_offense": "Elite red-zone offense", "elite_rz_defense": "Elite red-zone defense",
+    "elite_2min": "Elite two-minute offense", "leaky_under_pressure": "Struggles under pressure",
+    "poor_qb_contain": "Poor QB contain", "elite_qb_contain": "Elite QB contain",
+}
+
+
+def _tendencies(row) -> list:
+    return [lbl for flag, lbl in _FLAG_LABELS.items()
+            if flag in row and bool(row[flag]) and not pd.isna(row[flag])]
+
+
+def _profile_percentiles(team: str, season: int) -> list:
+    """League-relative percentile (0-100, higher=better) for each curated metric."""
+    s = styles_df()
+    s = s[s["season"] == season]
+    out = []
+    for col, label, higher in _PROFILE_METRICS:
+        if col not in s.columns:
+            continue
+        cv = s[["team", col]].dropna()
+        if team not in set(cv["team"]):
+            continue
+        ranks = cv[col].rank(pct=True)
+        pr = float(ranks[cv["team"] == team].iloc[0])
+        if not higher:
+            pr = 1.0 - pr
+        val = float(cv[cv["team"] == team][col].iloc[0])
+        out.append({"metric": col, "label": label,
+                    "value": round(val, 3), "pctl": int(round(pr * 100))})
+    return out
+
+
+def _units_display(team: str) -> dict:
+    """Per-team unit z-scores in 'good = high' convention (matches the matchup UI)."""
+    from ml.matchup_engine import team_units
+    u = team_units()
+    if team not in u.index:
+        return {}
+    r = u.loc[team]
+    return {
+        "pass_off": round(float(r["z_off_pass"]), 2), "rush_off": round(float(r["z_off_rush"]), 2),
+        "pass_def": round(float(-r["z_def_pass"]), 2), "rush_def": round(float(-r["z_def_rush"]), 2),
+        "st": round(float(r["z_st"]), 2), "coach": round(float(r["z_coaching"]), 2),
+        "cont_off": round(float(r["cont_off"]), 2), "cont_def": round(float(r["cont_def"]), 2),
+    }
+
+
+@app.route('/api/team_profile')
+def api_team_profile():
+    """Full team research profile: style, strengths/weaknesses, situational, units, depth."""
+    team = (request.args.get('team') or '').upper()
+    if not team:
+        return jsonify({"error": "team required"}), 400
+    s = styles_df()
+    season = int(request.args.get('season', latest_style_season()))
+    ss = s[(s["season"] == season) & (s["team"] == team)]
+    if ss.empty:                                   # fall back to team's most recent season
+        alt = s[s["team"] == team]
+        if alt.empty:
+            return jsonify({"error": f"no style data for {team}"}), 404
+        season = int(alt["season"].max())
+        ss = alt[alt["season"] == season]
+    row = ss.iloc[0]
+
+    meta = team_meta().get(team, {})
+    from ml.squad import squad_ratings, team_depth_chart
+    ranks, _ = squad_ratings()
+    rr = ranks[ranks["team"] == team]
+
+    style_keys = ["offense_label", "defense_label", "pass_rate_overall", "pass_rate_early_down",
+                  "rz_pass_rate", "third_down_pass_rate", "avg_air_yards", "avg_yac", "pace",
+                  "play_action_rate", "motion_rate", "screen_pass_rate", "no_huddle_rate",
+                  "blitz_rate", "avg_blitzers", "scramble_rate", "qb_rush_rate"]
+    sit_keys = ["pressure_rate_gen", "sack_rate_gen", "pressure_rate_allowed", "sack_rate_allowed",
+                "rz_td_rate", "rz_td_rate_allowed_x", "two_min_epa", "fourth_go_rate",
+                "def_points_allowed_avg", "turnover_rate", "third_down_stop_rate"]
+    style = {k: safe_json(row[k]) for k in style_keys if k in row.index}
+    situational = {k: safe_json(row[k]) for k in sit_keys if k in row.index}
+
+    pcts = _profile_percentiles(team, season)
+    strengths = sorted(pcts, key=lambda x: -x["pctl"])[:5]
+    weaknesses = sorted(pcts, key=lambda x: x["pctl"])[:5]
+
+    if team not in _DEPTH_CACHE:
+        _DEPTH_CACHE[team] = team_depth_chart(team)
+
+    return jsonify(_native({
+        "team": team, "season": season,
+        "name": meta.get("team_name", team),
+        "color": meta.get("team_color") or "#334155",
+        "logo": meta.get("team_logo_espn", ""),
+        "qb": qb1_2026().get(team, ""),
+        "rank": int(rr["rank"].iloc[0]) if len(rr) else None,
+        "rating": float(rr["rating"].iloc[0]) if len(rr) else None,
+        "style": style, "situational": situational,
+        "strengths": strengths, "weaknesses": weaknesses,
+        "tendencies": _tendencies(row),
+        "units": _units_display(team),
+        "groups": _DEPTH_CACHE[team],
+    }))
+
+
+# ── weekly form / trends ────────────────────────────────────────────
+def team_weekly_form(team: str, season: int) -> list:
+    """Per-week offensive/defensive EPP + points for/against for a team's season."""
+    p = pbp_season(season)
+    if p.empty:
+        return []
+    p = p[p["week"] <= 18]
+    plays = p[p["play_type"].isin(["pass", "run"]) & p["epa"].notna()]
+    off = plays[plays["posteam"] == team]
+    deff = plays[plays["defteam"] == team]
+
+    # points for / against by week from final scores
+    pf, pa = {}, {}
+    s = schedules_df()
+    if len(s):
+        sc = s[(s["season"] == season) & s["home_score"].notna()]
+        for _, g in sc.iterrows():
+            w = int(g["week"])
+            if g["home_team"] == team:
+                pf[w], pa[w] = g["home_score"], g["away_score"]
+            elif g["away_team"] == team:
+                pf[w], pa[w] = g["away_score"], g["home_score"]
+
+    weeks = sorted(set(off["week"].dropna().astype(int)) | set(deff["week"].dropna().astype(int)) | set(pf))
+    rows = []
+    for w in weeks:
+        o, d = off[off["week"] == w], deff[deff["week"] == w]
+        rows.append({
+            "week": int(w),
+            "off_epa": round(float(o["epa"].mean()), 3) if len(o) else None,
+            "def_epa": round(float(d["epa"].mean()), 3) if len(d) else None,
+            "success": round(float(o["success"].mean()), 3) if len(o) and "success" in o else None,
+            "pass_rate": round(float((o["play_type"] == "pass").mean()), 3) if len(o) else None,
+            "pf": safe_json(pf.get(w)), "pa": safe_json(pa.get(w)),
+        })
+    return rows
+
+
+def _form_summary(weeks: list, last_n: int = 3) -> dict:
+    def avg(rows, k):
+        vals = [r[k] for r in rows if r.get(k) is not None]
+        return round(sum(vals) / len(vals), 3) if vals else None
+    last = weeks[-last_n:]
+    return {
+        "season": {k: avg(weeks, k) for k in ("off_epa", "def_epa", "pf", "pa")},
+        "last3": {k: avg(last, k) for k in ("off_epa", "def_epa", "pf", "pa")},
+        "games": len(weeks),
+    }
+
+
+@app.route('/api/team_trends')
+def api_team_trends():
+    team = (request.args.get('team') or '').upper()
+    if not team:
+        return jsonify({"error": "team required"}), 400
+    # default to the latest season that actually has play-by-play
+    season = int(request.args.get('season', 0)) or None
+    if season is None:
+        for cand in range(latest_style_season(), 2018, -1):
+            if not pbp_season(cand).empty:
+                season = cand
+                break
+        season = season or latest_style_season()
+    weeks = team_weekly_form(team, season)
+    return jsonify(_native({
+        "team": team, "season": season, "weeks": weeks,
+        "summary": _form_summary(weeks),
+        "empty": len(weeks) == 0,
+    }))
+
+
+# ── latest injuries + full matchup ──────────────────────────────────
+_STATUS_RANK = {"Out": 0, "Doubtful": 1, "Questionable": 2}
+
+
+def latest_injuries(team: str) -> dict:
+    """Most-recent available injury report for a team (empty in the offseason)."""
+    inj = injuries_df()
+    if inj.empty or "team" not in inj.columns:
+        return {"season": None, "week": None, "players": []}
+    t = inj[inj["team"] == team]
+    if t.empty:
+        return {"season": None, "week": None, "players": []}
+    season = int(t["season"].max())
+    t = t[t["season"] == season]
+    week = int(t["week"].max())
+    t = t[t["week"] == week]
+    players = []
+    for _, r in t.iterrows():
+        st = r.get("report_status")
+        if not st or (isinstance(st, float) and pd.isna(st)):
+            continue
+        players.append({
+            "name": r.get("full_name"), "position": r.get("position"),
+            "status": st, "injury": r.get("report_primary_injury") or "",
+        })
+    players.sort(key=lambda x: _STATUS_RANK.get(x["status"], 3))
+    return {"season": season, "week": week, "players": players}
+
+
+@app.route('/api/matchup_full')
+def api_matchup_full():
+    """Matchup prediction + schemes + recent form + latest injuries for both teams."""
+    home = (request.args.get('home') or '').upper()
+    away = (request.args.get('away') or '').upper()
+    neutral = request.args.get('neutral', '0') == '1'
+    if not home or not away or home == away:
+        return jsonify({"error": "two different teams required"}), 400
+    from ml.matchup_engine import project_game
+    res = project_game(home, away, neutral)
+    if "error" in res:
+        return jsonify(res), 404
+
+    meta = team_meta()
+    styles = styles_df()
+    season = latest_style_season()
+    form_season = None
+    for cand in range(season, 2018, -1):
+        if not pbp_season(cand).empty:
+            form_season = cand
+            break
+
+    def scheme(t):
+        r = styles[(styles["season"] == season) & (styles["team"] == t)]
+        if r.empty:
+            return {}
+        r = r.iloc[0]
+        return {
+            "offense_label": safe_json(r.get("offense_label")),
+            "defense_label": safe_json(r.get("defense_label")),
+            "pass_rate": safe_json(r.get("pass_rate_overall")),
+            "pace": safe_json(r.get("pace")),
+            "blitz_rate": safe_json(r.get("blitz_rate")),
+            "play_action_rate": safe_json(r.get("play_action_rate")),
+            "tendencies": _tendencies(r),
+        }
+
+    def form(t):
+        weeks = team_weekly_form(t, form_season) if form_season else []
+        return {"season": form_season, "weeks": weeks, "summary": _form_summary(weeks)}
+
+    for side, t in [("home", home), ("away", away)]:
+        m = meta.get(t, {})
+        res[f"{side}_name"] = m.get("team_name", t)
+        res[f"{side}_color"] = m.get("team_color") or "#334155"
+        res[f"{side}_logo"] = m.get("team_logo_espn", "")
+    res["schemes"] = {home: scheme(home), away: scheme(away)}
+    res["form"] = {home: form(home), away: form(away)}
+    res["injuries"] = {home: latest_injuries(home), away: latest_injuries(away)}
+    return jsonify(_native(res))
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  DATA REFRESH — download latest nflverse data + rebuild light tables
+#  Runs in a background thread (POST /api/refresh) or on an in-process
+#  daily schedule. Uses ml.refresh, which downloads release parquets
+#  directly (no nfl_data_py — that conflicts with pandas 3).
+# ═══════════════════════════════════════════════════════════════════
+import os
+import threading
+
+_REFRESH_STATE = {"running": False, "log": []}
+_REFRESH_LOCK = threading.Lock()
+
+
+def clear_caches():
+    """Drop every in-process cache so freshly refreshed data is served immediately."""
+    global _TEAM_META, _QB1, _SQUAD, _STYLES, _INJ, _SCHED
+    _TEAM_META = _QB1 = _SQUAD = _STYLES = _INJ = _SCHED = None
+    _DEPTH_CACHE.clear()
+    _PROJ_CACHE.clear()
+    _PBP_CACHE.clear()
+    for mod, attr in [("ml.matchup_engine", "_UNITS"), ("ml.squad", "_PCT_CACHE")]:
+        try:
+            import importlib
+            setattr(importlib.import_module(mod), attr, None)
+        except Exception:
+            pass
+
+
+def _run_refresh(season: int):
+    from ml import refresh as R
+
+    def log(msg, level="INFO"):
+        _REFRESH_STATE["log"].append(str(msg))
+        del _REFRESH_STATE["log"][:-40]
+
+    try:
+        R.run(season, log=log)
+    except Exception as e:
+        _REFRESH_STATE["log"].append(f"FATAL {e}")
+    finally:
+        clear_caches()
+        _REFRESH_STATE["running"] = False
+
+
+def _start_refresh(season: int) -> bool:
+    """Start a refresh thread if none is running. Returns False if already running."""
+    with _REFRESH_LOCK:
+        if _REFRESH_STATE["running"]:
+            return False
+        _REFRESH_STATE["running"] = True
+        _REFRESH_STATE["log"] = []
+    threading.Thread(target=_run_refresh, args=(season,), daemon=True).start()
+    return True
+
+
+@app.route('/api/refresh', methods=['POST'])
+def api_refresh():
+    """Trigger a background data refresh. Guarded by the REFRESH_TOKEN env var."""
+    token = os.environ.get("REFRESH_TOKEN")
+    if not token:
+        return jsonify({"error": "refresh disabled (no REFRESH_TOKEN configured)"}), 403
+    supplied = request.headers.get("X-Refresh-Token") or request.args.get("token")
+    if supplied != token:
+        return jsonify({"error": "invalid token"}), 401
+    season = int(request.args.get("season", os.environ.get("REFRESH_SEASON", 2026)))
+    if not _start_refresh(season):
+        return jsonify({"error": "refresh already running"}), 409
+    return jsonify({"started": True, "season": season})
+
+
+@app.route('/api/refresh/status')
+def api_refresh_status():
+    from ml import refresh as R
+    return jsonify({
+        "running": _REFRESH_STATE["running"],
+        "last_refresh": R.last_status(),
+        "log_tail": "\n".join(_REFRESH_STATE["log"][-12:]),
+    })
+
+
+def _daily_scheduler():
+    """Optional in-process daily refresh. Enable with REFRESH_DAILY=1 (hour = REFRESH_HOUR
+    UTC, default 8). One worker only (gunicorn --workers 1), so a single thread suffices."""
+    import time as _t
+    from datetime import datetime, timezone
+    hour = int(os.environ.get("REFRESH_HOUR", 8))
+    season = int(os.environ.get("REFRESH_SEASON", 2026))
+    while True:
+        now = datetime.now(timezone.utc)
+        target = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+        if target <= now:
+            target = target.replace(day=now.day)
+            secs = (target - now).total_seconds() + 86400
+        else:
+            secs = (target - now).total_seconds()
+        _t.sleep(max(60, secs))
+        _start_refresh(season)
+        _t.sleep(3600)   # avoid double-firing within the same hour
+
+
+if os.environ.get("REFRESH_DAILY") == "1":
+    threading.Thread(target=_daily_scheduler, daemon=True).start()
+
+
 if __name__ == '__main__':
-    import os
     # Local dev entrypoint. In production (Railway) gunicorn imports `app` directly
     # and this block never runs — but honor $PORT / $HOST if someone runs it directly.
     port = int(os.environ.get("PORT", 5000))

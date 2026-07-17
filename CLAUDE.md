@@ -116,6 +116,30 @@ run `python tests/test_spread_convention.py` after touching any spread/cover log
 - **Windows + OneDrive**: repo lives under a OneDrive path with spaces. Quote paths. Shell is
   PowerShell; a Bash tool is also available.
 
+## Hosting & data refresh (Railway)
+
+The Flask dashboard is deployed on Railway (`nfl-engine-production.up.railway.app`) via
+gunicorn. Two hard rules for anything that runs ON the server:
+
+- **Never import `nfl_data_py` in the runtime path.** It pins `pandas<2`, which conflicts
+  with the engine's pandas 3 and breaks the build. Runtime deps live in `requirements.txt`;
+  the fetch-only libs (nfl_data_py/requests-for-fetch/tqdm) live in `requirements-fetch.txt`.
+- **The server reads local parquet only.** The one exception is `ml/refresh.py`, which
+  downloads nflverse **release** parquets directly over HTTPS (pandas + requests, no
+  nfl_data_py) for a *light* current-season refresh: injuries + PBP + schedules, then
+  rebuilds `situational_stats` + `team_styles` (`python -m ml.refresh --season 2026`).
+  It does **not** rebuild composite/the full engine — that stays an offline `run_engine.py` job.
+
+Refresh is exposed at `POST /api/refresh` (guarded by the `REFRESH_TOKEN` env var) +
+`GET /api/refresh/status`, and can run on an in-process daily schedule (`REFRESH_DAILY=1`,
+`REFRESH_HOUR`, `REFRESH_SEASON`). After a refresh the server clears its in-process caches
+(`clear_caches()` in `dashboard/server.py`). Persistence uses a Railway **Volume** at
+`/app/data`; `dashboard/seed.py` (run before gunicorn) seeds it from the build-time
+`data_seed/` copy on first boot.
+
+The dashboard (`dashboard/season2026.html`) is a hash-routed SPA: Rankings, Team profile
+(`/api/team_profile`), Trends (`/api/team_trends`), Matchup (`/api/matchup_full`), Refresh.
+
 ## Conventions
 
 - Match the existing style: heavy docstrings at the top of each module describing inputs/outputs,

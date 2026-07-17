@@ -1,0 +1,10 @@
+# Nixpacks build customization.
+#
+# Bake a seed copy of the committed data (data_seed/) into the image. A Railway
+# Volume mounted at /app/data shadows the image's data/ and starts EMPTY on first
+# boot; dashboard/seed.py copies data_seed/ into it so the app has data immediately.
+# This overrides only the (normally empty) build phase — pip install still runs in
+# the install phase beforehand.
+[phases.build]
+dependsOn = ["install"]
+cmds = ["cp -r data data_seed"]

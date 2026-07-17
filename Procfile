@@ -1,1 +1,1 @@
-web: gunicorn dashboard.server:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
+web: python dashboard/seed.py && gunicorn dashboard.server:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
