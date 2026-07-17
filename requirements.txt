@@ -1,11 +1,13 @@
-# NFL Engine — Requirements
+# NFL Engine — RUNTIME requirements (what the hosted dashboard needs)
 # Run: pip install -r requirements.txt
+#
+# This is the set Railway/Nixpacks installs. The web app + engine only READ local
+# parquet — they never touch the network — so the data-fetch libraries live in
+# requirements-fetch.txt (installed locally only) to avoid a hard dependency
+# conflict: nfl_data_py pins pandas<2, but the engine runs on pandas 2/3.
 
-nfl_data_py>=0.3.3
 pandas>=2.0.0
 pyarrow>=14.0.0
-requests>=2.31.0
-tqdm>=4.66.0
 numpy>=1.26.0
 flask>=3.0.0
 gunicorn>=21.2.0   # production WSGI server (Railway/Linux); Flask dev server is local-only

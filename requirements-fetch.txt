@@ -1,0 +1,15 @@
+# NFL Engine — DATA-FETCH requirements (LOCAL ONLY)
+# Run: pip install -r requirements-fetch.txt
+#
+# These libraries are used ONLY by fetch_data.py (the single script that touches the
+# network to download nflverse data). They are deliberately kept OUT of requirements.txt
+# because nfl_data_py pins pandas<2.0, which conflicts with the engine's pandas>=2.0.
+# Install these in your local data-fetch environment, not on the deployed server.
+#
+# NOTE: if pip refuses due to the pandas pin, install with:
+#   pip install -r requirements-fetch.txt --no-deps
+# (nfl_data_py works fine against pandas 2/3 in practice; the pin is stale metadata.)
+
+nfl_data_py>=0.3.3
+requests>=2.31.0
+tqdm>=4.66.0

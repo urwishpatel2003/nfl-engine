@@ -21,6 +21,9 @@ fetch_data.py ──▶ data/raw/*.parquet ──▶ engine/ build steps ──�
 
 1. **Fetch** — `python fetch_data.py --seasons 2020 2021 2022 2023 2024 2025`
    Run LOCALLY (needs internet). Writes ~30 parquet files to `data/raw/`.
+   Needs the fetch-only deps: `pip install -r requirements-fetch.txt` (kept separate
+   from `requirements.txt` because `nfl_data_py` pins `pandas<2`, which conflicts with
+   the engine's `pandas>=2`; the runtime never imports it).
 2. **Build engine** (in order; orchestrated by `run_engine.py`):
    - `engine/composite.py` → `composite_scores.parquet` — 0-100 player scores per (season, week)
    - `engine/styles.py` → `team_styles.parquet` — team offensive/defensive style profiles from PBP
