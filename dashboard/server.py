@@ -316,7 +316,13 @@ def get_teams():
 
 
 if __name__ == '__main__':
+    import os
+    # Local dev entrypoint. In production (Railway) gunicorn imports `app` directly
+    # and this block never runs — but honor $PORT / $HOST if someone runs it directly.
+    port = int(os.environ.get("PORT", 5000))
+    host = os.environ.get("HOST", "0.0.0.0")
+    debug = os.environ.get("FLASK_DEBUG", "1") == "1"
     print("NFL 2026 Dashboard — power rankings + matchup predictions")
-    print("Open: http://localhost:5000   (legacy engine dashboard at /legacy)")
+    print(f"Open: http://localhost:{port}   (legacy engine dashboard at /legacy)")
     print()
-    app.run(debug=True, port=5000, use_reloader=False)
+    app.run(debug=debug, host=host, port=port, use_reloader=False)

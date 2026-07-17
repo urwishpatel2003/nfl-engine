@@ -6,9 +6,9 @@ __pycache__/
 venv/
 env/
 
-# Data — large, regenerable from fetch_data.py / run_engine.py
-data/raw/
-data/processed/
+# Data — needed at runtime by the hosted dashboard, so it IS committed (33MB total,
+# reads are local/offline). Regenerable from fetch_data.py / run_engine.py if lost.
+# (Was previously ignored; un-ignored so Railway/`railway up` ship the parquet files.)
 
 # Claude Code local settings
 .claude/settings.local.json

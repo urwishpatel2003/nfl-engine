@@ -1,0 +1,4 @@
+player_id,team,returns,tot_yds,avg_yds,td,player_name,name,composite,rank
+00-0038976,LAC,10,92.0,9.2,0.0,Marvin Mims,Marvin Mims,85.0,1
+00-0040138,TEN,10,53.0,5.3,0.0,Jaylin Noel,Jaylin Noel,28.552633356236754,2
+00-0036331,MIN,11,48.0,4.3636365,0.0,Devin Duvernay,Devin Duvernay,15.0,3
