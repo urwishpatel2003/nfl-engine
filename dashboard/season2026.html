@@ -169,6 +169,18 @@
   .gc-row{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);padding:2px 0}
   .gc-row b{color:var(--txt);font-weight:600}
   .gc-final{font-size:11.5px;margin-top:6px;padding-top:6px;border-top:1px solid var(--line);color:var(--muted)}
+  .gcard.top{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;position:relative}
+  .gc-badge{position:absolute;top:-9px;left:12px;background:var(--accent);color:#fff;font-size:10.5px;
+            font-weight:700;padding:2px 9px;border-radius:10px;letter-spacing:.2px}
+  .gc-edge{background:#12233f;border:1px solid #26406b;border-radius:8px;padding:6px 10px;margin:8px 0 2px;
+           font-size:11.5px;display:flex;justify-content:space-between;align-items:center}
+  .gc-edge b{color:#8fc0ff}
+  .toppicks{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 4px}
+  .tp{display:flex;align-items:center;gap:7px;background:var(--panel2);border:1px solid #2a3b5c;
+      border-radius:20px;padding:5px 12px 5px 6px;font-size:12px;cursor:pointer}
+  .tp:hover{border-color:var(--accent)}
+  .tp .rk{background:var(--accent);color:#fff;width:19px;height:19px;border-radius:50%;display:inline-flex;
+          align-items:center;justify-content:center;font-size:10.5px;font-weight:700;flex:0 0 auto}
 
   /* refresh */
   .rfstat{font-size:13px;color:var(--muted);margin-top:12px}
@@ -557,7 +569,11 @@ function schCard(g){
       mark = pickHome===homeWon ? ' <span style="color:var(--good)">✓</span>' : ' <span style="color:var(--bad)">✗</span>'; }
     fin = `<div class="gc-final">Final: ${g.away} ${g.away_score} — ${g.home_score} ${g.home}${mark}</div>`;
   }
-  return `<div class="gcard" onclick="go('#/matchup?home=${g.home}&away=${g.away}')">
+  const top = g.pick_rank;
+  const edgeRow = g.edge!=null
+    ? `<div class="gc-edge"><span>Edge vs line</span><b>${g.ats_pick} · ${Math.abs(g.edge).toFixed(1)} pts</b></div>` : '';
+  return `<div class="gcard${top?' top':''}" onclick="go('#/matchup?home=${g.home}&away=${g.away}')">
+    ${top?`<div class="gc-badge">🔥 Top Pick #${top}</div>`:''}
     <div class="gc-tms">
       <div class="gc-tm"><img src="${g.away_logo}" onerror="this.style.visibility='hidden'"><div class="gc-ab">${g.away}</div><div class="gc-sc">${pred?g.pred_away.toFixed(0):'–'}</div></div>
       <div class="gc-mid">@</div>
@@ -566,6 +582,7 @@ function schCard(g){
     <div class="gc-prob"><div style="width:${ap}%;background:${g.away_color}"></div><div style="width:${hp}%;background:${g.home_color}"></div></div>
     <div class="gc-row"><span>Model pick</span><b>${pred?`${fav} -${Math.abs(g.pred_margin).toFixed(1)}`:'—'}</b></div>
     <div class="gc-row"><span>Vegas line</span><b>${veg}</b></div>
+    ${edgeRow}
     <div class="gc-row"><span>Total · model / Vegas</span><b>${pred?g.pred_total.toFixed(1):'—'} / ${g.vegas_total??'—'}</b></div>
     ${injPts>0?`<div class="gc-row"><span>⚕ injury adjust</span><b>−${injPts.toFixed(1)} pts</b></div>`:''}
     ${fin}
@@ -594,9 +611,17 @@ async function viewSchedule(params){
   ss.onchange=()=>go(`#/schedule?season=${ss.value}&week=1`);
   sw.onchange=()=>go(`#/schedule?season=${ss.value}&week=${sw.value}`);
   const body=document.getElementById('schBody');
-  body.innerHTML = (d.games&&d.games.length)
-    ? `<div class="note">Click any game for the full breakdown (schemes, form, injuries, box score). Model line vs the Vegas line shown per game.</div><div class="sched">${d.games.map(schCard).join('')}</div>`
-    : `<div class="note warn">No games found for this week.</div>`;
+  if(!d.games||!d.games.length){ body.innerHTML=`<div class="note warn">No games found for this week.</div>`; return; }
+  const picks = d.games.filter(g=>g.pick_rank).sort((a,b)=>a.pick_rank-b.pick_rank);
+  const strip = picks.length ? `<div class="card" style="padding:14px">
+      <h2 style="margin:0 0 10px">🔥 Top 5 picks <span>biggest model disagreement with the Vegas line</span></h2>
+      <div class="toppicks">${picks.map(g=>`<div class="tp" onclick="go('#/matchup?home=${g.home}&away=${g.away}')">
+        <span class="rk">${g.pick_rank}</span><b>${g.ats_pick}</b>&nbsp;${g.away}@${g.home} · ${Math.abs(g.edge).toFixed(1)} pt edge</div>`).join('')}</div>
+      <div style="color:var(--muted);font-size:11px;margin-top:8px">These are where the model most disagrees with the market — the biggest edges, not guaranteed winners (the model doesn't reliably beat NFL point spreads out-of-sample).</div>
+    </div>` : '';
+  body.innerHTML = strip
+    + `<div class="note">Click any game for the full breakdown (schemes, form, injuries, box score). ${picks.length?'Top-5 edges are highlighted below.':''}</div>`
+    + `<div class="sched">${d.games.map(schCard).join('')}</div>`;
 }
 
 // ── VIEW: refresh ───────────────────────────────────────────────────

@@ -720,6 +720,17 @@ def api_schedule():
                 "inj_home": pred["injury_impact"][home], "inj_away": pred["injury_impact"][away],
             })
         games.append(rec)
+
+    # model edge vs the Vegas line: edge = model home margin − spread_line (>0 ⇒ home covers).
+    # The |edge| ranks the strongest disagreements with the market → top-5 ATS picks.
+    scored = [g for g in games if g.get("pred_margin") is not None and g.get("vegas_spread") is not None]
+    for g in scored:
+        edge = round(g["pred_margin"] - g["vegas_spread"], 1)
+        g["edge"] = edge
+        g["ats_pick"] = g["home"] if edge >= 0 else g["away"]
+    for i, g in enumerate(sorted(scored, key=lambda x: -abs(x["edge"]))[:5], 1):
+        g["pick_rank"] = i
+
     _SCHED_PRED[(season, week)] = games
     return jsonify(_native({"season": season, "week": week, "seasons": seasons,
                             "weeks": weeks, "games": games}))
