@@ -59,8 +59,11 @@
   .rk .tm{width:118px;display:flex;flex-direction:column;line-height:1.15}
   .rk .ab{font-weight:600;font-size:13px}
   .rk .qb{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .rk .barwrap{flex:1;height:16px;background:#0e1626;border-radius:6px;overflow:hidden}
-  .rk .bar{height:100%;border-radius:6px}
+  .rk .barwrap{flex:1;height:16px;background:#0e1626;border-radius:6px;position:relative;overflow:hidden}
+  .rk .barwrap .zero{position:absolute;left:50%;top:0;bottom:0;width:1px;background:#3a4a68;z-index:1}
+  .rk .bar{position:absolute;top:2px;bottom:2px}
+  .rk .bar.pos{left:50%;border-radius:0 4px 4px 0}   /* above-average teams extend right */
+  .rk .bar.neg{right:50%;border-radius:4px 0 0 4px}  /* below-average teams extend left  */
   .rk .val{width:46px;text-align:right;font-variant-numeric:tabular-nums;font-size:13px}
 
   /* chips + tiles */
@@ -270,16 +273,17 @@ async function viewRankings(){
     <div class="note"><b>2026 roster-talent ranking</b> — rates each team by the players currently
       on its roster (QB by multi-year EPA, skill/OL/pass-rush/coverage) + coaching, <b>not</b> by last
       year's results. Click a team for its full profile.</div>
-    <div class="pad"><div class="card"><h2>Power Rankings <span>2026 · roster talent</span></h2>
+    <div class="pad"><div class="card"><h2>Power Rankings <span>2026 · roster talent · bar diverges from league average</span></h2>
       ${data.map(d=>{
-        const w=Math.max(4,Math.abs(d.rating)/max*100);
+        const w=Math.max(1.5,Math.abs(d.rating)/max*49);   // each side spans up to ~half the track
+        const pos=d.rating>=0;
         const prev=(d.prev!=null)?`2025: ${f1(d.prev)}`:'';
         return `<div class="rk" title="${prev}" onclick="go('#/team/${d.team}')">
           <div class="n">${d.rank}</div>
           <img src="${d.logo}" onerror="this.style.visibility='hidden'">
           <div class="tm"><div class="ab">${d.team}</div>${d.qb?`<div class="qb">${d.qb}</div>`:''}</div>
-          <div class="barwrap"><div class="bar" style="width:${w}%;background:${d.color}"></div></div>
-          <div class="val">${f1(d.rating)}</div>
+          <div class="barwrap"><span class="zero"></span><div class="bar ${pos?'pos':'neg'}" style="width:${w}%;background:${d.color}"></div></div>
+          <div class="val" style="color:${pos?'var(--good)':'var(--bad)'}">${f1(d.rating)}</div>
         </div>`;
       }).join('')}
     </div></div>`;
