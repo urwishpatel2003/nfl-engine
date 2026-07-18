@@ -605,6 +605,19 @@ def api_matchup_full():
     if "error" in res:
         return jsonify(res), 404
 
+    # injury-adjust the score: subtract each team's ruled-out-player points penalty,
+    # then recompute margin / total / win prob so the SPREAD reflects availability.
+    from ml.projections import injury_impact, unavailable_ids
+    unavail = unavailable_ids()
+    imp = {home: injury_impact(home, unavail), away: injury_impact(away, unavail)}
+    res["pred_home_score"] = round(res["pred_home_score"] - imp[home]["pts"], 1)
+    res["pred_away_score"] = round(res["pred_away_score"] - imp[away]["pts"], 1)
+    res["pred_margin"] = round(res["pred_home_score"] - res["pred_away_score"], 1)
+    res["pred_total"] = round(res["pred_home_score"] + res["pred_away_score"], 1)
+    _wp = float(1 / (1 + np.exp(-res["pred_margin"] / 13.5 * np.pi / np.sqrt(3))))
+    res["home_win_prob"], res["away_win_prob"] = round(_wp, 3), round(1 - _wp, 3)
+    res["injury_impact"] = imp
+
     meta = team_meta()
     styles = styles_df()
     season = latest_style_season()
@@ -666,7 +679,8 @@ def clear_caches():
     _PBP_CACHE.clear()
     for mod, attr in [("ml.matchup_engine", "_UNITS"), ("ml.squad", "_PCT_CACHE"),
                       ("ml.squad", "_META_CACHE"), ("ml.squad", "_SKILL_CACHE"),
-                      ("ml.squad", "_PBP_AGG")]:
+                      ("ml.squad", "_PBP_AGG"), ("ml.projections", "_PROFILE_CACHE"),
+                      ("ml.projections", "_QBDEPTH_CACHE")]:
         try:
             import importlib
             setattr(importlib.import_module(mod), attr, None)

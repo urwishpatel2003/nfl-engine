@@ -457,6 +457,13 @@ function injPanel(tm, iv){
   return hdr+iv.players.map(p=>`<div class="inj"><span class="bn">${esc(p.name)} <span style="color:var(--muted)">${esc(p.position||'')}</span></span>
     <span><span class="st st-${esc(p.status)}">${esc(p.status)}</span> <span style="color:var(--muted);font-size:11px">${esc(p.injury)}</span></span></div>`).join('')+`</div>`;
 }
+function injImpactNote(r){
+  const ii=r.injury_impact; if(!ii) return '';
+  const side=t=>{ const d=ii[t]; if(!d||!d.pts) return ''; return `<b>${t}</b> −${d.pts} pts${d.players&&d.players.length?` (${d.players.map(esc).join(', ')})`:''}`; };
+  const parts=[side(r.away),side(r.home)].filter(Boolean);
+  if(!parts.length) return `<div class="note">No ruled-out players affect this matchup.</div>`;
+  return `<div class="note warn">Spread adjusted for absences — ${parts.join(' · ')}</div>`;
+}
 function boxTeam(tm, t){
   if(!t) return '';
   const m=META[tm]||{}; const rbs=(t.rush||[]); const wrs=(t.rec||[]).filter(x=>x.pos!=='RB'); const q=t.qb;
@@ -507,8 +514,10 @@ async function viewMatchup(home, away, neutral){
   </div>
   <div class="card" style="margin-top:20px"><h2>Schemes</h2><div class="box">${schemePanel(r.away, r.schemes[r.away])}${schemePanel(r.home, r.schemes[r.home])}</div></div>
   <div class="card"><h2>Recent form <span>${r.form[r.home]&&r.form[r.home].season||''}</span></h2><div class="box">${formPanel(r.away, r.form[r.away])}${formPanel(r.home, r.form[r.home])}</div></div>
-  <div class="card"><h2>Latest injuries</h2><div class="box">${injPanel(r.away, r.injuries[r.away])}${injPanel(r.home, r.injuries[r.home])}</div></div>
-  <div class="card"><h2>Projected box score</h2><div id="mBox" class="box"><div class="loading">Projecting player stat lines…</div></div></div>`;
+  <div class="card"><h2>Latest injuries <span>Out/Doubtful players are removed from the projection &amp; spread</span></h2>
+    ${injImpactNote(r)}
+    <div class="box">${injPanel(r.away, r.injuries[r.away])}${injPanel(r.home, r.injuries[r.home])}</div></div>
+  <div class="card"><h2>Projected box score <span>available players only</span></h2><div id="mBox" class="box"><div class="loading">Projecting player stat lines…</div></div></div>`;
   // player box (reuse existing cached endpoint)
   const p = await j(`/api/matchup_players?home=${h}&away=${a}`);
   const box=document.getElementById('mBox');

@@ -27,6 +27,47 @@ RAW = Path(__file__).parent.parent / "data" / "raw"
 PROC = Path(__file__).parent.parent / "data" / "processed"
 
 _PROFILE_CACHE = None
+_QBDEPTH_CACHE = None
+
+# Injury statuses that mean "won't play" → excluded from projections. Questionable
+# players are assumed active (they suit up ~75% of the time).
+OUT_STATUSES = ("Out", "Doubtful")
+
+
+def unavailable_ids(statuses=OUT_STATUSES) -> set:
+    """gsis_ids ruled out in each team's most-recent injury report (same report the
+    dashboard's injury panel shows). Empty in the offseason if no report exists."""
+    p = RAW / "injuries.parquet"
+    if not p.exists():
+        return set()
+    inj = pd.read_parquet(p)
+    if inj.empty or "gsis_id" not in inj.columns or "report_status" not in inj.columns:
+        return set()
+    inj = inj.dropna(subset=["gsis_id"]).copy()
+    inj["sw"] = inj["season"].astype(int) * 100 + inj["week"].astype(int)
+    inj = inj[inj["sw"] == inj.groupby("team")["sw"].transform("max")]   # latest week per team
+    return set(inj[inj["report_status"].isin(statuses)]["gsis_id"])
+
+
+def _depth_qbs() -> dict:
+    """{team: [(gsis_id, name), …]} ordered by depth-chart rank."""
+    global _QBDEPTH_CACHE
+    if _QBDEPTH_CACHE is None:
+        dc = pd.read_parquet(RAW / "depth_2026_current.parquet").copy()
+        dc["pos_rank"] = pd.to_numeric(dc["pos_rank"], errors="coerce")
+        q = dc[dc.pos_abb == "QB"].sort_values(["team", "pos_rank"])
+        _QBDEPTH_CACHE = {t: [(r.gsis_id, r.player_name) for r in g.itertuples()]
+                          for t, g in q.groupby("team")}
+    return _QBDEPTH_CACHE
+
+
+def _available_qb(team: str, unavail: set):
+    """First depth-chart QB who isn't ruled out (falls back to QB1 if all are)."""
+    qs = _depth_qbs().get(team, [])
+    for gid, name in qs:
+        if gid not in unavail:
+            return gid, name
+    return qs[0] if qs else (None, None)
 
 
 # ── 1. player box-score aggregation from PBP ────────────────────────
@@ -148,15 +189,16 @@ ROOKIE_QB = {"cmp_pct": 0.62, "ypa": 6.4, "ptd_pa": 0.036, "int_pa": 0.028, "car
 
 # ── 4. distribute team volume to players for a matchup ──────────────
 def _distribute(team: str, team_pa: float, team_ra: float, off_tds: float, prof: pd.DataFrame,
-                pass_factor: float = 1.0, rush_factor: float = 1.0) -> dict:
-    """Allocate a team's projected pass/rush volume to its current players, with the
-    opponent-defense adjustment (pass_factor for the air game, rush_factor for the ground)."""
-    roster = prof[prof.team == team]
+                pass_factor: float = 1.0, rush_factor: float = 1.0, unavail: set = frozenset()) -> dict:
+    """Allocate a team's projected pass/rush volume to its AVAILABLE players (injured players
+    are dropped so their carries/targets redistribute), with the opponent-defense adjustment
+    (pass_factor for the air game, rush_factor for the ground)."""
+    roster = prof[(prof.team == team) & (~prof.player_id.isin(unavail))]
     pass_tds = off_tds * 0.62 * pass_factor
     rush_tds = off_tds - off_tds * 0.62          # ground TDs unaffected by pass factor
 
-    # QB: the depth-chart starter (rookie/no-2025 -> replacement prior, not a backup's noise)
-    sid, sname = _qb_starters().get(team, (None, None))
+    # QB: first depth-chart QB who isn't ruled out (rookie/no-2025 -> replacement prior)
+    sid, sname = _available_qb(team, unavail)
     qrow = roster[roster.player_id == sid]
     q = qrow.iloc[0] if not qrow.empty else None
     if q is None:
@@ -201,13 +243,43 @@ def _distribute(team: str, team_pa: float, team_ra: float, off_tds: float, prof:
     return {"qb": qb_line, "rush": rush_lines, "rec": rec_lines}
 
 
+def injury_impact(team: str, unavail: set = None) -> dict:
+    """Points penalty for a team's ruled-out contributors (drives the spread). QB dominates;
+    skill players give a smaller, capped hit since a replacement recovers most of the usage."""
+    if unavail is None:
+        unavail = unavailable_ids()
+    prof = player_profiles()
+    r = prof[prof.team == team]
+    pen, who = 0.0, []
+    # QB1 out → penalty scaled by the gap to the best available backup
+    from ml.squad import _qb_value_table
+    qbp = _qb_value_table().rank(pct=True) * 100
+    qs = _depth_qbs().get(team, [])
+    if qs and qs[0][0] in unavail:
+        s = float(qbp.get(qs[0][0], 60.0))
+        b = next((float(qbp.get(g, 40.0)) for g, _ in qs[1:] if g not in unavail), 35.0)
+        d = max(0.0, (s - b) / 100.0 * 7.0)                # elite→replacement ≈ up to 7 pts
+        if d > 0.1:
+            pen += d; who.append(f"{qs[0][1]} (QB)")
+    # skill starters out → net loss after a ~65% replacement recovers most of the share
+    for _, p in r[r.player_id.isin(unavail)].iterrows():
+        if p.position in ("RB", "WR", "TE"):
+            share = float(p.get("target_share", 0) or 0) + float(p.get("carry_share", 0) or 0)
+            loss = min(2.0, share * 6.0 * 0.35)
+            if loss > 0.2:
+                pen += loss; who.append(f"{p.player_name} ({p.position})")
+    return {"pts": round(min(pen, 10.0), 1), "players": who}
+
+
 def project_matchup(home: str, away: str, neutral: bool = False) -> dict:
-    """Full matchup: unit-vs-unit score + opponent-adjusted player stat lines."""
+    """Full matchup: unit-vs-unit score + opponent-adjusted player stat lines, using only
+    AVAILABLE players (injured players are excluded and their usage redistributed)."""
     from ml.matchup_engine import project_game, team_units
     pred = project_game(home, away, neutral=neutral)
     u = team_units()
     tv = team_volume()
     prof = player_profiles()
+    unavail = unavailable_ids()
     points = {home: pred["pred_home_score"], away: pred["pred_away_score"]}
     margin = {home: pred["pred_margin"], away: -pred["pred_margin"]}
 
@@ -222,7 +294,7 @@ def project_matchup(home: str, away: str, neutral: bool = False) -> dict:
         # opponent-defense adjustment: bad D (positive z_def EPA allowed) -> more player yards
         pass_factor = float(np.clip(1 + 0.14 * u.loc[opp, "z_def_pass"], 0.75, 1.30)) if opp in u.index else 1.0
         rush_factor = float(np.clip(1 + 0.14 * u.loc[opp, "z_def_rush"], 0.75, 1.30)) if opp in u.index else 1.0
-        teams[team] = _distribute(team, team_pa, team_ra, off_tds, prof, pass_factor, rush_factor)
+        teams[team] = _distribute(team, team_pa, team_ra, off_tds, prof, pass_factor, rush_factor, unavail)
 
     return {"home": home, "away": away, "pred": pred, "teams": teams}
 
