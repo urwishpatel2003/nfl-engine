@@ -692,6 +692,7 @@ def api_schedule():
     if sort_cols:
         dw = dw.sort_values(sort_cols)
 
+    from ml.context import game_context
     meta = team_meta()
     unavail = unavailable_ids()
     games = []
@@ -701,6 +702,7 @@ def api_schedule():
             continue
         hm, am = meta.get(home, {}), meta.get(away, {})
         played = pd.notna(g.get("home_score"))
+        ctx = game_context(home, away, g)
         rec = {
             "game_id": g.get("game_id"), "gameday": g.get("gameday"), "gametime": g.get("gametime"),
             "home": home, "away": away,
@@ -710,14 +712,21 @@ def api_schedule():
             "vegas_spread": safe_json(g.get("spread_line")), "vegas_total": safe_json(g.get("total_line")),
             "home_score": safe_json(g.get("home_score")), "away_score": safe_json(g.get("away_score")),
             "final": bool(played),
+            "neutral": ctx["neutral"], "stadium": ctx["stadium"], "context_notes": ctx["notes"],
         }
-        pred = _adjusted_prediction(home, away, neutral=False, unavail=unavail)
+        # neutral site removes home field (via project_game); travel/weather nudge each score
+        pred = _adjusted_prediction(home, away, neutral=ctx["neutral"], unavail=unavail)
         if "error" not in pred:
+            hs = round(pred["pred_home_score"] + ctx["home_delta"], 1)
+            as_ = round(pred["pred_away_score"] + ctx["away_delta"], 1)
+            margin = round(hs - as_, 1)
+            wp = float(1 / (1 + np.exp(-margin / 13.5 * np.pi / np.sqrt(3))))
             rec.update({
-                "pred_home": pred["pred_home_score"], "pred_away": pred["pred_away_score"],
-                "pred_margin": pred["pred_margin"], "pred_total": pred["pred_total"],
-                "home_win_prob": pred["home_win_prob"],
+                "pred_home": hs, "pred_away": as_,
+                "pred_margin": margin, "pred_total": round(hs + as_, 1),
+                "home_win_prob": round(wp, 3),
                 "inj_home": pred["injury_impact"][home], "inj_away": pred["injury_impact"][away],
+                "context_delta": {"home": ctx["home_delta"], "away": ctx["away_delta"]},
             })
         games.append(rec)
 
