@@ -664,7 +664,8 @@ def clear_caches():
     _DEPTH_CACHE.clear()
     _PROJ_CACHE.clear()
     _PBP_CACHE.clear()
-    for mod, attr in [("ml.matchup_engine", "_UNITS"), ("ml.squad", "_PCT_CACHE")]:
+    for mod, attr in [("ml.matchup_engine", "_UNITS"), ("ml.squad", "_PCT_CACHE"),
+                      ("ml.squad", "_META_CACHE")]:
         try:
             import importlib
             setattr(importlib.import_module(mod), attr, None)

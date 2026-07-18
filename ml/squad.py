@@ -222,17 +222,21 @@ POS_LABEL = {"QB": "Quarterback", "RB": "Running Back", "WR": "Wide Receiver",
 
 
 _PCT_CACHE = None
+_META_CACHE = None
 
 
 def _player_pct():
     """Per-player 0-100 rating = percentile within position (2025). Comparable across
-    positions: 90+=elite, ~60-80=solid starter, <40=depth. Returns lookups by id/key."""
+    positions: 90+=elite, ~60-80=solid starter, <40=depth. Indexed by BOTH gsis id and
+    normalized name so id mismatches still resolve. The composite covers most positions
+    (incl. OL guards/tackles, DL, DB, LB, P), with specialized QB/pass-rush/coverage on top."""
     global _PCT_CACHE
     if _PCT_CACHE is not None:
         return _PCT_CACHE
     comp = _composite_2025()
     comp["pct"] = comp.groupby("position")["adjusted_score"].rank(pct=True) * 100
-    skill = comp.set_index("player_id")["pct"]                       # WR/RB/TE (+QB fallback)
+    skill = comp.set_index("player_id")["pct"]
+    skill_nm = comp.dropna(subset=["nm"]).drop_duplicates("nm").set_index("nm")["pct"]
     qb = _qb_value_table(); qb_pct = qb.rank(pct=True) * 100         # QB by multi-year EPA
     dl = pd.read_csv(PROC / "dl_rankings_2025.csv"); dl["k"] = dl["name"].map(_key)
     dl["prod"] = dl.get("def_sacks", 0).fillna(0) + 0.5 * dl.get("def_pressures", 0).fillna(0)
@@ -242,25 +246,90 @@ def _player_pct():
                                             rate=("def_passer_rating_allowed", "mean")).reset_index()
     cov = cov[cov.tgt >= 20]; cov["k"] = cov["pfr_player_name"].map(_key)
     cov_pct = (-cov.groupby("k")["rate"].mean()).rank(pct=True) * 100  # DB/LB by coverage
-    _PCT_CACHE = (skill, qb_pct, dl_pct, cov_pct)
+    _PCT_CACHE = (skill, skill_nm, qb_pct, dl_pct, cov_pct)
     return _PCT_CACHE
 
 
+def _roster_meta():
+    """For players with NO 2025 stat line: draft pick + experience (rookie estimate),
+    plus the team O-line %ile and kicker %ile. Cached; reset by the server on refresh."""
+    global _META_CACHE
+    if _META_CACHE is not None:
+        return _META_CACHE
+    r = pd.read_parquet(RAW / "rosters_2026.parquet").dropna(subset=["player_id"]).copy()
+    r["nm"] = r["player_name"].map(_norm)
+    r["dn"] = pd.to_numeric(r.get("draft_number"), errors="coerce")
+    r["yx"] = pd.to_numeric(r.get("years_exp"), errors="coerce")
+    by_id, by_nm = r.drop_duplicates("player_id").set_index("player_id"), r.drop_duplicates("nm").set_index("nm")
+    draft = {"id": by_id["dn"], "nm": by_nm["dn"]}
+    exp = {"id": by_id["yx"], "nm": by_nm["yx"]}
+    olp = PROC / "ol_rankings_2025.csv"
+    ol_pct = (pd.read_csv(olp).set_index("team")["composite"].rank(pct=True) * 100) if olp.exists() else pd.Series(dtype=float)
+    kp = PROC / "kicker_rankings_2025.csv"
+    k_pct = (pd.read_csv(kp).dropna(subset=["player_id"]).set_index("player_id")["composite"].rank(pct=True) * 100) if kp.exists() else pd.Series(dtype=float)
+    _META_CACHE = (draft, exp, ol_pct, k_pct)
+    return _META_CACHE
+
+
+def _draft_rating(pick):
+    """Rookie estimate from overall draft slot: high picks project higher than late/UDFA."""
+    if pick is None or pd.isna(pick):
+        return None
+    p = float(pick)
+    for lim, val in [(10, 70), (32, 64), (64, 58), (105, 53), (150, 48), (200, 44)]:
+        if p <= lim:
+            return val
+    return 40
+
+
+_DEPTH_RT = {1: 48, 2: 42, 3: 37, 4: 33}   # replacement rating by depth-chart rank
+
+
 def team_depth_chart(team: str) -> list:
+    """Every depth-chart player gets a 0-100 rating via a waterfall, tagged with its source:
+       measured (2025 production) → team (O-line grade) → rookie (draft slot) → proj (depth)."""
     dc = pd.read_parquet(RAW / "depth_2026_current.parquet").copy()
     dc["pos_rank"] = pd.to_numeric(dc["pos_rank"], errors="coerce")
     dc = dc[(dc.team == team) & dc.player_name.notna()].copy()
     dc["grp"] = dc["pos_abb"].map(GROUP_MAP)
-    skill, qb_pct, dl_pct, cov_pct = _player_pct()
+    skill, skill_nm, qb_pct, dl_pct, cov_pct = _player_pct()
+    draft, exp, ol_pct, k_pct = _roster_meta()
+    team_ol = float(ol_pct.get(team, 50.0)) if len(ol_pct) else 50.0
 
-    def rate(grp, gid, name):
-        k = _key(name)
-        if grp == "QB":       v = qb_pct.get(gid, skill.get(gid))
-        elif grp in ("WR", "RB", "TE"): v = skill.get(gid)
-        elif grp == "DL":     v = dl_pct.get(k)
-        elif grp in ("DB", "LB"): v = cov_pct.get(k)
-        else:                 v = None
-        return None if v is None or pd.isna(v) else int(round(v))
+    def _first(*vals):
+        for v in vals:
+            if v is not None and not pd.isna(v):
+                return v
+        return None
+
+    def rate(grp, gid, name, pos_rank):
+        k, nm = _key(name), _norm(name)
+        pr = int(pos_rank) if pos_rank and not pd.isna(pos_rank) else 3
+        # O-line: no reliable per-player metric → team O-line grade, adjusted for depth
+        # (starter = full grade, backups discounted) so the group isn't all one number.
+        if grp == "OL":
+            return int(round(max(20.0, team_ol + {1: 0, 2: -8, 3: -14}.get(pr, -18)))), "team"
+        # 1. best measured 2025 signal for the group, then the universal composite (id or name)
+        if grp == "QB":
+            v = _first(qb_pct.get(gid), skill.get(gid), skill_nm.get(nm))
+        elif grp == "DL":
+            v = _first(dl_pct.get(k), skill.get(gid), skill_nm.get(nm))
+        elif grp in ("DB", "LB"):
+            v = _first(cov_pct.get(k), skill.get(gid), skill_nm.get(nm))
+        elif grp == "K":
+            v = _first(k_pct.get(gid), skill.get(gid), skill_nm.get(nm))
+        else:                                            # WR/RB/TE/P/LS — composite covers most
+            v = _first(skill.get(gid), skill_nm.get(nm))
+        if v is not None:
+            return int(round(v)), "measured"
+        # 2. rookies / 2nd-year with no snaps → draft-slot estimate
+        ex = _first(exp["id"].get(gid), exp["nm"].get(nm))
+        if ex is not None and ex <= 1:
+            dv = _draft_rating(_first(draft["id"].get(gid), draft["nm"].get(nm)))
+            if dv is not None:
+                return int(round(dv)), "rookie"
+        # 3. everyone else → depth-based replacement level
+        return _DEPTH_RT.get(pr, 30), "proj"
 
     groups = []
     for grp in POS_ORDER:
@@ -268,10 +337,12 @@ def team_depth_chart(team: str) -> list:
         sub = dc[dc.grp == grp].sort_values(["pos_rank", "pos_abb"])
         if sub.empty:
             continue
-        players = [{"name": r.player_name, "slot": r.pos_abb,
-                    "rank": int(r.pos_rank) if pd.notna(r.pos_rank) else None,
-                    "rating": rate(grp, r.gsis_id, r.player_name)}
-                   for r in sub.itertuples()]
+        players = []
+        for r in sub.itertuples():
+            rt, src = rate(grp, r.gsis_id, r.player_name, r.pos_rank)
+            players.append({"name": r.player_name, "slot": r.pos_abb,
+                            "rank": int(r.pos_rank) if pd.notna(r.pos_rank) else None,
+                            "rating": rt, "source": src})
         groups.append({"pos": grp, "label": POS_LABEL.get(grp, grp), "players": players})
     return groups
 

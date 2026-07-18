@@ -350,14 +350,20 @@ async function viewTeam(team){
       <div class="sub" style="color:var(--muted);font-size:11.5px;margin-top:8px">Roster continuity from 2025 — offense ${pc(U.cont_off)}, defense ${pc(U.cont_def)}</div>
     </div>
 
-    <div class="card"><h2>Depth chart <span>2026 roster · 2025 player ratings</span></h2>
+    <div class="card"><h2>Depth chart <span>2026 roster · 0–100 player ratings</span></h2>
       <div class="depth">${d.groups.map(g=>`
         <div class="grp"><div class="gh">${g.label}</div>
-          ${g.players.map(p=>{ const r=p.rating; const bar=r==null?'':`<div class="rb"><i style="width:${r}%;background:${ratingColor(r)}"></i></div>`;
+          ${g.players.map(p=>{ const r=p.rating; const est=p.source&&p.source!=='measured';
+            const bar=r==null?'':`<div class="rb"><i style="width:${r}%;background:${ratingColor(r)};${est?'opacity:.5':''}"></i></div>`;
             const tag=(p.slot&&p.slot!==g.pos)?p.slot:(p.rank??'');
-            return `<div class="pl ${p.rank===1?'starter':''}"><div class="dr">${tag}</div><div class="pn">${p.name}</div>${bar}<div class="rt" style="color:${ratingColor(r)}">${r==null?'—':r}</div></div>`;
+            const st=est?`opacity:.6;font-style:italic`:'';
+            const ttl=est?`title="projected — ${p.source==='rookie'?'rookie draft slot':p.source==='team'?'team O-line grade':'roster depth'}, not 2025 stats"`:'';
+            return `<div class="pl ${p.rank===1?'starter':''}" ${ttl}><div class="dr">${tag}</div><div class="pn">${p.name}</div>${bar}<div class="rt" style="color:${ratingColor(r)};${st}">${r==null?'—':r}</div></div>`;
           }).join('')}
         </div>`).join('')}</div>
+      <div style="color:var(--muted);font-size:11px;margin-top:12px">Ratings are 0–100 (position percentile).
+        <span style="opacity:.6;font-style:italic">Faded/italic</span> = projected from rookie draft slot,
+        roster depth, or team O-line grade rather than 2025 on-field production.</div>
     </div>
   </div>`;
   document.getElementById('teamPick').addEventListener('change', e=>go('#/team/'+e.target.value));
