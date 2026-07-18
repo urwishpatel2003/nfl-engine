@@ -75,15 +75,136 @@ def _composite_2025():
     return agg[["player_id", "nm", "k", "position", "adjusted_score"]]
 
 
+# ── play-by-play player values ──────────────────────────────────────
+# seasonal_stats.parquet lags a year behind (no current season) and the composite's
+# efficiency/usage components are flat, so QBs missed their latest season and volume RBs
+# were buried. These value tables are computed straight from PBP (which DOES include the
+# current season) — recency-weighted passing+rushing EPA for QBs, and real production
+# (yards + TDs + touches + EPA) for skill players.
+_PBP_W = {2025: 0.60, 2024: 0.30, 2023: 0.10}   # recency weights across the seasons we have
+_PBP_AGG = None
+_SKILL_CACHE = None
+
+
+def _pbp_agg():
+    """Per-player rushing / receiving / passing aggregates for each weighted season."""
+    global _PBP_AGG
+    if _PBP_AGG is not None:
+        return _PBP_AGG
+    rush, rec, pas, names = [], [], [], {}
+    for s, w in _PBP_W.items():
+        p = RAW / f"pbp_{s}.parquet"
+        if not p.exists():
+            continue
+        d = pd.read_parquet(p)
+        if "season" in d.columns:
+            d = d[d["season"] == s]
+        if "week" in d.columns:
+            d = d[d["week"] <= 18]
+        ru = d[d["rush_attempt"] == 1]
+        gr = ru.groupby("rusher_player_id").agg(
+            rush_yds=("yards_gained", "sum"), rush_td=("touchdown", "sum"),
+            carries=("play_id", "count"), rush_epa=("epa", "sum")).reset_index()
+        gr = gr.rename(columns={"rusher_player_id": "pid"}); gr["w"] = w; rush.append(gr)
+        names.update(dict(zip(ru["rusher_player_id"], ru["rusher_player_name"])))
+        tg = d[(d["pass_attempt"] == 1) & d["receiver_player_id"].notna()]
+        gc = tg.groupby("receiver_player_id").agg(
+            targets=("play_id", "count"), rec=("complete_pass", "sum"),
+            rec_yds=("yards_gained", "sum"), rec_td=("touchdown", "sum"),
+            rec_epa=("epa", "sum")).reset_index()
+        gc = gc.rename(columns={"receiver_player_id": "pid"}); gc["w"] = w; rec.append(gc)
+        names.update(dict(zip(tg["receiver_player_id"], tg["receiver_player_name"])))
+        ps = d[d["pass_attempt"] == 1]
+        gp = ps.groupby("passer_player_id").agg(pass_epa=("epa", "sum"), pass_n=("play_id", "count")).reset_index()
+        gp = gp.rename(columns={"passer_player_id": "pid"}); gp["w"] = w; pas.append(gp)
+        names.update(dict(zip(ps["passer_player_id"], ps["passer_player_name"])))
+    cat = lambda fr: pd.concat(fr, ignore_index=True) if fr else pd.DataFrame()
+    _PBP_AGG = (cat(rush), cat(rec), cat(pas), names)
+    return _PBP_AGG
+
+
+def _wavg(df, metrics):
+    """Recency-weighted per-season average per player: sum(metric*w)/sum(w)."""
+    if df.empty:
+        return pd.DataFrame(columns=["pid"] + metrics)
+    return df.groupby("pid").apply(
+        lambda x: pd.Series({m: (x[m] * x["w"]).sum() / x["w"].sum() for m in metrics}),
+        include_groups=False).reset_index()
+
+
+def _pos_map():
+    """player_id → position (RB/WR/TE/QB/…), from 2025 composite then 2026 rosters."""
+    m = {}
+    cp = PROC / "composite_scores.parquet"
+    if cp.exists():
+        c = pd.read_parquet(cp); c = c[c.season == 2025].drop_duplicates("player_id")
+        m.update(dict(zip(c["player_id"], c["position"])))
+    r = pd.read_parquet(RAW / "rosters_2026.parquet").dropna(subset=["player_id"]).drop_duplicates("player_id")
+    for pid, pos in zip(r["player_id"], r["position"]):
+        m.setdefault(pid, pos)
+    return m
+
+
+def _skill_value():
+    """RB/WR/TE value from real production (yards + TDs + touches + EPA), recency-weighted
+    and z-scored within position. Same schema as _composite_2025 so it drops into the
+    offense-group and per-player-percentile code. Correctly credits volume workhorses."""
+    global _SKILL_CACHE
+    if _SKILL_CACHE is not None:
+        return _SKILL_CACHE
+    rush, rec, _, names = _pbp_agg()
+    rw = _wavg(rush, ["rush_yds", "rush_td", "carries", "rush_epa"])
+    cw = _wavg(rec, ["targets", "rec", "rec_yds", "rec_td", "rec_epa"])
+    m = rw.merge(cw, on="pid", how="outer").fillna(0.0)
+    m["position"] = m["pid"].map(_pos_map())
+    m = m[m["position"].isin(["RB", "WR", "TE", "FB"])].copy()
+    m["grp"] = m["position"].replace({"FB": "RB"})
+    m["scrim_yds"] = m["rush_yds"] + m["rec_yds"]
+    m["tds"] = m["rush_td"] + m["rec_td"]
+    m["touches"] = m["carries"] + m["rec"]
+    m["epa"] = m["rush_epa"] + m["rec_epa"]
+
+    def _zc(s):
+        sd = s.std(ddof=0)
+        return (s - s.mean()) / sd if sd > 1e-9 else s * 0.0
+
+    m["adjusted_score"] = 0.0
+    for _, sub in m.groupby("grp"):
+        m.loc[sub.index, "adjusted_score"] = (
+            0.42 * _zc(sub["scrim_yds"]) + 0.25 * _zc(sub["tds"]) +
+            0.20 * _zc(sub["epa"]) + 0.13 * _zc(sub["touches"]))
+    m["name"] = m["pid"].map(names)
+    m["nm"] = m["name"].map(_norm)
+    m["k"] = m["name"].map(_key)
+    _SKILL_CACHE = m.rename(columns={"pid": "player_id"})[
+        ["player_id", "nm", "k", "position", "adjusted_score"]]
+    return _SKILL_CACHE
+
+
 def _qb_value_table():
-    """Multi-year QB value = (passing + rushing) EPA per play, recency+volume weighted.
-    Far wider spread than the composite, so elite QBs actually separate from replacement."""
-    ss = pd.read_parquet(RAW / "seasonal_stats.parquet")
-    ss = ss[ss.season.isin([2023, 2024, 2025]) & (ss.attempts >= 100)].copy()
-    ss["epa_play"] = (ss["passing_epa"].fillna(0) + ss["rushing_epa"].fillna(0)) / ss["attempts"].clip(lower=1)
-    w = {2025: 0.5, 2024: 0.35, 2023: 0.15}
-    ss["w"] = ss["season"].map(w) * ss["attempts"]          # weight by recency AND volume
-    return ss.groupby("player_id").apply(
+    """Multi-year (recency + volume weighted) passing+rushing EPA per play from PBP.
+    Includes the current season, which seasonal_stats.parquet does not."""
+    rows = []
+    for s, w in _PBP_W.items():
+        p = RAW / f"pbp_{s}.parquet"
+        if not p.exists():
+            continue
+        d = pd.read_parquet(p)
+        if "season" in d.columns:
+            d = d[d["season"] == s]
+        if "week" in d.columns:
+            d = d[d["week"] <= 18]
+        pa = d[d["pass_attempt"] == 1].groupby("passer_player_id").agg(pe=("epa", "sum"), pn=("play_id", "count"))
+        ru = d[d["rush_attempt"] == 1].groupby("rusher_player_id").agg(re=("epa", "sum"), rn=("play_id", "count"))
+        j = pa.join(ru, how="left").fillna(0.0)
+        j = j[j["pn"] >= 100]                                # real QB workload that season
+        j["epa_play"] = (j["pe"] + j["re"]) / (j["pn"] + j["rn"]).clip(lower=1)
+        j["w"] = w * j["pn"]; j = j.reset_index().rename(columns={"passer_player_id": "pid"})
+        rows.append(j[["pid", "epa_play", "w"]])
+    if not rows:
+        return pd.Series(dtype=float)
+    allq = pd.concat(rows, ignore_index=True)
+    return allq.groupby("pid").apply(
         lambda x: (x.epa_play * x.w).sum() / x.w.sum(), include_groups=False)
 
 
@@ -160,12 +281,12 @@ def _coaching():
 # ── assemble ────────────────────────────────────────────────────────
 def squad_ratings(breakdown: bool = False) -> pd.DataFrame:
     roster = _team_rosters_2026()
-    comp = _composite_2025()
+    skill_val = _skill_value()                                      # PBP production, not the composite
     teams = sorted(roster.team.unique())
 
     g = pd.DataFrame(index=teams)
     g["qb"]    = _qb_starter()                                      # depth-chart starter, EPA/play
-    g["skill"] = _offense_group(roster, comp, ["WR", "RB", "TE"], 5)
+    g["skill"] = _offense_group(roster, skill_val, ["WR", "RB", "TE"], 5)
     g["ol"]    = _ol()
     g["rush"]  = _pass_rush(roster)
     g["cover"] = _coverage(roster)
@@ -235,8 +356,13 @@ def _player_pct():
         return _PCT_CACHE
     comp = _composite_2025()
     comp["pct"] = comp.groupby("position")["adjusted_score"].rank(pct=True) * 100
-    skill = comp.set_index("player_id")["pct"]
+    skill = comp.set_index("player_id")["pct"]                       # composite %ile (all positions)
     skill_nm = comp.dropna(subset=["nm"]).drop_duplicates("nm").set_index("nm")["pct"]
+    # RB/WR/TE rated on real PBP production (fixes volume backs), %ile within position
+    sv = _skill_value().copy()
+    sv["pct"] = sv.groupby("position")["adjusted_score"].rank(pct=True) * 100
+    prod = sv.set_index("player_id")["pct"]
+    prod_nm = sv.dropna(subset=["nm"]).drop_duplicates("nm").set_index("nm")["pct"]
     qb = _qb_value_table(); qb_pct = qb.rank(pct=True) * 100         # QB by multi-year EPA
     dl = pd.read_csv(PROC / "dl_rankings_2025.csv"); dl["k"] = dl["name"].map(_key)
     dl["prod"] = dl.get("def_sacks", 0).fillna(0) + 0.5 * dl.get("def_pressures", 0).fillna(0)
@@ -246,7 +372,7 @@ def _player_pct():
                                             rate=("def_passer_rating_allowed", "mean")).reset_index()
     cov = cov[cov.tgt >= 20]; cov["k"] = cov["pfr_player_name"].map(_key)
     cov_pct = (-cov.groupby("k")["rate"].mean()).rank(pct=True) * 100  # DB/LB by coverage
-    _PCT_CACHE = (skill, skill_nm, qb_pct, dl_pct, cov_pct)
+    _PCT_CACHE = (skill, skill_nm, prod, prod_nm, qb_pct, dl_pct, cov_pct)
     return _PCT_CACHE
 
 
@@ -292,7 +418,7 @@ def team_depth_chart(team: str) -> list:
     dc["pos_rank"] = pd.to_numeric(dc["pos_rank"], errors="coerce")
     dc = dc[(dc.team == team) & dc.player_name.notna()].copy()
     dc["grp"] = dc["pos_abb"].map(GROUP_MAP)
-    skill, skill_nm, qb_pct, dl_pct, cov_pct = _player_pct()
+    skill, skill_nm, prod, prod_nm, qb_pct, dl_pct, cov_pct = _player_pct()
     draft, exp, ol_pct, k_pct = _roster_meta()
     team_ol = float(ol_pct.get(team, 50.0)) if len(ol_pct) else 50.0
 
@@ -318,7 +444,9 @@ def team_depth_chart(team: str) -> list:
             v = _first(cov_pct.get(k), skill.get(gid), skill_nm.get(nm))
         elif grp == "K":
             v = _first(k_pct.get(gid), skill.get(gid), skill_nm.get(nm))
-        else:                                            # WR/RB/TE/P/LS — composite covers most
+        elif grp in ("WR", "RB", "TE"):                  # real PBP production first, composite as backup
+            v = _first(prod.get(gid), prod_nm.get(nm), skill.get(gid), skill_nm.get(nm))
+        else:                                            # P/LS — composite covers punters
             v = _first(skill.get(gid), skill_nm.get(nm))
         if v is not None:
             return int(round(v)), "measured"
