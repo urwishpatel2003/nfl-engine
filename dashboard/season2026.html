@@ -37,6 +37,14 @@
   @media(max-width:840px){.grid2{grid-template-columns:1fr}}
   select{width:100%;background:var(--panel2);color:var(--txt);border:1px solid var(--line);
          border-radius:9px;padding:10px;font-size:14px}
+  /* page header with a team picker (Team + Trends views) */
+  .viewhead{display:flex;align-items:center;justify-content:space-between;gap:12px;
+            flex-wrap:wrap;margin-bottom:18px}
+  .viewhead .ttl{font-size:18px;font-weight:700}
+  .viewhead .ttl span{color:var(--muted);font-weight:400;font-size:12px;margin-left:6px}
+  select.pick{width:auto;max-width:260px;min-width:190px}
+  @media(max-width:560px){.viewhead{flex-direction:column;align-items:stretch}
+    select.pick{max-width:none;width:100%}}
   button{background:var(--accent);color:#fff;border:0;border-radius:9px;padding:11px 16px;
          font-size:14px;font-weight:600;cursor:pointer;width:100%}
   button:hover{filter:brightness(1.08)}
@@ -303,6 +311,10 @@ async function viewTeam(team){
     <div class="pv" style="color:${pctlColor(x.pctl)}">${x.pctl}</div></div>`;
   const U=d.units||{};
   app().innerHTML = `<div class="pad">
+    <div class="viewhead">
+      <div class="ttl">Team Profile <span>pick a team, or click one in Rankings</span></div>
+      <select id="teamPick" class="pick">${teamOptions(d.team)}</select>
+    </div>
     <div class="card">
       <div class="thead">
         <img src="${d.logo}" onerror="this.style.visibility='hidden'">
@@ -348,14 +360,18 @@ async function viewTeam(team){
         </div>`).join('')}</div>
     </div>
   </div>`;
+  document.getElementById('teamPick').addEventListener('change', e=>go('#/team/'+e.target.value));
 }
 
 // ── VIEW: trends ────────────────────────────────────────────────────
 async function viewTrends(team){
   team = team || TEAMS[0].team;
   app().innerHTML = `<div class="pad">
-    <div class="card"><h2>Team Trends <span>weekly form</span>
-      <select id="trPick" style="max-width:230px;float:right">${teamOptions(team)}</select></h2>
+    <div class="viewhead">
+      <div class="ttl">Team Trends <span>weekly form</span></div>
+      <select id="trPick" class="pick">${teamOptions(team)}</select>
+    </div>
+    <div class="card">
       <div id="trBody"><div class="loading">Loading…</div></div>
     </div></div>`;
   document.getElementById('trPick').addEventListener('change', e=>go('#/trends/'+e.target.value));
