@@ -155,6 +155,21 @@
   .st-Doubtful{background:#3a2a12;color:#fbbf24}
   .st-Questionable{background:#20304a;color:#93c5fd}
 
+  /* schedule slate */
+  .sched{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px}
+  .gcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;cursor:pointer}
+  .gcard:hover{border-color:var(--accent)}
+  .gc-tms{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px}
+  .gc-tm{display:flex;flex-direction:column;align-items:center;gap:4px}
+  .gc-tm img{width:34px;height:34px;object-fit:contain}
+  .gc-ab{font-weight:700;font-size:13px}
+  .gc-sc{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums}
+  .gc-mid{color:var(--muted);font-size:12px;text-align:center}
+  .gc-prob{height:6px;border-radius:3px;overflow:hidden;display:flex;margin:10px 0 8px}
+  .gc-row{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);padding:2px 0}
+  .gc-row b{color:var(--txt);font-weight:600}
+  .gc-final{font-size:11.5px;margin-top:6px;padding-top:6px;border-top:1px solid var(--line);color:var(--muted)}
+
   /* refresh */
   .rfstat{font-size:13px;color:var(--muted);margin-top:12px}
   .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
@@ -169,6 +184,7 @@
   </div>
   <nav id="nav">
     <a href="#/rankings">Rankings</a>
+    <a href="#/schedule">Schedule</a>
     <a href="#/team">Team</a>
     <a href="#/trends">Trends</a>
     <a href="#/matchup">Matchup</a>
@@ -256,6 +272,7 @@ async function route(){
   try{
     await ensureRankings();
     if(view==='rankings')      await viewRankings();
+    else if(view==='schedule') await viewSchedule(params);
     else if(view==='team')     await viewTeam(arg || TEAMS[0].team);
     else if(view==='trends')   await viewTrends(arg || (RANKINGS[0]&&RANKINGS[0].team));
     else if(view==='matchup')  await viewMatchup(params.get('home'), params.get('away'), params.get('neutral')==='1');
@@ -522,6 +539,64 @@ async function viewMatchup(home, away, neutral){
   const p = await j(`/api/matchup_players?home=${h}&away=${a}`);
   const box=document.getElementById('mBox');
   box.innerHTML = p.error? '<div class="loading">No projection available.</div>' : boxTeam(a,p.teams[a])+boxTeam(h,p.teams[h]);
+}
+
+// ── VIEW: schedule (weekly slate, auto-predicted) ───────────────────
+function schCard(g){
+  const pred = g.pred_home!=null;
+  const fav = pred ? (g.pred_margin>=0?g.home:g.away) : '';
+  const hp = pred ? Math.round(g.home_win_prob*100) : 50, ap = 100-hp;
+  const veg = g.vegas_spread==null ? '—'
+      : g.vegas_spread>0 ? `${g.home} -${g.vegas_spread}`
+      : g.vegas_spread<0 ? `${g.away} -${Math.abs(g.vegas_spread)}` : 'PK';
+  const injPts = ((g.inj_home&&g.inj_home.pts)||0)+((g.inj_away&&g.inj_away.pts)||0);
+  let fin='';
+  if(g.final && g.home_score!=null){
+    let mark='';
+    if(pred){ const pickHome=g.pred_margin>=0, homeWon=g.home_score>g.away_score;
+      mark = pickHome===homeWon ? ' <span style="color:var(--good)">✓</span>' : ' <span style="color:var(--bad)">✗</span>'; }
+    fin = `<div class="gc-final">Final: ${g.away} ${g.away_score} — ${g.home_score} ${g.home}${mark}</div>`;
+  }
+  return `<div class="gcard" onclick="go('#/matchup?home=${g.home}&away=${g.away}')">
+    <div class="gc-tms">
+      <div class="gc-tm"><img src="${g.away_logo}" onerror="this.style.visibility='hidden'"><div class="gc-ab">${g.away}</div><div class="gc-sc">${pred?g.pred_away.toFixed(0):'–'}</div></div>
+      <div class="gc-mid">@</div>
+      <div class="gc-tm"><img src="${g.home_logo}" onerror="this.style.visibility='hidden'"><div class="gc-ab">${g.home}</div><div class="gc-sc">${pred?g.pred_home.toFixed(0):'–'}</div></div>
+    </div>
+    <div class="gc-prob"><div style="width:${ap}%;background:${g.away_color}"></div><div style="width:${hp}%;background:${g.home_color}"></div></div>
+    <div class="gc-row"><span>Model pick</span><b>${pred?`${fav} -${Math.abs(g.pred_margin).toFixed(1)}`:'—'}</b></div>
+    <div class="gc-row"><span>Vegas line</span><b>${veg}</b></div>
+    <div class="gc-row"><span>Total · model / Vegas</span><b>${pred?g.pred_total.toFixed(1):'—'} / ${g.vegas_total??'—'}</b></div>
+    ${injPts>0?`<div class="gc-row"><span>⚕ injury adjust</span><b>−${injPts.toFixed(1)} pts</b></div>`:''}
+    ${fin}
+    <div class="gc-row" style="margin-top:6px"><span>${esc(g.gameday||'')} ${esc(g.gametime||'')}</span><span>details ›</span></div>
+  </div>`;
+}
+
+async function viewSchedule(params){
+  const qs = new URLSearchParams();
+  if(params.get('season')) qs.set('season', params.get('season'));
+  if(params.get('week'))   qs.set('week', params.get('week'));
+  app().innerHTML = `<div class="pad">
+    <div class="viewhead">
+      <div class="ttl">Weekly Schedule <span>every game auto-predicted (roster + injuries)</span></div>
+      <div style="display:flex;gap:8px">
+        <select id="schSeason" class="pick" style="min-width:110px"></select>
+        <select id="schWeek" class="pick" style="min-width:120px"></select>
+      </div>
+    </div>
+    <div id="schBody"><div class="loading">Predicting the slate… (first load builds the model, ~15s)</div></div>
+  </div>`;
+  const d = await j('/api/schedule?'+qs.toString());
+  const ss=document.getElementById('schSeason'), sw=document.getElementById('schWeek');
+  ss.innerHTML = (d.seasons||[]).map(s=>`<option value="${s}" ${s==d.season?'selected':''}>${s} season</option>`).join('');
+  sw.innerHTML = (d.weeks||[]).map(w=>`<option value="${w}" ${w==d.week?'selected':''}>Week ${w}</option>`).join('');
+  ss.onchange=()=>go(`#/schedule?season=${ss.value}&week=1`);
+  sw.onchange=()=>go(`#/schedule?season=${ss.value}&week=${sw.value}`);
+  const body=document.getElementById('schBody');
+  body.innerHTML = (d.games&&d.games.length)
+    ? `<div class="note">Click any game for the full breakdown (schemes, form, injuries, box score). Model line vs the Vegas line shown per game.</div><div class="sched">${d.games.map(schCard).join('')}</div>`
+    : `<div class="note warn">No games found for this week.</div>`;
 }
 
 // ── VIEW: refresh ───────────────────────────────────────────────────

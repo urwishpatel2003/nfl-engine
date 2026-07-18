@@ -592,23 +592,16 @@ def latest_injuries(team: str) -> dict:
     return {"season": season, "week": week, "players": players}
 
 
-@app.route('/api/matchup_full')
-def api_matchup_full():
-    """Matchup prediction + schemes + recent form + latest injuries for both teams."""
-    home = (request.args.get('home') or '').upper()
-    away = (request.args.get('away') or '').upper()
-    neutral = request.args.get('neutral', '0') == '1'
-    if not home or not away or home == away:
-        return jsonify({"error": "two different teams required"}), 400
+def _adjusted_prediction(home: str, away: str, neutral: bool = False, unavail=None) -> dict:
+    """project_game score, injury-adjusted: subtract each team's ruled-out-player points
+    penalty, then recompute margin / total / win prob so the SPREAD reflects availability."""
     from ml.matchup_engine import project_game
+    from ml.projections import injury_impact, unavailable_ids
     res = project_game(home, away, neutral)
     if "error" in res:
-        return jsonify(res), 404
-
-    # injury-adjust the score: subtract each team's ruled-out-player points penalty,
-    # then recompute margin / total / win prob so the SPREAD reflects availability.
-    from ml.projections import injury_impact, unavailable_ids
-    unavail = unavailable_ids()
+        return res
+    if unavail is None:
+        unavail = unavailable_ids()
     imp = {home: injury_impact(home, unavail), away: injury_impact(away, unavail)}
     res["pred_home_score"] = round(res["pred_home_score"] - imp[home]["pts"], 1)
     res["pred_away_score"] = round(res["pred_away_score"] - imp[away]["pts"], 1)
@@ -617,6 +610,20 @@ def api_matchup_full():
     _wp = float(1 / (1 + np.exp(-res["pred_margin"] / 13.5 * np.pi / np.sqrt(3))))
     res["home_win_prob"], res["away_win_prob"] = round(_wp, 3), round(1 - _wp, 3)
     res["injury_impact"] = imp
+    return res
+
+
+@app.route('/api/matchup_full')
+def api_matchup_full():
+    """Matchup prediction + schemes + recent form + latest injuries for both teams."""
+    home = (request.args.get('home') or '').upper()
+    away = (request.args.get('away') or '').upper()
+    neutral = request.args.get('neutral', '0') == '1'
+    if not home or not away or home == away:
+        return jsonify({"error": "two different teams required"}), 400
+    res = _adjusted_prediction(home, away, neutral)
+    if "error" in res:
+        return jsonify(res), 404
 
     meta = team_meta()
     styles = styles_df()
@@ -657,6 +664,67 @@ def api_matchup_full():
     return jsonify(_native(res))
 
 
+_SCHED_PRED = {}   # (season, week) -> games list; cleared on refresh
+
+
+@app.route('/api/schedule')
+def api_schedule():
+    """A week's slate: every game with the model's roster+injury-adjusted prediction
+    (and the Vegas line / final score when available). Auto-pairs home/away from the schedule."""
+    from ml.projections import unavailable_ids
+    s = schedules_df()
+    if s.empty:
+        return jsonify({"error": "no schedule data"}), 404
+    seasons = sorted(int(x) for x in s["season"].dropna().unique())
+    season = int(request.args.get('season', seasons[-1]))
+    d = s[s["season"] == season].copy()
+    if "game_type" in d.columns:                     # regular season for the weekly view
+        d = d[d["game_type"].fillna("REG").str.upper().eq("REG")]
+    weeks = sorted(int(x) for x in d["week"].dropna().unique())
+    if not weeks:
+        return jsonify(_native({"season": season, "week": None, "seasons": seasons, "weeks": [], "games": []}))
+    week = int(request.args.get('week', weeks[0]))
+    if (season, week) in _SCHED_PRED:
+        return jsonify(_native({"season": season, "week": week, "seasons": seasons,
+                                "weeks": weeks, "games": _SCHED_PRED[(season, week)]}))
+    dw = d[d["week"] == week]
+    sort_cols = [c for c in ["gameday", "gametime"] if c in dw.columns]
+    if sort_cols:
+        dw = dw.sort_values(sort_cols)
+
+    meta = team_meta()
+    unavail = unavailable_ids()
+    games = []
+    for _, g in dw.iterrows():
+        home, away = g.get("home_team"), g.get("away_team")
+        if not isinstance(home, str) or not isinstance(away, str):
+            continue
+        hm, am = meta.get(home, {}), meta.get(away, {})
+        played = pd.notna(g.get("home_score"))
+        rec = {
+            "game_id": g.get("game_id"), "gameday": g.get("gameday"), "gametime": g.get("gametime"),
+            "home": home, "away": away,
+            "home_name": hm.get("team_name", home), "away_name": am.get("team_name", away),
+            "home_logo": hm.get("team_logo_espn", ""), "away_logo": am.get("team_logo_espn", ""),
+            "home_color": hm.get("team_color") or "#334155", "away_color": am.get("team_color") or "#334155",
+            "vegas_spread": safe_json(g.get("spread_line")), "vegas_total": safe_json(g.get("total_line")),
+            "home_score": safe_json(g.get("home_score")), "away_score": safe_json(g.get("away_score")),
+            "final": bool(played),
+        }
+        pred = _adjusted_prediction(home, away, neutral=False, unavail=unavail)
+        if "error" not in pred:
+            rec.update({
+                "pred_home": pred["pred_home_score"], "pred_away": pred["pred_away_score"],
+                "pred_margin": pred["pred_margin"], "pred_total": pred["pred_total"],
+                "home_win_prob": pred["home_win_prob"],
+                "inj_home": pred["injury_impact"][home], "inj_away": pred["injury_impact"][away],
+            })
+        games.append(rec)
+    _SCHED_PRED[(season, week)] = games
+    return jsonify(_native({"season": season, "week": week, "seasons": seasons,
+                            "weeks": weeks, "games": games}))
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  DATA REFRESH — download latest nflverse data + rebuild light tables
 #  Runs in a background thread (POST /api/refresh) or on an in-process
@@ -677,6 +745,7 @@ def clear_caches():
     _DEPTH_CACHE.clear()
     _PROJ_CACHE.clear()
     _PBP_CACHE.clear()
+    _SCHED_PRED.clear()
     for mod, attr in [("ml.matchup_engine", "_UNITS"), ("ml.squad", "_PCT_CACHE"),
                       ("ml.squad", "_META_CACHE"), ("ml.squad", "_SKILL_CACHE"),
                       ("ml.squad", "_PBP_AGG"), ("ml.projections", "_PROFILE_CACHE"),
