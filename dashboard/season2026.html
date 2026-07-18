@@ -507,14 +507,23 @@ async function viewMatchup(home, away, neutral){
 
 // ── VIEW: refresh ───────────────────────────────────────────────────
 async function viewRefresh(){
+  const saved = localStorage.getItem('nfl_refresh_token') || '';
   app().innerHTML = `<div class="pad"><div class="card">
     <h2>Data Refresh <span>pull latest injuries &amp; stats</span></h2>
-    <div class="note">Downloads the current season's nflverse data (injuries, weekly stats, play-by-play)
-      and recomputes team styles &amp; situational tables. Runs in the background; this can take up to a minute.</div>
+    <div class="note">Downloads the current season's nflverse data (injuries, play-by-play, schedules)
+      and recomputes team styles &amp; situational tables. Runs in the background (up to a minute) and
+      also refreshes automatically every night.</div>
     <div id="rfStatus" class="rfstat">Checking status…</div>
-    <button id="rfGo" style="margin-top:14px;max-width:220px">Refresh now</button>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px">
+      <input id="rfToken" type="password" placeholder="Refresh token" value="${esc(saved)}" autocomplete="off"
+             style="flex:1;min-width:200px;max-width:340px;background:var(--panel2);color:var(--txt);
+                    border:1px solid var(--line);border-radius:9px;padding:10px;font-size:14px">
+      <button id="rfGo" style="max-width:200px">Refresh now</button>
+    </div>
+    <div style="color:var(--muted);font-size:11.5px;margin-top:8px">Set by the site owner (Railway
+      <code>REFRESH_TOKEN</code>). Saved in this browser after a successful run.</div>
   </div></div>`;
-  const statusEl=document.getElementById('rfStatus'), btn=document.getElementById('rfGo');
+  const statusEl=document.getElementById('rfStatus'), btn=document.getElementById('rfGo'), tokEl=document.getElementById('rfToken');
   async function poll(){
     try{
       const s = await j('/api/refresh/status');
@@ -526,15 +535,20 @@ async function viewRefresh(){
       if(s.running) setTimeout(poll, 3000);
     }catch(e){ statusEl.innerHTML = `<span class="dot" style="background:var(--muted)"></span>Refresh endpoint not available on this deployment yet.`; btn.disabled=true; }
   }
-  btn.addEventListener('click', async ()=>{
+  async function doRefresh(){
+    const tok = (tokEl.value||'').trim();          // trim: paste often adds a trailing space
+    if(!tok){ statusEl.textContent='Enter the refresh token first.'; tokEl.focus(); return; }
     btn.disabled=true; statusEl.textContent='Starting refresh…';
     try{
-      const tok = prompt('Enter refresh token (set by the site owner):','');
-      const r = await fetch('/api/refresh', {method:'POST', headers:{'X-Refresh-Token':tok||''}});
-      if(r.status===401){ statusEl.textContent='Invalid token.'; btn.disabled=false; return; }
+      const r = await fetch('/api/refresh', {method:'POST', headers:{'X-Refresh-Token':tok}});
+      if(r.status===401){ statusEl.textContent='Invalid token — check for typos or extra spaces (it is case-sensitive).'; btn.disabled=false; return; }
+      if(r.status===403){ statusEl.textContent='Refresh is disabled on the server (no REFRESH_TOKEN configured).'; btn.disabled=false; return; }
+      if(r.status!==409){ localStorage.setItem('nfl_refresh_token', tok); }   // remember a working token
       poll();
-    }catch(e){ statusEl.textContent='Could not start refresh.'; btn.disabled=false; }
-  });
+    }catch(e){ statusEl.textContent='Could not reach the server.'; btn.disabled=false; }
+  }
+  btn.addEventListener('click', doRefresh);
+  tokEl.addEventListener('keydown', e=>{ if(e.key==='Enter') doRefresh(); });
   poll();
 }
 
