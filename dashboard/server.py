@@ -730,19 +730,41 @@ def api_schedule():
             })
         games.append(rec)
 
-    # model edge vs the Vegas line: edge = model home margin − spread_line (>0 ⇒ home covers).
-    # The |edge| ranks the strongest disagreements with the market → top-5 ATS picks.
+    # Turn each point estimate into a key-number-aware ATS pick + cover probability, and an
+    # over/under read. Rank the top-5 plays by cover probability (accounts for key numbers,
+    # not just raw edge).
+    from ml.spreads import ats_pick as _ats_pick, total_prob as _total_prob
     scored = [g for g in games if g.get("pred_margin") is not None and g.get("vegas_spread") is not None]
     for g in scored:
-        edge = round(g["pred_margin"] - g["vegas_spread"], 1)
-        g["edge"] = edge
-        g["ats_pick"] = g["home"] if edge >= 0 else g["away"]
-    for i, g in enumerate(sorted(scored, key=lambda x: -abs(x["edge"]))[:5], 1):
+        a = _ats_pick(g["pred_margin"], g["vegas_spread"])
+        g["edge"] = a["edge"]
+        g["ats_pick"] = g["home"] if a["side"] == "home" else g["away"]
+        g["cover_prob"] = a["cover_prob"]
+        g["push_prob"] = a["push"]
+        if g.get("pred_total") is not None and g.get("vegas_total") is not None:
+            tp = _total_prob(g["pred_total"], g["vegas_total"])
+            over = tp["over"] >= tp["under"]
+            g["total_pick"] = "Over" if over else "Under"
+            g["total_prob"] = tp["over"] if over else tp["under"]
+    for i, g in enumerate(sorted(scored, key=lambda x: -x["cover_prob"])[:5], 1):
         g["pick_rank"] = i
 
     _SCHED_PRED[(season, week)] = games
     return jsonify(_native({"season": season, "week": week, "seasons": seasons,
                             "weeks": weeks, "games": games}))
+
+
+@app.route('/api/backtest')
+def api_backtest():
+    """Honest accuracy: model margin MAE vs the market's, straight-up accuracy, and
+    (in-sample) ATS/ROI, with the out-of-sample caveat baked into the payload."""
+    from ml.backtest_spreads import evaluate, latest_completed_season
+    arg = request.args.get('season')
+    season = int(arg) if arg else None
+    res = evaluate(season)
+    if "error" in res:                               # requested season not gradable → latest completed
+        res = evaluate(latest_completed_season())
+    return jsonify(_native(res))
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -766,6 +788,12 @@ def clear_caches():
     _PROJ_CACHE.clear()
     _PBP_CACHE.clear()
     _SCHED_PRED.clear()
+    for modname, cachename in [("ml.adjust", "_ADJ_CACHE"), ("ml.backtest_spreads", "_BT_CACHE")]:
+        try:
+            import importlib
+            getattr(importlib.import_module(modname), cachename).clear()
+        except Exception:
+            pass
     for mod, attr in [("ml.matchup_engine", "_UNITS"), ("ml.squad", "_PCT_CACHE"),
                       ("ml.squad", "_META_CACHE"), ("ml.squad", "_SKILL_CACHE"),
                       ("ml.squad", "_PBP_AGG"), ("ml.projections", "_PROFILE_CACHE"),

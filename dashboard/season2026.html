@@ -571,8 +571,10 @@ function schCard(g){
     fin = `<div class="gc-final">Final: ${g.away} ${g.away_score} — ${g.home_score} ${g.home}${mark}</div>`;
   }
   const top = g.pick_rank;
-  const edgeRow = g.edge!=null
-    ? `<div class="gc-edge"><span>Edge vs line</span><b>${g.ats_pick} · ${Math.abs(g.edge).toFixed(1)} pts</b></div>` : '';
+  const edgeRow = g.cover_prob!=null
+    ? `<div class="gc-edge"><span>ATS pick · cover prob</span><b>${g.ats_pick} · ${Math.round(g.cover_prob*100)}%</b></div>` : '';
+  const totalRow = g.total_prob!=null
+    ? `<div class="gc-row"><span>Total pick</span><b>${g.total_pick} ${g.vegas_total??''} · ${Math.round(g.total_prob*100)}%</b></div>` : '';
   return `<div class="gcard${top?' top':''}" onclick="go('#/matchup?home=${g.home}&away=${g.away}')">
     ${top?`<div class="gc-badge">🔥 Top Pick #${top}</div>`:''}
     ${g.neutral?`<div class="gc-badge" style="left:auto;right:12px;background:#0e7490">🌍 Neutral</div>`:''}
@@ -586,6 +588,7 @@ function schCard(g){
     <div class="gc-row"><span>Vegas line</span><b>${veg}</b></div>
     ${edgeRow}
     <div class="gc-row"><span>Total · model / Vegas</span><b>${pred?g.pred_total.toFixed(1):'—'} / ${g.vegas_total??'—'}</b></div>
+    ${totalRow}
     ${injPts>0?`<div class="gc-row"><span>⚕ injury adjust</span><b>−${injPts.toFixed(1)} pts</b></div>`:''}
     ${fin}
     ${g.context_notes&&g.context_notes.length?`<div class="gc-ctx">${g.neutral?'🌍':'✈️'} ${esc(g.context_notes.join(' · '))}</div>`:''}
@@ -619,12 +622,23 @@ async function viewSchedule(params){
   const strip = picks.length ? `<div class="card" style="padding:14px">
       <h2 style="margin:0 0 10px">🔥 Top 5 picks <span>biggest model disagreement with the Vegas line</span></h2>
       <div class="toppicks">${picks.map(g=>`<div class="tp" onclick="go('#/matchup?home=${g.home}&away=${g.away}')">
-        <span class="rk">${g.pick_rank}</span><b>${g.ats_pick}</b>&nbsp;${g.away}@${g.home} · ${Math.abs(g.edge).toFixed(1)} pt edge</div>`).join('')}</div>
-      <div style="color:var(--muted);font-size:11px;margin-top:8px">These are where the model most disagrees with the market — the biggest edges, not guaranteed winners (the model doesn't reliably beat NFL point spreads out-of-sample).</div>
+        <span class="rk">${g.pick_rank}</span><b>${g.ats_pick}</b>&nbsp;${g.away}@${g.home} · ${Math.round(g.cover_prob*100)}% cover · ${Math.abs(g.edge).toFixed(1)} pt edge</div>`).join('')}</div>
+      <div style="color:var(--muted);font-size:11px;margin-top:8px">Ranked by key-number-aware cover probability. These are the model's strongest disagreements with the market — not guaranteed winners (it doesn't reliably beat NFL spreads out-of-sample; see the backtest).</div>
     </div>` : '';
-  body.innerHTML = strip
-    + `<div class="note">Click any game for the full breakdown (schemes, form, injuries, box score). ${picks.length?'Top-5 edges are highlighted below.':''}</div>`
+  body.innerHTML = strip + `<div id="schAcc"></div>`
+    + `<div class="note">Click any game for the full breakdown (schemes, form, injuries, box score). ${picks.length?'Top-5 plays (by cover probability) highlighted below.':''}</div>`
     + `<div class="sched">${d.games.map(schCard).join('')}</div>`;
+  // honest accuracy vs the market (background; cached server-side)
+  try{
+    const b = await j('/api/backtest?season='+d.season);
+    if(b && !b.error){
+      const beat = b.model_margin_mae < b.market_margin_mae;
+      document.getElementById('schAcc').innerHTML = `<div class="note ${beat?'':'warn'}">
+        <b>Model check (${b.season}, in-sample):</b> margin MAE ${b.model_margin_mae} vs closing line ${b.market_margin_mae}
+        · straight-up ${Math.round(b.winner_acc*100)}% · ATS ${Math.round(b.ats_in_sample*100)}%.
+        <span style="opacity:.85">${esc(b.note)}</span></div>`;
+    }
+  }catch(e){}
 }
 
 // ── VIEW: refresh ───────────────────────────────────────────────────

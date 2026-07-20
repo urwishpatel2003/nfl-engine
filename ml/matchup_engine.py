@@ -102,10 +102,16 @@ def team_units() -> pd.DataFrame:
     pa, ru = plays[plays.play_type == "pass"], plays[plays.play_type == "run"]
 
     u = pd.DataFrame(index=sorted(set(plays.posteam.dropna())))
-    u["off_pass"] = pa.groupby("posteam")["epa"].mean()
-    u["off_rush"] = ru.groupby("posteam")["epa"].mean()
-    u["def_pass"] = pa.groupby("defteam")["epa"].mean()          # allowed (lower=better)
-    u["def_rush"] = ru.groupby("defteam")["epa"].mean()
+    # opponent-adjusted unit EPA (schedule-adjusted); falls back to raw means if unavailable
+    from ml.adjust import adjusted_unit_epa
+    adj = adjusted_unit_epa(2025)
+    _raw = {"off_pass": pa.groupby("posteam")["epa"].mean(),
+            "off_rush": ru.groupby("posteam")["epa"].mean(),
+            "def_pass": pa.groupby("defteam")["epa"].mean(),      # allowed (lower=better)
+            "def_rush": ru.groupby("defteam")["epa"].mean()}
+    for col, rawvals in _raw.items():
+        u[col] = (pd.Series({t: adj.get(t, {}).get(col) for t in u.index}).fillna(rawvals)
+                  if adj else rawvals)
     gpg = plays.groupby("posteam")["game_id"].nunique()
     u["pace"] = plays.groupby("posteam").size() / gpg
     u["pass_rate"] = pa.groupby("posteam").size() / plays.groupby("posteam").size()

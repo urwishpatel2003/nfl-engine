@@ -97,6 +97,22 @@ def game_context(home: str, away: str, row) -> dict:
         if home == "DEN":                                              # thin air tires the visitor
             ad -= 0.4; notes.append("Altitude (Denver)")
 
+    # rest / scheduling spot (bye week vs short week) — shifts the margin, not the total
+    hr, ar = row.get("home_rest"), row.get("away_rest")
+    if pd.notna(hr) and pd.notna(ar):
+        hr, ar = float(hr), float(ar)
+        diff = hr - ar
+        if abs(diff) >= 3:
+            radj = max(-1.2, min(1.2, diff * 0.12))
+            hd += radj / 2; ad -= radj / 2
+            edge_team = home if diff > 0 else away
+            tag = []
+            if min(hr, ar) <= 4:
+                tag.append("short week")
+            if max(hr, ar) >= 11:
+                tag.append("off bye")
+            notes.append(f"Rest: {edge_team} +{abs(int(round(diff)))}d" + (f" ({', '.join(tag)})" if tag else ""))
+
     # weather (suppresses both teams' scoring)
     temp, wind = row.get("temp"), row.get("wind")
     is_dome = roof in ("dome", "closed") or (not neutral and home in coords and coords[home][2])
