@@ -26,10 +26,18 @@ Fantasy scoring is noisy; treat the board as a lean, not gospel. The value/under
 strongest where opportunity and production disagree.
 """
 
+import re
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+
+def _namekey(s) -> str:
+    """Normalize a name for cross-source matching: lowercase, letters only, drop the
+    generational suffix (Jr./Sr./II/III/IV) that one feed carries and another drops."""
+    k = re.sub(r"[^a-z]", "", str(s).lower())
+    return re.sub(r"(iii|iv|ii|jr|sr)$", "", k)
 
 RAW = Path(__file__).parent.parent / "data" / "raw"
 
@@ -267,9 +275,30 @@ def with_adp(board: pd.DataFrame) -> pd.DataFrame:
     adp = pd.read_csv(path)
     adp.columns = [c.strip().lower() for c in adp.columns]
     name_col = "player" if "player" in adp.columns else adp.columns[0]
-    adp["_k"] = adp[name_col].astype(str).str.lower().str.replace(r"[^a-z]", "", regex=True)
-    board["_k"] = board.get("player", board.get("player_name")).astype(str).str.lower().str.replace(r"[^a-z]", "", regex=True)
+    adp["_k"] = adp[name_col].map(_namekey)
+    adp = adp.drop_duplicates("_k")
+    board["_k"] = board.get("player", board.get("player_name")).map(_namekey)
     board = board.merge(adp[["_k", "adp"]], on="_k", how="left").drop(columns="_k")
     if "overall_rank" in board.columns:
-        board["value"] = (board["adp"] - board["overall_rank"]).round(1)   # +ve = falls past our rank
+        # Put both on the SAME scale: re-rank our board over just the players who have an ADP,
+        # then value = ADP − our-rank-in-that-pool. (Comparing our 900-deep board straight to a
+        # 400-deep ADP made the tail explode.) +value = we rank him higher than the market = target.
+        have = board["adp"].notna()
+        board["our_rank"] = np.nan
+        board.loc[have, "our_rank"] = board.loc[have, "overall_rank"].rank(method="min")
+        board["value"] = (board["adp"] - board["our_rank"]).round(1)
     return board
+
+
+def value_board(max_adp: int = 216, top: int = 30) -> pd.DataFrame:
+    """Market-vs-us within the draftable pool (default ADP ≤ 216 = 18 rounds × 12 teams).
+    Restricted to players with real PRODUCTION history — our projection for rookies/depth is a
+    crude prior, so calling the market wrong on them is noise, not signal. Sorted by value:
+    positive = we're higher than ADP (target), negative = market reaches vs our board (fade)."""
+    b = with_adp(project())
+    d = b[b["adp"].notna() & (b["adp"] <= max_adp) & (b["source"] == "production")].copy()
+    d = d.sort_values("value", ascending=False)
+    cols = ["player", "position", "team", "proj_ppg", "our_rank", "adp", "value", "pos_rank"]
+    targets = d.head(top)[cols]
+    fades = d.tail(top).sort_values("value")[cols]
+    return targets, fades

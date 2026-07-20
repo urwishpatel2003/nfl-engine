@@ -823,13 +823,17 @@ def api_fantasy():
     """Best-ball fantasy: our 2026 VOR-ranked draft board (value-over-replacement so it flows like
     a real draft), plus opportunity-vs-production 'undervalued/breakout' candidates. If an ADP CSV
     is dropped at data/raw/adp_underdog.csv, the board also shows ADP + value vs our rank."""
-    from ml.fantasy import project, breakouts, with_adp
+    from ml.fantasy import project, breakouts, with_adp, value_board
     view = request.args.get('view', 'board')
     pos = request.args.get('pos')
     if view == 'breakouts':
         d = breakouts(2025, top=int(request.args.get('top', 25)))
         return jsonify(_native({"view": "breakouts", "season": 2025,
                                 "players": d.to_dict('records')}))
+    if view == 'values':
+        tg, fd = value_board(top=int(request.args.get('top', 30)))
+        return jsonify(_native({"view": "values", "has_adp": True,
+                                "targets": tg.to_dict('records'), "fades": fd.to_dict('records')}))
     b = with_adp(project())
     if pos and pos.upper() in ('QB', 'RB', 'WR', 'TE'):
         b = b[b['position'] == pos.upper()]
