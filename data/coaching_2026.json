@@ -5,8 +5,16 @@
   "hc_new": false,
   "oc": "Nathaniel Hackett",
   "dc": "Nick Rallis",
-  "off_tags": [],
-  "def_tags": [],
+  "off_tags": [
+   "zone run",
+   "play-action",
+   "RPO"
+  ],
+  "def_tags": [
+   "multiple",
+   "3-4",
+   "aggressive"
+  ],
   "oc_prev": null,
   "dc_prev": null,
   "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
@@ -22,8 +30,16 @@
   "hc_new": false,
   "oc": "Tommy Rees",
   "dc": "Jeff Ulbrich",
-  "off_tags": [],
-  "def_tags": [],
+  "off_tags": [
+   "play-action",
+   "pro-style",
+   "run-heavy"
+  ],
+  "def_tags": [
+   "4-3",
+   "cover-3",
+   "zone"
+  ],
   "oc_prev": null,
   "dc_prev": null,
   "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
@@ -39,10 +55,15 @@
   "hc_new": true,
   "oc": "Declan Doyle",
   "dc": "Anthony Weaver",
-  "off_tags": [],
+  "off_tags": [
+   "wide zone",
+   "play-action",
+   "motion"
+  ],
   "def_tags": [
    "disguise",
-   "multiple"
+   "multiple",
+   "aggressive"
   ],
   "oc_prev": null,
   "dc_prev": null,
@@ -59,8 +80,16 @@
   "hc_new": false,
   "oc": "Pete Carmichael Jr.",
   "dc": "Jim Leonhard",
-  "off_tags": [],
-  "def_tags": [],
+  "off_tags": [
+   "spread",
+   "vertical",
+   "no-huddle"
+  ],
+  "def_tags": [
+   "multiple",
+   "zone",
+   "disguise"
+  ],
   "oc_prev": null,
   "dc_prev": null,
   "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
@@ -76,8 +105,16 @@
   "hc_new": false,
   "oc": "Brad Idzik",
   "dc": "Ejiro Evero",
-  "off_tags": [],
-  "def_tags": [],
+  "off_tags": [
+   "play-action",
+   "run-heavy",
+   "Shanahan-adjacent"
+  ],
+  "def_tags": [
+   "3-4",
+   "two-high",
+   "Fangio-adjacent"
+  ],
   "oc_prev": null,
   "dc_prev": null,
   "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
@@ -97,11 +134,12 @@
    "wide zone",
    "play-action",
    "motion",
-   "Ben Johnson"
+   "creative"
   ],
   "def_tags": [
-   "multiple",
-   "4-3"
+   "4-3",
+   "aggressive",
+   "blitz"
   ],
   "oc_prev": null,
   "dc_prev": null,
@@ -119,9 +157,15 @@
   "oc": "Dan Pitcher",
   "dc": "Al Golden",
   "off_tags": [
-   "spread pass"
+   "spread pass",
+   "timing",
+   "McVay tree"
   ],
-  "def_tags": [],
+  "def_tags": [
+   "multiple",
+   "disguise",
+   "zone"
+  ],
   "oc_prev": null,
   "dc_prev": null,
   "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
@@ -137,8 +181,13 @@
   "hc_new": true,
   "oc": "Travis Switzer",
   "dc": "Mike Rutenberg",
-  "off_tags": [],
-  "def_tags": [],
+  "off_tags": [
+   "run-heavy",
+   "gap scheme"
+  ],
+  "def_tags": [
+   "multiple"
+  ],
   "oc_prev": null,
   "dc_prev": null,
   "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
@@ -154,8 +203,14 @@
   "hc_new": false,
   "oc": "Klayton Adams",
   "dc": "Christian Parker",
-  "off_tags": [],
-  "def_tags": [],
+  "off_tags": [
+   "gap run",
+   "play-action"
+  ],
+  "def_tags": [
+   "multiple",
+   "zone"
+  ],
   "oc_prev": null,
   "dc_prev": null,
   "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
@@ -177,7 +232,9 @@
    "play-action"
   ],
   "def_tags": [
-   "aggressive blitz"
+   "aggressive blitz",
+   "man",
+   "3-4"
   ],
   "oc_prev": null,
   "dc_prev": null,
@@ -194,8 +251,16 @@
   "hc_new": false,
   "oc": "Drew Petzing",
   "dc": "Kelvin Sheppard",
-  "off_tags": [],
-  "def_tags": [],
+  "off_tags": [
+   "spread",
+   "RPO",
+   "zone run"
+  ],
+  "def_tags": [
+   "aggressive",
+   "multiple",
+   "blitz"
+  ],
   "oc_prev": null,
   "dc_prev": null,
   "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
@@ -216,7 +281,9 @@
    "play-action",
    "LaFleur"
   ],
-  "def_tags": [],
+  "def_tags": [
+   "multiple"
+  ],
   "oc_prev": null,
   "dc_prev": null,
   "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
@@ -233,10 +300,17 @@
   "oc": "Nick Caley",
   "dc": "Matt Burke",
   "off_tags": [
-   "spread",
-   "play-action"
+   "wide zone",
+   "play-action",
+   "motion",
+   "Shanahan tree"
   ],
-  "def_tags": [],
+  "def_tags": [
+   "4-3",
+   "cover",
+   "wide-9",
+   "Shanahan tree"
+  ],
   "oc_prev": null,
   "dc_prev": null,
   "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
@@ -252,10 +326,15 @@
   "hc_new": false,
   "oc": "Jim Bob Cooter",
   "dc": "Lou Anarumo",
-  "off_tags": [],
+  "off_tags": [
+   "spread",
+   "RPO",
+   "tempo"
+  ],
   "def_tags": [
    "multiple",
-   "disguise"
+   "disguise",
+   "zone"
   ],
   "oc_prev": null,
   "dc_prev": null,
@@ -272,8 +351,15 @@
   "hc_new": false,
   "oc": "Grant Udinski",
   "dc": "Anthony Campanile",
-  "off_tags": [],
-  "def_tags": [],
+  "off_tags": [
+   "wide zone",
+   "play-action",
+   "McVay tree"
+  ],
+  "def_tags": [
+   "multiple",
+   "aggressive"
+  ],
   "oc_prev": null,
   "dc_prev": null,
   "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
@@ -319,7 +405,11 @@
    "motion",
    "McVay tree"
   ],
-  "def_tags": [],
+  "def_tags": [
+   "multiple",
+   "two-high",
+   "sim pressure"
+  ],
   "oc_prev": null,
   "dc_prev": null,
   "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
@@ -341,7 +431,9 @@
    "play-action",
    "Shanahan tree"
   ],
-  "def_tags": [],
+  "def_tags": [
+   "multiple"
+  ],
   "oc_prev": null,
   "dc_prev": null,
   "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
@@ -357,8 +449,15 @@
   "hc_new": true,
   "oc": "Andrew Janocko",
   "dc": "Rob Leonard",
-  "off_tags": [],
-  "def_tags": [],
+  "off_tags": [
+   "wide zone",
+   "play-action",
+   "bootleg"
+  ],
+  "def_tags": [
+   "4-3",
+   "cover-3"
+  ],
   "oc_prev": null,
   "dc_prev": null,
   "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
@@ -374,8 +473,16 @@
   "hc_new": true,
   "oc": "Bobby Slowik",
   "dc": "Sean Duggan",
-  "off_tags": [],
-  "def_tags": [],
+  "off_tags": [
+   "wide zone",
+   "play-action",
+   "motion",
+   "Shanahan tree"
+  ],
+  "def_tags": [
+   "two-high",
+   "zone"
+  ],
   "oc_prev": null,
   "dc_prev": null,
   "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
@@ -417,8 +524,16 @@
   "hc_new": false,
   "oc": "Josh McDaniels",
   "dc": "Zak Kuhr",
-  "off_tags": [],
-  "def_tags": [],
+  "off_tags": [
+   "Erhardt-Perkins",
+   "spread",
+   "play-action",
+   "motion"
+  ],
+  "def_tags": [
+   "multiple",
+   "2-gap"
+  ],
   "oc_prev": null,
   "dc_prev": null,
   "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
@@ -435,8 +550,9 @@
   "oc": "Doug Nussmeier",
   "dc": "Brandon Staley",
   "off_tags": [
-   "play-action",
-   "wide zone"
+   "vertical",
+   "Air Coryell",
+   "spread"
   ],
   "def_tags": [
    "two-high",
@@ -460,9 +576,14 @@
   "off_tags": [
    "West Coast",
    "spread",
-   "Nagy"
+   "motion",
+   "Reid tree"
   ],
-  "def_tags": [],
+  "def_tags": [
+   "aggressive",
+   "man",
+   "disguise"
+  ],
   "oc_prev": null,
   "dc_prev": null,
   "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
@@ -478,8 +599,16 @@
   "hc_new": false,
   "oc": "Frank Reich",
   "dc": "Brian Duker",
-  "off_tags": [],
-  "def_tags": [],
+  "off_tags": [
+   "play-action",
+   "RPO",
+   "vertical"
+  ],
+  "def_tags": [
+   "4-3",
+   "cover-3",
+   "zone"
+  ],
   "oc_prev": null,
   "dc_prev": null,
   "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
@@ -495,7 +624,11 @@
   "hc_new": false,
   "oc": "Sean Mannion",
   "dc": "Vic Fangio",
-  "off_tags": [],
+  "off_tags": [
+   "RPO",
+   "tempo",
+   "run-heavy"
+  ],
   "def_tags": [
    "two-high",
    "quarters",
@@ -517,7 +650,10 @@
   "hc_new": true,
   "oc": "Brian Angelichio",
   "dc": "Patrick Graham",
-  "off_tags": [],
+  "off_tags": [
+   "West Coast",
+   "play-action"
+  ],
   "def_tags": [
    "multiple",
    "disguise"
@@ -537,8 +673,15 @@
   "hc_new": false,
   "oc": "Brian Fleury",
   "dc": "Aden Durde",
-  "off_tags": [],
-  "def_tags": [],
+  "off_tags": [
+   "wide zone",
+   "play-action"
+  ],
+  "def_tags": [
+   "multiple",
+   "disguise",
+   "Ravens tree"
+  ],
   "oc_prev": null,
   "dc_prev": null,
   "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
@@ -560,7 +703,10 @@
    "motion",
    "Shanahan tree"
   ],
-  "def_tags": [],
+  "def_tags": [
+   "4-3",
+   "cover-3"
+  ],
   "oc_prev": null,
   "dc_prev": null,
   "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
@@ -576,7 +722,12 @@
   "hc_new": false,
   "oc": "Zac Robinson",
   "dc": "Todd Bowles",
-  "off_tags": [],
+  "off_tags": [
+   "wide zone",
+   "play-action",
+   "motion",
+   "McVay tree"
+  ],
   "def_tags": [
    "aggressive blitz",
    "man"
@@ -599,12 +750,12 @@
   "off_tags": [
    "spread",
    "RPO",
-   "Daboll"
+   "no-huddle"
   ],
   "def_tags": [
    "4-3",
-   "zone",
-   "Gus Bradley"
+   "cover-3",
+   "zone"
   ],
   "oc_prev": null,
   "dc_prev": null,
@@ -621,8 +772,15 @@
   "hc_new": false,
   "oc": "David Blough",
   "dc": "Daronte Jones",
-  "off_tags": [],
-  "def_tags": [],
+  "off_tags": [
+   "spread",
+   "RPO"
+  ],
+  "def_tags": [
+   "multiple",
+   "zone",
+   "Quinn tree"
+  ],
   "oc_prev": null,
   "dc_prev": null,
   "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
