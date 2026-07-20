@@ -3,145 +3,137 @@
   "hc": "Jonathan Gannon",
   "hc_2025": "Jonathan Gannon",
   "hc_new": false,
-  "oc": null,
-  "dc": null,
+  "oc": "Nathaniel Hackett",
+  "dc": "Nick Rallis",
   "off_tags": [],
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "ATL": {
   "hc": "Raheem Morris",
   "hc_2025": "Raheem Morris",
   "hc_new": false,
-  "oc": null,
-  "dc": null,
+  "oc": "Tommy Rees",
+  "dc": "Jeff Ulbrich",
   "off_tags": [],
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "BAL": {
   "hc": "Jesse Minter",
   "hc_2025": "John Harbaugh",
   "hc_new": true,
-  "oc": null,
-  "dc": null,
-  "off_tags": [
-   "run-heavy",
-   "RPO",
-   "option"
-  ],
+  "oc": "Declan Doyle",
+  "dc": "Anthony Weaver",
+  "off_tags": [],
   "def_tags": [
    "disguise",
-   "blitz"
+   "multiple"
   ],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "BUF": {
   "hc": "Sean McDermott",
   "hc_2025": "Sean McDermott",
   "hc_new": false,
-  "oc": null,
-  "dc": "Sean McDermott",
-  "off_tags": [
-   "spread",
-   "no-huddle"
-  ],
-  "def_tags": [
-   "cover-2 zone",
-   "Tampa-2"
-  ],
+  "oc": "Pete Carmichael Jr.",
+  "dc": "Jim Leonhard",
+  "off_tags": [],
+  "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "CAR": {
   "hc": "Dave Canales",
   "hc_2025": "Dave Canales",
   "hc_new": false,
-  "oc": "Dave Canales",
-  "dc": null,
-  "off_tags": [
-   "play-action",
-   "Shanahan-adjacent"
-  ],
-  "def_tags": [
-   "zone"
-  ],
+  "oc": "Brad Idzik",
+  "dc": "Ejiro Evero",
+  "off_tags": [],
+  "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "CHI": {
   "hc": "Ben Johnson",
   "hc_2025": "Ben Johnson",
   "hc_new": false,
-  "oc": "Ben Johnson",
-  "dc": null,
+  "oc": "Press Taylor",
+  "dc": "Dennis Allen",
   "off_tags": [
    "wide zone",
    "play-action",
    "motion",
-   "creative"
+   "Ben Johnson"
   ],
   "def_tags": [
-   "multiple"
+   "multiple",
+   "4-3"
   ],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "CIN": {
   "hc": "Zac Taylor",
   "hc_2025": "Zac Taylor",
   "hc_new": false,
-  "oc": "Zac Taylor",
-  "dc": null,
+  "oc": "Dan Pitcher",
+  "dc": "Al Golden",
   "off_tags": [
-   "spread pass",
-   "McVay tree"
+   "spread pass"
   ],
-  "def_tags": [
-   "zone"
-  ],
+  "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "CLE": {
   "hc": "Todd Monken",
   "hc_2025": "Kevin Stefanski",
   "hc_new": true,
-  "oc": null,
-  "dc": null,
+  "oc": "Travis Switzer",
+  "dc": "Mike Rutenberg",
   "off_tags": [],
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "DAL": {
   "hc": "Brian Schottenheimer",
   "hc_2025": "Brian Schottenheimer",
   "hc_new": false,
-  "oc": null,
-  "dc": null,
+  "oc": "Klayton Adams",
+  "dc": "Christian Parker",
   "off_tags": [],
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "DEN": {
   "hc": "Sean Payton",
   "hc_2025": "Sean Payton",
   "hc_new": false,
-  "oc": "Sean Payton",
+  "oc": "Davis Webb",
   "dc": "Vance Joseph",
   "off_tags": [
    "timing pass",
@@ -153,101 +145,94 @@
   ],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "DET": {
   "hc": "Dan Campbell",
   "hc_2025": "Dan Campbell",
   "hc_new": false,
-  "oc": null,
-  "dc": null,
-  "off_tags": [
-   "wide zone",
-   "play-action"
-  ],
-  "def_tags": [
-   "aggressive"
-  ],
+  "oc": "Drew Petzing",
+  "dc": "Kelvin Sheppard",
+  "off_tags": [],
+  "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "GB": {
   "hc": "Matt LaFleur",
   "hc_2025": "Matt LaFleur",
   "hc_new": false,
-  "oc": "Matt LaFleur",
+  "oc": "Adam Stenavich",
   "dc": null,
   "off_tags": [
    "wide zone",
    "play-action",
-   "motion"
+   "LaFleur"
   ],
-  "def_tags": [
-   "multiple"
-  ],
+  "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
   "verify": true
  },
  "HOU": {
   "hc": "DeMeco Ryans",
   "hc_2025": "DeMeco Ryans",
   "hc_new": false,
-  "oc": null,
-  "dc": null,
+  "oc": "Nick Caley",
+  "dc": "Matt Burke",
   "off_tags": [
-   "spread"
+   "spread",
+   "play-action"
   ],
-  "def_tags": [
-   "4-3",
-   "Shanahan tree"
-  ],
+  "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "IND": {
   "hc": "Shane Steichen",
   "hc_2025": "Shane Steichen",
   "hc_new": false,
-  "oc": null,
-  "dc": null,
+  "oc": "Jim Bob Cooter",
+  "dc": "Lou Anarumo",
   "off_tags": [],
-  "def_tags": [],
+  "def_tags": [
+   "multiple",
+   "disguise"
+  ],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "JAX": {
   "hc": "Liam Coen",
   "hc_2025": "Liam Coen",
   "hc_new": false,
-  "oc": "Liam Coen",
-  "dc": null,
-  "off_tags": [
-   "wide zone",
-   "play-action",
-   "McVay tree"
-  ],
-  "def_tags": [
-   "multiple"
-  ],
+  "oc": "Grant Udinski",
+  "dc": "Anthony Campanile",
+  "off_tags": [],
+  "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "KC": {
   "hc": "Andy Reid",
   "hc_2025": "Andy Reid",
   "hc_new": false,
-  "oc": "Andy Reid",
+  "oc": "Eric Bieniemy",
   "dc": "Steve Spagnuolo",
   "off_tags": [
    "West Coast",
    "spread",
-   "motion",
-   "creative"
+   "motion"
   ],
   "def_tags": [
    "aggressive blitz",
@@ -255,74 +240,76 @@
   ],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "LA": {
   "hc": "Sean McVay",
   "hc_2025": "Sean McVay",
   "hc_new": false,
-  "oc": "Sean McVay",
-  "dc": null,
+  "oc": "Nathan Scheelhaase",
+  "dc": "Chris Shula",
   "off_tags": [
    "wide zone",
    "play-action",
    "motion",
-   "11 personnel"
+   "McVay tree"
   ],
-  "def_tags": [
-   "multiple"
-  ],
+  "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "LAC": {
   "hc": "Jim Harbaugh",
   "hc_2025": "Jim Harbaugh",
   "hc_new": false,
-  "oc": "Greg Roman",
-  "dc": "Jesse Minter",
+  "oc": "Mike McDaniel",
+  "dc": "Chris O'Leary",
   "off_tags": [
-   "run-heavy",
-   "gap",
-   "play-action"
+   "wide zone",
+   "motion",
+   "play-action",
+   "Shanahan tree"
   ],
-  "def_tags": [
-   "multiple"
-  ],
+  "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "LV": {
   "hc": "Klint Kubliak",
   "hc_2025": "Pete Carroll",
   "hc_new": true,
-  "oc": null,
-  "dc": null,
+  "oc": "Andrew Janocko",
+  "dc": "Rob Leonard",
   "off_tags": [],
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "MIA": {
   "hc": "Jeff Hafley",
   "hc_2025": "Mike McDaniel",
   "hc_new": true,
-  "oc": null,
-  "dc": null,
+  "oc": "Bobby Slowik",
+  "dc": "Sean Duggan",
   "off_tags": [],
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "MIN": {
   "hc": "Kevin O'Connell",
   "hc_2025": "Kevin O'Connell",
   "hc_new": false,
-  "oc": "Kevin O'Connell",
+  "oc": "Wes Phillips",
   "dc": "Brian Flores",
   "off_tags": [
    "play-action",
@@ -331,175 +318,190 @@
   ],
   "def_tags": [
    "exotic blitz",
-   "disguise"
+   "man",
+   "disguise",
+   "Flores"
   ],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "NE": {
   "hc": "Mike Vrabel",
   "hc_2025": "Mike Vrabel",
   "hc_new": false,
-  "oc": null,
-  "dc": null,
+  "oc": "Josh McDaniels",
+  "dc": "Zak Kuhr",
   "off_tags": [],
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "NO": {
   "hc": "Kellen Moore",
   "hc_2025": "Kellen Moore",
   "hc_new": false,
-  "oc": "Kellen Moore",
-  "dc": null,
+  "oc": "Doug Nussmeier",
+  "dc": "Brandon Staley",
   "off_tags": [
-   "vertical",
-   "Air Coryell",
-   "spread"
+   "play-action",
+   "wide zone"
   ],
   "def_tags": [
-   "man",
-   "blitz"
+   "two-high",
+   "light box"
   ],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "NYG": {
   "hc": "John Harbaugh",
   "hc_2025": "Brian Daboll",
   "hc_new": true,
-  "oc": null,
-  "dc": null,
-  "off_tags": [],
+  "oc": "Matt Nagy",
+  "dc": "Dennard Wilson",
+  "off_tags": [
+   "West Coast",
+   "spread",
+   "Nagy"
+  ],
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "NYJ": {
   "hc": "Aaron Glenn",
   "hc_2025": "Aaron Glenn",
   "hc_new": false,
-  "oc": null,
-  "dc": null,
+  "oc": "Frank Reich",
+  "dc": "Brian Duker",
   "off_tags": [],
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "PHI": {
   "hc": "Nick Sirianni",
   "hc_2025": "Nick Sirianni",
   "hc_new": false,
-  "oc": null,
-  "dc": null,
-  "off_tags": [
-   "RPO",
-   "tempo",
-   "run-heavy"
-  ],
+  "oc": "Sean Mannion",
+  "dc": "Vic Fangio",
+  "off_tags": [],
   "def_tags": [
-   "multiple"
+   "two-high",
+   "quarters",
+   "zone",
+   "Fangio"
   ],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "PIT": {
   "hc": "Mike McCarthy",
   "hc_2025": "Mike Tomlin",
   "hc_new": true,
-  "oc": null,
-  "dc": null,
+  "oc": "Brian Angelichio",
+  "dc": "Patrick Graham",
   "off_tags": [],
-  "def_tags": [],
+  "def_tags": [
+   "multiple",
+   "disguise"
+  ],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "SEA": {
   "hc": "Mike Macdonald",
   "hc_2025": "Mike Macdonald",
   "hc_new": false,
-  "oc": null,
-  "dc": "Mike Macdonald",
-  "off_tags": [
-   "spread"
-  ],
-  "def_tags": [
-   "disguise",
-   "multiple",
-   "Ravens tree"
-  ],
+  "oc": "Brian Fleury",
+  "dc": "Aden Durde",
+  "off_tags": [],
+  "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "SF": {
   "hc": "Kyle Shanahan",
   "hc_2025": "Kyle Shanahan",
   "hc_new": false,
-  "oc": "Kyle Shanahan",
+  "oc": "Klay Kubiak",
   "dc": null,
   "off_tags": [
    "wide zone",
    "play-action",
    "motion",
-   "under center"
-  ],
-  "def_tags": [
-   "4-3 zone",
    "Shanahan tree"
   ],
+  "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
   "verify": true
  },
  "TB": {
   "hc": "Todd Bowles",
   "hc_2025": "Todd Bowles",
   "hc_new": false,
-  "oc": null,
+  "oc": "Zac Robinson",
   "dc": "Todd Bowles",
-  "off_tags": [
-   "spread",
-   "vertical"
-  ],
+  "off_tags": [],
   "def_tags": [
    "aggressive blitz",
    "man"
   ],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "TEN": {
   "hc": "Robert Saleh",
   "hc_2025": "Brian Callahan",
   "hc_new": true,
-  "oc": null,
-  "dc": null,
-  "off_tags": [],
-  "def_tags": [],
+  "oc": "Brian Daboll",
+  "dc": "Gus Bradley",
+  "off_tags": [
+   "spread",
+   "RPO",
+   "Daboll"
+  ],
+  "def_tags": [
+   "4-3",
+   "zone",
+   "Gus Bradley"
+  ],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  },
  "WAS": {
   "hc": "Dan Quinn",
   "hc_2025": "Dan Quinn",
   "hc_new": false,
-  "oc": null,
-  "dc": null,
+  "oc": "David Blough",
+  "dc": "Daronte Jones",
   "off_tags": [],
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "verify": true
+  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
+  "verify": false
  }
 }
