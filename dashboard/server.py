@@ -593,23 +593,30 @@ def latest_injuries(team: str) -> dict:
 
 
 def _adjusted_prediction(home: str, away: str, neutral: bool = False, unavail=None) -> dict:
-    """project_game score, injury-adjusted: subtract each team's ruled-out-player points
-    penalty, then recompute margin / total / win prob so the SPREAD reflects availability."""
+    """project_game score with three second-order layers: (1) injury→unit routing so a hurt
+    unit loses harder to a strong opposing unit (interaction), (2) scheme/play-caller mismatch
+    nudges, (3) the flat QB/skill availability points penalty — then recompute margin/total/wp."""
     from ml.matchup_engine import project_game
     from ml.projections import injury_impact, unavailable_ids
-    res = project_game(home, away, neutral)
-    if "error" in res:
-        return res
+    from ml.matchup_context import unit_injury_deltas, scheme_matchup
     if unavail is None:
         unavail = unavailable_ids()
+    unit_adj = {home: unit_injury_deltas(home), away: unit_injury_deltas(away)}
+    res = project_game(home, away, neutral, unit_adj=unit_adj)
+    if "error" in res:
+        return res
     imp = {home: injury_impact(home, unavail), away: injury_impact(away, unavail)}
-    res["pred_home_score"] = round(res["pred_home_score"] - imp[home]["pts"], 1)
-    res["pred_away_score"] = round(res["pred_away_score"] - imp[away]["pts"], 1)
+    sch = scheme_matchup(home, away)
+    res["pred_home_score"] = round(res["pred_home_score"] - imp[home]["pts"] + sch["home_delta"], 1)
+    res["pred_away_score"] = round(res["pred_away_score"] - imp[away]["pts"] + sch["away_delta"], 1)
     res["pred_margin"] = round(res["pred_home_score"] - res["pred_away_score"], 1)
     res["pred_total"] = round(res["pred_home_score"] + res["pred_away_score"], 1)
     _wp = float(1 / (1 + np.exp(-res["pred_margin"] / 13.5 * np.pi / np.sqrt(3))))
     res["home_win_prob"], res["away_win_prob"] = round(_wp, 3), round(1 - _wp, 3)
     res["injury_impact"] = imp
+    res["scheme_matchup"] = sch
+    res["unit_injuries"] = {t: {k: v for k, v in d.items() if abs(v) > 1e-9}
+                            for t, d in unit_adj.items()}
     return res
 
 
@@ -803,6 +810,11 @@ def clear_caches():
     try:
         import ml.backtest_spreads
         ml.backtest_spreads._BLEND_W = None           # recompute optimal blend after refresh
+    except Exception:
+        pass
+    try:
+        import ml.matchup_context
+        ml.matchup_context.clear()
     except Exception:
         pass
     for mod, attr in [("ml.matchup_engine", "_UNITS"), ("ml.squad", "_PCT_CACHE"),

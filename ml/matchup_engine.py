@@ -171,9 +171,11 @@ def team_units() -> pd.DataFrame:
 
 
 # ── unit-vs-unit points model ───────────────────────────────────────
-def project_game(home: str, away: str, neutral: bool = False) -> dict:
+def project_game(home: str, away: str, neutral: bool = False, unit_adj: dict = None) -> dict:
     """Expected points for each team from offense-vs-defense + ST + coaching + pace,
-    with the margin anchored to the roster-talent rating (consistent with the rankings)."""
+    with the margin anchored to the roster-talent rating (consistent with the rankings).
+    unit_adj = {team: {z_off_pass/z_off_rush/z_def_pass/z_def_rush: delta}} injects per-game
+    unit downgrades (e.g. injury-to-unit routing) so they interact through the matchup nudge."""
     u = team_units()
     if home not in u.index or away not in u.index:
         return {"error": "unknown team(s)"}
@@ -182,12 +184,17 @@ def project_game(home: str, away: str, neutral: bool = False) -> dict:
     hfa = 0.0 if neutral else 2.0
     lg_pace = float(u["pace"].mean())
 
+    def uz(team, col):                      # unit z-score with any per-game adjustment
+        base = float(u.loc[team, col])
+        return base + (unit_adj.get(team, {}).get(col, 0.0) if unit_adj else 0.0)
+
     def phase(off, deff, sign):
         # points-for/against blend (captures overall off vs def), then small unit nudges + ST + coaching
         base = 0.5 * u.loc[off, "pf"] + 0.5 * u.loc[deff, "pa"]
-        # specific pass/rush mismatch nudge: good offense vs bad (high-EPA-allowed) defense
-        nudge = 0.8 * ((u.loc[off, "z_off_pass"] + u.loc[deff, "z_def_pass"]) +
-                       0.6 * (u.loc[off, "z_off_rush"] + u.loc[deff, "z_def_rush"]))
+        # specific pass/rush mismatch nudge: good offense vs bad (high-EPA-allowed) defense.
+        # unit_adj lets an injured unit lose *harder* to a strong opposing unit (the interaction).
+        nudge = 0.8 * ((uz(off, "z_off_pass") + uz(deff, "z_def_pass")) +
+                       0.6 * (uz(off, "z_off_rush") + uz(deff, "z_def_rush")))
         pts = base + nudge + u.loc[off, "st"] + 0.4 * u.loc[off, "z_coaching"] + sign * hfa / 2
         return float(pts)
 

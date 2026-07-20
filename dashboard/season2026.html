@@ -487,6 +487,22 @@ function injPanel(tm, iv){
   return hdr+iv.players.map(p=>`<div class="inj"><span class="bn">${esc(p.name)} <span style="color:var(--muted)">${esc(p.position||'')}</span></span>
     <span><span class="st st-${esc(p.status)}">${esc(p.status)}</span> <span style="color:var(--muted);font-size:11px">${esc(p.injury)}</span></span></div>`).join('')+`</div>`;
 }
+function matchupEdges(r){
+  const sm=r.scheme_matchup, ui=r.unit_injuries||{};
+  const UNIT={z_off_pass:'pass offense',z_off_rush:'rush offense',z_def_pass:'pass defense',z_def_rush:'run defense'};
+  const scheme=[], unit=[];
+  for(const t of [r.away,r.home]){
+    const ns=(sm&&sm.notes&&sm.notes[t])||[];
+    if(ns.length) scheme.push(`<b>${t}</b> — ${ns.map(esc).join(' · ')}`);
+    const d=ui[t]||{}, ks=Object.keys(d);
+    if(ks.length) unit.push(`<b>${t}</b> injuries weaken: ${ks.map(k=>UNIT[k]||k).join(', ')}`);
+  }
+  if(!scheme.length && !unit.length) return '';
+  return `<div class="card"><h2>Scheme &amp; injury edges <span>play-caller matchups + injury-to-unit</span></h2>
+    ${scheme.length?`<div class="bxs">Scheme matchups (offensive scheme vs defensive scheme)</div>${scheme.map(p=>`<div style="font-size:12px;padding:3px 0">${p}</div>`).join('')}`:''}
+    ${unit.length?`<div class="bxs" style="margin-top:8px">Injury-weakened units (feeds the unit-vs-unit matchup)</div>${unit.map(p=>`<div style="font-size:12px;padding:3px 0">${p}</div>`).join('')}`:''}
+  </div>`;
+}
 function simPanel(r){
   const s=r.simulation; if(!s) return '';
   const km=s.key_margins||{};
@@ -557,6 +573,7 @@ async function viewMatchup(home, away, neutral){
     ${renderUnits(r)}
   </div>
   ${simPanel(r)}
+  ${matchupEdges(r)}
   <div class="card" style="margin-top:20px"><h2>Schemes</h2><div class="box">${schemePanel(r.away, r.schemes[r.away])}${schemePanel(r.home, r.schemes[r.home])}</div></div>
   <div class="card"><h2>Recent form <span>${r.form[r.home]&&r.form[r.home].season||''}</span></h2><div class="box">${formPanel(r.away, r.form[r.away])}${formPanel(r.home, r.form[r.home])}</div></div>
   <div class="card"><h2>Latest injuries <span>Out/Doubtful players are removed from the projection &amp; spread</span></h2>
