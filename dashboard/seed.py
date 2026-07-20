@@ -25,8 +25,14 @@ SEED = ROOT / "data_seed"
 
 # Files ml/refresh.py rewrites on the server — the volume copy is authoritative for these,
 # so we don't clobber a refresh with the (older) baked-in image copy.
+#
+# NOTE: team_styles.parquet is intentionally NOT here. It's a deterministic derived table
+# (pure function of PBP + engine/styles.py), so the committed build must be the baseline that
+# carries labeler/code fixes to the volume on every deploy — otherwise a one-time seed freezes
+# stale labels forever. A live refresh still rebuilds it at runtime; that output simply persists
+# until the next redeploy re-syncs the committed baseline.
 _REFRESH_NAMES = {"injuries.parquet", "schedules.parquet", "situational_stats.parquet",
-                  "team_styles.parquet", "last_refresh.json"}
+                  "last_refresh.json"}
 
 
 def _refresh_managed(name: str) -> bool:

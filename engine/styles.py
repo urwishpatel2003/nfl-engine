@@ -315,56 +315,60 @@ def build_team_styles(seasons: list = None, n_games: int = None) -> pd.DataFrame
     return styles
 
 
+def _season_z(df: pd.DataFrame, col: str) -> pd.Series:
+    """Within-season z-score of a column (0 where the column is missing or has no variance).
+    Labels must be RELATIVE to the league that season — absolute cutoffs collapse everyone into
+    one bucket because most teams cluster in the middle on any single metric."""
+    if col not in df.columns:
+        return pd.Series(0.0, index=df.index)
+    x = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+    return x.groupby(df["season"]).transform(lambda s: (s - s.mean()) / (s.std(ddof=0) or 1.0))
+
+
 def assign_offense_label(df: pd.DataFrame) -> pd.DataFrame:
-    """Rule-based offensive archetype labeling."""
-
-    def label(row):
-        pr  = row.get("pass_rate_overall", 0.5)
-        ay  = row.get("avg_air_yards", 7.0)
-        rps = row.get("pass_rate_run_sit", 0.3)
-        epp = row.get("off_epa_per_pass", 0)
-        epr = row.get("off_epa_per_rush", 0)
-        pace = row.get("pace", 65)
-
-        if pr >= 0.62 and ay >= 8.5:
-            return "Air Raid"
-        if pr >= 0.60 and ay < 7.5:
-            return "West Coast"
-        if pr <= 0.50 and epr > epp:
-            return "Run Heavy"
-        if rps <= 0.30 and pace >= 68:
-            return "RPO / Spread"
-        return "Balanced"
-
-    df["offense_label"] = df.apply(label, axis=1)
+    """Offensive archetype from where a team sits RELATIVE to the league that season. Each team
+    is scored on a few recognizable identities and gets the one it leans into most; teams that
+    are genuinely middle-of-the-pack on all of them stay 'Balanced'. (The old version used fixed
+    thresholds like pace>=68 / pass_rate>=0.62 that almost no team crosses, so ~27/32 collapsed
+    to 'Balanced'.)"""
+    zp   = _season_z(df, "pass_rate_overall")   # pass volume
+    za   = _season_z(df, "avg_air_yards")       # downfield depth
+    zpace = _season_z(df, "pace")               # tempo
+    znh  = _season_z(df, "no_huddle_rate")
+    zm   = _season_z(df, "motion_rate")
+    zsc  = _season_z(df, "screen_pass_rate")
+    rl   = (pd.to_numeric(df.get("off_epa_per_rush"), errors="coerce").fillna(0.0)
+            - pd.to_numeric(df.get("off_epa_per_pass"), errors="coerce").fillna(0.0))
+    zrl  = rl.groupby(df["season"]).transform(lambda s: (s - s.mean()) / (s.std(ddof=0) or 1.0))
+    aff = pd.DataFrame({
+        "Air Raid":     0.7 * zp + 0.9 * za,               # pass a lot, throw deep
+        "West Coast":   0.8 * zp - 0.7 * za + 0.3 * zsc,   # high-volume short passing + screens
+        "Run Heavy":   -0.9 * zp + 0.5 * zrl,              # run-leaning identity
+        "RPO / Spread": 0.9 * zpace + 0.6 * znh + 0.3 * zm,# up-tempo, no-huddle, motion
+    }, index=df.index)
+    best, peak = aff.idxmax(axis=1), aff.max(axis=1)
+    df["offense_label"] = best.where(peak >= 0.55, "Balanced")
     return df
 
 
 def assign_defense_label(df: pd.DataFrame) -> pd.DataFrame:
-    """Rule-based defensive archetype labeling using richer signals."""
-
-    def label(row):
-        sr    = row.get("sack_rate",          0.06)
-        prg   = row.get("pressure_rate_gen",  0.25)   # new: pressure gen rate
-        stuff = row.get("stuff_rate",         0.15)
-        epa_p = row.get("def_epa_per_pass",   0)
-        epa_r = row.get("def_epa_per_rush",   0)
-        stop3 = row.get("third_down_stop_rate", 0.6)
-        rz_td = row.get("rz_td_rate_allowed", 0.6)    # new: red zone TD rate allowed
-
-        if (sr or 0) >= 0.09 or (prg or 0) >= 0.35:
-            return "Aggressive Blitz"
-        if (epa_r or 0) >= 0.10 and (stuff or 0) >= 0.20:
-            return "Run Stopper"
-        if (stop3 or 0) >= 0.70 and (epa_p or 0) >= 0.08:
-            return "Cover 2 Zone"
-        if (rz_td or 1) <= 0.45:                       # new: elite red zone D
-            return "Red Zone Specialist"
-        if (epa_p or 0) >= 0.06:
-            return "Man Coverage"
-        return "Bend Dont Break"
-
-    df["defense_label"] = df.apply(label, axis=1)
+    """Defensive archetype from within-season z-scores of the signals that ACTUALLY vary in the
+    built data (sack rate, blitz volume, pass-EPA-allowed, rush-EPA-allowed, third-down stop).
+    The previous version keyed on pressure_rate_gen / stuff_rate / rz_td_rate_allowed — all of
+    which are zero or absent in team_styles — so every team fell through to 'Bend Don't Break'."""
+    zsk = _season_z(df, "sack_rate")
+    zbl = _season_z(df, "avg_blitzers")
+    zpd = -_season_z(df, "def_epa_per_pass")     # lower EPA allowed = better → higher z
+    zrd = -_season_z(df, "def_epa_per_rush")
+    z3  = _season_z(df, "third_down_stop_rate")
+    aff = pd.DataFrame({
+        "Aggressive Blitz": 0.7 * zsk + 0.6 * zbl,          # brings pressure, with volume
+        "Man Coverage":     0.9 * zpd - 0.3 * zbl,          # locks up the pass without blitzing
+        "Run Stopper":      0.9 * zrd,                      # wins the run front
+        "Cover 2 Zone":     0.7 * z3 + 0.3 * zpd - 0.3 * zbl,  # bend-zone: gets off on third down
+    }, index=df.index)
+    best, peak = aff.idxmax(axis=1), aff.max(axis=1)
+    df["defense_label"] = best.where(peak >= 0.50, "Bend Don't Break")
     return df
 
 
