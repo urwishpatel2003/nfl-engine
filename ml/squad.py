@@ -468,7 +468,7 @@ def team_depth_chart(team: str) -> list:
         players = []
         for r in sub.itertuples():
             rt, src = rate(grp, r.gsis_id, r.player_name, r.pos_rank)
-            players.append({"name": r.player_name, "slot": r.pos_abb,
+            players.append({"name": r.player_name, "slot": r.pos_abb, "gsis": r.gsis_id,
                             "rank": int(r.pos_rank) if pd.notna(r.pos_rank) else None,
                             "rating": rt, "source": src})
         groups.append({"pos": grp, "label": POS_LABEL.get(grp, grp), "players": players})

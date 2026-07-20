@@ -47,18 +47,61 @@ def _styles():
     return _STY
 
 
-# ── 1. injury → unit routing ────────────────────────────────────────
-# position (from the injury report) → which unit(s) it weakens, and how much per player.
+# ── 1. injury → unit routing (quality-weighted, starters only) ──────
+# position (from the injury report) → which unit(s) it weakens.
 _RUN_D = {"DT", "NT", "DL", "ILB", "MLB", "LB"}                 # interior run defenders
-_PASS_D = {"CB", "DB", "S", "FS", "SS", "NB", "OLB"}           # coverage / edge
-_EDGE = {"DE", "EDGE"}                                          # counts toward both fronts
+_PASS_D = {"CB", "DB", "S", "FS", "SS", "NB", "OLB"}           # coverage
+_EDGE = {"DE", "EDGE"}                                          # edge rushers: both fronts
 _OL = {"T", "G", "C", "OL", "OT", "OG", "LT", "RT", "LG", "RG", "T/G"}
-_PER = 0.18          # z downgrade per key player out
-_CAP = 0.6           # max downgrade to any one unit
+_WR = {"WR", "TE"}
+_RB = {"RB", "FB"}
+_BASE = 0.42        # z downgrade for losing an ELITE starter; scaled down by rating
+_CAP = 0.7          # max downgrade to any one unit
+
+_RATINGS = {}       # team -> ({gsis: rec}, {norm_name: rec})
+
+
+def _team_ratings(team):
+    """Per-player rating + depth rank from the depth-chart model, keyed by id and name."""
+    if team in _RATINGS:
+        return _RATINGS[team]
+    from ml.squad import team_depth_chart, _norm
+    byg, bynm = {}, {}
+    try:
+        for grp in team_depth_chart(team):
+            for p in grp["players"]:
+                rec = {"rating": p.get("rating"), "rank": p.get("rank"), "group": grp["pos"]}
+                if p.get("gsis"):
+                    byg[p["gsis"]] = rec
+                if p.get("name"):
+                    bynm[_norm(p["name"])] = rec
+    except Exception:
+        pass
+    _RATINGS[team] = (byg, bynm)
+    return _RATINGS[team]
+
+
+def _route(d, pos, mag):
+    """Apply a downgrade of size `mag` to the unit(s) a position affects (sign-correct:
+    defense +=allows more, offense -=less)."""
+    if pos in _OL:
+        d["z_off_pass"] -= mag; d["z_off_rush"] -= mag
+    elif pos in _WR:
+        d["z_off_pass"] -= mag
+    elif pos in _RB:
+        d["z_off_rush"] -= mag
+    elif pos in _EDGE:
+        d["z_def_pass"] += mag * 0.9; d["z_def_rush"] += mag * 0.5
+    elif pos in _RUN_D:
+        d["z_def_rush"] += mag
+    elif pos in _PASS_D:
+        d["z_def_pass"] += mag
 
 
 def unit_injury_deltas(team: str) -> dict:
-    """Per-team deltas to unit z-scores from this team's most-recent 'Out' list."""
+    """Unit z-score deltas from this team's Out list — only STARTERS / heavily-featured
+    players count, and each is scaled by the injured player's 0-100 rating (losing an
+    All-Pro >> losing a depth piece, which barely moves it since a similar player replaces him)."""
     inj = _injuries()
     d = {"z_off_pass": 0.0, "z_off_rush": 0.0, "z_def_pass": 0.0, "z_def_rush": 0.0}
     if inj.empty or "team" not in inj.columns:
@@ -67,18 +110,27 @@ def unit_injury_deltas(team: str) -> dict:
     if t.empty:
         return d
     sw = t["season"].astype(int) * 100 + t["week"].astype(int)
-    t = t[sw == sw.max()]
-    out = t[t["report_status"] == "Out"]
-    for pos in out["position"].fillna("").astype(str).str.upper():
-        if pos in _OL:
-            d["z_off_pass"] -= _PER; d["z_off_rush"] -= _PER
-        if pos in _RUN_D:
-            d["z_def_rush"] += _PER
-        if pos in _PASS_D:
-            d["z_def_pass"] += _PER
-        if pos in _EDGE:                       # edge rushers hurt both fronts a bit
-            d["z_def_pass"] += _PER * 0.7; d["z_def_rush"] += _PER * 0.5
-    # clamp
+    out = t[(sw == sw.max()) & (t["report_status"] == "Out")]
+    if out.empty:
+        return d
+    from ml.squad import _norm
+    byg, bynm = _team_ratings(team)
+    for _, r in out.iterrows():
+        pos = str(r.get("position") or "").upper()
+        if pos == "QB":                                    # QB handled by the points penalty
+            continue
+        rec = byg.get(r.get("gsis_id")) or bynm.get(_norm(r.get("full_name") or ""))
+        if not rec or rec.get("rating") is None:
+            continue
+        rating, rank = rec["rating"], rec.get("rank")
+        # starter (rank 1 of the slot) OR a heavily-featured, well-rated #2
+        starter = (rank == 1) or (rank == 2 and rating >= 68)
+        if not starter:
+            continue
+        q = max(0.0, min(1.2, (rating - 45) / 45.0))       # quality above replacement
+        if q <= 0:
+            continue
+        _route(d, pos, _BASE * q)
     d["z_off_pass"] = max(-_CAP, d["z_off_pass"]); d["z_off_rush"] = max(-_CAP, d["z_off_rush"])
     d["z_def_pass"] = min(_CAP, d["z_def_pass"]); d["z_def_rush"] = min(_CAP, d["z_def_rush"])
     return d
@@ -169,5 +221,6 @@ def scheme_matchup(home: str, away: str, season=None) -> dict:
 
 
 def clear():
-    global _INJ, _STY, _SCHEME
+    global _INJ, _STY, _SCHEME, _RATINGS
     _INJ = _STY = _SCHEME = None
+    _RATINGS = {}
