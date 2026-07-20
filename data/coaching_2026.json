@@ -1,0 +1,505 @@
+{
+ "ARI": {
+  "hc": "Jonathan Gannon",
+  "hc_2025": "Jonathan Gannon",
+  "hc_new": false,
+  "oc": null,
+  "dc": null,
+  "off_tags": [],
+  "def_tags": [],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "ATL": {
+  "hc": "Raheem Morris",
+  "hc_2025": "Raheem Morris",
+  "hc_new": false,
+  "oc": null,
+  "dc": null,
+  "off_tags": [],
+  "def_tags": [],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "BAL": {
+  "hc": "Jesse Minter",
+  "hc_2025": "John Harbaugh",
+  "hc_new": true,
+  "oc": null,
+  "dc": null,
+  "off_tags": [
+   "run-heavy",
+   "RPO",
+   "option"
+  ],
+  "def_tags": [
+   "disguise",
+   "blitz"
+  ],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "BUF": {
+  "hc": "Sean McDermott",
+  "hc_2025": "Sean McDermott",
+  "hc_new": false,
+  "oc": null,
+  "dc": "Sean McDermott",
+  "off_tags": [
+   "spread",
+   "no-huddle"
+  ],
+  "def_tags": [
+   "cover-2 zone",
+   "Tampa-2"
+  ],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "CAR": {
+  "hc": "Dave Canales",
+  "hc_2025": "Dave Canales",
+  "hc_new": false,
+  "oc": "Dave Canales",
+  "dc": null,
+  "off_tags": [
+   "play-action",
+   "Shanahan-adjacent"
+  ],
+  "def_tags": [
+   "zone"
+  ],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "CHI": {
+  "hc": "Ben Johnson",
+  "hc_2025": "Ben Johnson",
+  "hc_new": false,
+  "oc": "Ben Johnson",
+  "dc": null,
+  "off_tags": [
+   "wide zone",
+   "play-action",
+   "motion",
+   "creative"
+  ],
+  "def_tags": [
+   "multiple"
+  ],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "CIN": {
+  "hc": "Zac Taylor",
+  "hc_2025": "Zac Taylor",
+  "hc_new": false,
+  "oc": "Zac Taylor",
+  "dc": null,
+  "off_tags": [
+   "spread pass",
+   "McVay tree"
+  ],
+  "def_tags": [
+   "zone"
+  ],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "CLE": {
+  "hc": "Todd Monken",
+  "hc_2025": "Kevin Stefanski",
+  "hc_new": true,
+  "oc": null,
+  "dc": null,
+  "off_tags": [],
+  "def_tags": [],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "DAL": {
+  "hc": "Brian Schottenheimer",
+  "hc_2025": "Brian Schottenheimer",
+  "hc_new": false,
+  "oc": null,
+  "dc": null,
+  "off_tags": [],
+  "def_tags": [],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "DEN": {
+  "hc": "Sean Payton",
+  "hc_2025": "Sean Payton",
+  "hc_new": false,
+  "oc": "Sean Payton",
+  "dc": "Vance Joseph",
+  "off_tags": [
+   "timing pass",
+   "spread",
+   "play-action"
+  ],
+  "def_tags": [
+   "aggressive blitz"
+  ],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "DET": {
+  "hc": "Dan Campbell",
+  "hc_2025": "Dan Campbell",
+  "hc_new": false,
+  "oc": null,
+  "dc": null,
+  "off_tags": [
+   "wide zone",
+   "play-action"
+  ],
+  "def_tags": [
+   "aggressive"
+  ],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "GB": {
+  "hc": "Matt LaFleur",
+  "hc_2025": "Matt LaFleur",
+  "hc_new": false,
+  "oc": "Matt LaFleur",
+  "dc": null,
+  "off_tags": [
+   "wide zone",
+   "play-action",
+   "motion"
+  ],
+  "def_tags": [
+   "multiple"
+  ],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "HOU": {
+  "hc": "DeMeco Ryans",
+  "hc_2025": "DeMeco Ryans",
+  "hc_new": false,
+  "oc": null,
+  "dc": null,
+  "off_tags": [
+   "spread"
+  ],
+  "def_tags": [
+   "4-3",
+   "Shanahan tree"
+  ],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "IND": {
+  "hc": "Shane Steichen",
+  "hc_2025": "Shane Steichen",
+  "hc_new": false,
+  "oc": null,
+  "dc": null,
+  "off_tags": [],
+  "def_tags": [],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "JAX": {
+  "hc": "Liam Coen",
+  "hc_2025": "Liam Coen",
+  "hc_new": false,
+  "oc": "Liam Coen",
+  "dc": null,
+  "off_tags": [
+   "wide zone",
+   "play-action",
+   "McVay tree"
+  ],
+  "def_tags": [
+   "multiple"
+  ],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "KC": {
+  "hc": "Andy Reid",
+  "hc_2025": "Andy Reid",
+  "hc_new": false,
+  "oc": "Andy Reid",
+  "dc": "Steve Spagnuolo",
+  "off_tags": [
+   "West Coast",
+   "spread",
+   "motion",
+   "creative"
+  ],
+  "def_tags": [
+   "aggressive blitz",
+   "disguise"
+  ],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "LA": {
+  "hc": "Sean McVay",
+  "hc_2025": "Sean McVay",
+  "hc_new": false,
+  "oc": "Sean McVay",
+  "dc": null,
+  "off_tags": [
+   "wide zone",
+   "play-action",
+   "motion",
+   "11 personnel"
+  ],
+  "def_tags": [
+   "multiple"
+  ],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "LAC": {
+  "hc": "Jim Harbaugh",
+  "hc_2025": "Jim Harbaugh",
+  "hc_new": false,
+  "oc": "Greg Roman",
+  "dc": "Jesse Minter",
+  "off_tags": [
+   "run-heavy",
+   "gap",
+   "play-action"
+  ],
+  "def_tags": [
+   "multiple"
+  ],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "LV": {
+  "hc": "Klint Kubliak",
+  "hc_2025": "Pete Carroll",
+  "hc_new": true,
+  "oc": null,
+  "dc": null,
+  "off_tags": [],
+  "def_tags": [],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "MIA": {
+  "hc": "Jeff Hafley",
+  "hc_2025": "Mike McDaniel",
+  "hc_new": true,
+  "oc": null,
+  "dc": null,
+  "off_tags": [],
+  "def_tags": [],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "MIN": {
+  "hc": "Kevin O'Connell",
+  "hc_2025": "Kevin O'Connell",
+  "hc_new": false,
+  "oc": "Kevin O'Connell",
+  "dc": "Brian Flores",
+  "off_tags": [
+   "play-action",
+   "motion",
+   "McVay tree"
+  ],
+  "def_tags": [
+   "exotic blitz",
+   "disguise"
+  ],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "NE": {
+  "hc": "Mike Vrabel",
+  "hc_2025": "Mike Vrabel",
+  "hc_new": false,
+  "oc": null,
+  "dc": null,
+  "off_tags": [],
+  "def_tags": [],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "NO": {
+  "hc": "Kellen Moore",
+  "hc_2025": "Kellen Moore",
+  "hc_new": false,
+  "oc": "Kellen Moore",
+  "dc": null,
+  "off_tags": [
+   "vertical",
+   "Air Coryell",
+   "spread"
+  ],
+  "def_tags": [
+   "man",
+   "blitz"
+  ],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "NYG": {
+  "hc": "John Harbaugh",
+  "hc_2025": "Brian Daboll",
+  "hc_new": true,
+  "oc": null,
+  "dc": null,
+  "off_tags": [],
+  "def_tags": [],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "NYJ": {
+  "hc": "Aaron Glenn",
+  "hc_2025": "Aaron Glenn",
+  "hc_new": false,
+  "oc": null,
+  "dc": null,
+  "off_tags": [],
+  "def_tags": [],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "PHI": {
+  "hc": "Nick Sirianni",
+  "hc_2025": "Nick Sirianni",
+  "hc_new": false,
+  "oc": null,
+  "dc": null,
+  "off_tags": [
+   "RPO",
+   "tempo",
+   "run-heavy"
+  ],
+  "def_tags": [
+   "multiple"
+  ],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "PIT": {
+  "hc": "Mike McCarthy",
+  "hc_2025": "Mike Tomlin",
+  "hc_new": true,
+  "oc": null,
+  "dc": null,
+  "off_tags": [],
+  "def_tags": [],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "SEA": {
+  "hc": "Mike Macdonald",
+  "hc_2025": "Mike Macdonald",
+  "hc_new": false,
+  "oc": null,
+  "dc": "Mike Macdonald",
+  "off_tags": [
+   "spread"
+  ],
+  "def_tags": [
+   "disguise",
+   "multiple",
+   "Ravens tree"
+  ],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "SF": {
+  "hc": "Kyle Shanahan",
+  "hc_2025": "Kyle Shanahan",
+  "hc_new": false,
+  "oc": "Kyle Shanahan",
+  "dc": null,
+  "off_tags": [
+   "wide zone",
+   "play-action",
+   "motion",
+   "under center"
+  ],
+  "def_tags": [
+   "4-3 zone",
+   "Shanahan tree"
+  ],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "TB": {
+  "hc": "Todd Bowles",
+  "hc_2025": "Todd Bowles",
+  "hc_new": false,
+  "oc": null,
+  "dc": "Todd Bowles",
+  "off_tags": [
+   "spread",
+   "vertical"
+  ],
+  "def_tags": [
+   "aggressive blitz",
+   "man"
+  ],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "TEN": {
+  "hc": "Robert Saleh",
+  "hc_2025": "Brian Callahan",
+  "hc_new": true,
+  "oc": null,
+  "dc": null,
+  "off_tags": [],
+  "def_tags": [],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ },
+ "WAS": {
+  "hc": "Dan Quinn",
+  "hc_2025": "Dan Quinn",
+  "hc_new": false,
+  "oc": null,
+  "dc": null,
+  "off_tags": [],
+  "def_tags": [],
+  "oc_prev": null,
+  "dc_prev": null,
+  "verify": true
+ }
+}

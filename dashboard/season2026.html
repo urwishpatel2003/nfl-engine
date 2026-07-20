@@ -367,6 +367,20 @@ async function viewTeam(team){
       </div>
     </div>
 
+    ${(()=>{const C=d.coaching; if(!C||!C.hc) return '';
+      const tagChips=a=>(a&&a.length)?a.map(t=>`<span class="chip">${esc(t)}</span>`).join(''):'<span class="chip" style="opacity:.6">not set — verify</span>';
+      return `<div class="card"><h2>Coaching &amp; scheme <span>2026 staff${C.hc_new?' · NEW head coach':''}</span></h2>
+      <div class="chips">
+        <span class="chip lbl">HC: ${esc(C.hc)}</span>
+        ${C.oc?`<span class="chip">Play-caller: ${esc(C.oc)}</span>`:'<span class="chip" style="opacity:.6">OC: verify</span>'}
+        ${C.dc?`<span class="chip">DC: ${esc(C.dc)}</span>`:'<span class="chip" style="opacity:.6">DC: verify</span>'}
+        ${C.hc_new?`<span class="chip" style="background:#3a2a12;color:#fbbf24">⚠ new staff — 2025 scheme regressed toward neutral</span>`:''}
+      </div>
+      <div class="bxs" style="margin-top:10px">Offensive scheme</div><div class="chips">${tagChips(C.off_tags)}</div>
+      <div class="bxs" style="margin-top:8px">Defensive scheme</div><div class="chips">${tagChips(C.def_tags)}</div>
+      <div style="color:var(--muted);font-size:11px;margin-top:10px">Head coach is from the schedule data; coordinators &amp; scheme tags are curated in <code>data/coaching_2026.json</code> and flagged for verification.</div>
+    </div>`;})()}
+
     <div class="grid2">
       <div class="card"><h2>Strengths <span>league percentile</span></h2>${(d.strengths||[]).map(x=>swBar(x)).join('')}</div>
       <div class="card"><h2>Weaknesses <span>league percentile</span></h2>${(d.weaknesses||[]).map(x=>swBar(x)).join('')}</div>

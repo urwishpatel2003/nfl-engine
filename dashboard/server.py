@@ -475,6 +475,7 @@ def api_team_profile():
 
     if team not in _DEPTH_CACHE:
         _DEPTH_CACHE[team] = team_depth_chart(team)
+    from ml.coaching import team_coaching
 
     return jsonify(_native({
         "team": team, "season": season,
@@ -488,6 +489,7 @@ def api_team_profile():
         "strengths": strengths, "weaknesses": weaknesses,
         "tendencies": _tendencies(row),
         "units": _units_display(team),
+        "coaching": team_coaching(team),
         "groups": _DEPTH_CACHE[team],
     }))
 
@@ -812,11 +814,12 @@ def clear_caches():
         ml.backtest_spreads._BLEND_W = None           # recompute optimal blend after refresh
     except Exception:
         pass
-    try:
-        import ml.matchup_context
-        ml.matchup_context.clear()
-    except Exception:
-        pass
+    for modname in ("ml.matchup_context", "ml.coaching"):
+        try:
+            import importlib
+            importlib.import_module(modname).clear()
+        except Exception:
+            pass
     for mod, attr in [("ml.matchup_engine", "_UNITS"), ("ml.squad", "_PCT_CACHE"),
                       ("ml.squad", "_META_CACHE"), ("ml.squad", "_SKILL_CACHE"),
                       ("ml.squad", "_PBP_AGG"), ("ml.projections", "_PROFILE_CACHE"),

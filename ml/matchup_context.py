@@ -200,13 +200,22 @@ def _offense_vs_defense(off_t, def_t, tab) -> tuple:
 
 
 def scheme_matchup(home: str, away: str, season=None) -> dict:
-    """Per-team scheme-mismatch points + notes for both offensive matchups."""
+    """Per-team scheme-mismatch points + notes. A team that changed its head coach for 2026
+    has its 2025-derived scheme edge regressed (we don't know the new play-caller's scheme)."""
+    from ml.coaching import scheme_confidence, team_coaching
     s = _styles()
     if season is None:
         season = int(s["season"].max()) if not s.empty else None
     tab = _scheme_tables(season) if season is not None else {"label": {}}
     h_b, h_notes = _offense_vs_defense(home, away, tab)   # home offense vs away defense
     a_b, a_notes = _offense_vs_defense(away, home, tab)   # away offense vs home defense
+    # regress the scheme edge toward 0 for a new-staff offense (scheme uncertainty)
+    h_conf, a_conf = scheme_confidence(home), scheme_confidence(away)
+    h_b, a_b = round(h_b * h_conf, 2), round(a_b * a_conf, 2)
+    if h_conf < 1.0 and h_notes:
+        h_notes = h_notes + ["new staff — scheme uncertain"]
+    if a_conf < 1.0 and a_notes:
+        a_notes = a_notes + ["new staff — scheme uncertain"]
     hs, aws = _style_row(home, season), _style_row(away, season)
     return {
         "home_delta": h_b, "away_delta": a_b,
@@ -217,6 +226,7 @@ def scheme_matchup(home: str, away: str, season=None) -> dict:
             away: {"off": str(aws.get("offense_label")) if aws is not None else None,
                    "def": str(aws.get("defense_label")) if aws is not None else None},
         },
+        "coaching": {home: team_coaching(home), away: team_coaching(away)},
     }
 
 
