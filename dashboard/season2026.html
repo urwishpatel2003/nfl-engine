@@ -208,6 +208,8 @@
   .pos-WR{background:#13233f;color:#8fc0ff}.pos-TE{background:#33260f;color:#f0c079}
   .ftbl .pr{color:var(--muted);font-size:11px}
   .ftbl .nm{font-weight:600}
+  .tier{display:inline-block;background:#1b2c4a;border:1px solid #2f4a78;color:#9fc2ff;
+        font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:5px}
   .val-pos{color:var(--good);font-weight:700}.val-neg{color:var(--bad);font-weight:700}
   .ftgap{height:8px;background:#0e1626;border-radius:4px;overflow:hidden;min-width:60px}
   .ftgap i{display:block;height:100%;background:linear-gradient(90deg,#3b82f6,#22c55e)}
@@ -711,17 +713,19 @@ function ftPosFilter(pos,sc){
 function ftBoard(d){
   const hasAdp=d.has_adp, rows=d.players||[];
   if(!rows.length) return '<div class="loading">No players.</div>';
-  const head=`<tr><th class="r">#</th><th>Player</th><th>Pos</th><th>Team</th><th class="r">Proj PPG</th><th class="r">Proj Pts</th><th class="r">VOR</th>${hasAdp?'<th class="r">ADP</th><th class="r">Value</th>':''}</tr>`;
+  const hasEcr=rows.some(p=>p.tier!=null);
+  const head=`<tr><th class="r">#</th><th>Player</th><th>Pos</th><th>Team</th><th class="r">Proj PPG</th><th class="r">VOR</th>${hasEcr?'<th class="r">Tier</th><th class="r">ECR</th>':''}${hasAdp?'<th class="r">ADP</th><th class="r">Value</th>':''}</tr>`;
   const b=rows.map(p=>{
     const src=(p.source&&p.source!=='production')?` <span class="pr">${esc(p.source)}</span>`:'';
     const v=p.value;
+    const ecrcell=hasEcr?`<td class="r">${p.tier!=null?'<span class="tier">T'+p.tier+'</span>':'—'}</td><td class="r pr">${p.ecr!=null?Math.round(p.ecr):'—'}</td>`:'';
     const valcell=hasAdp?`<td class="r">${p.adp!=null?Number(p.adp).toFixed(1):'—'}</td><td class="r ${v>0?'val-pos':v<0?'val-neg':''}">${v!=null?(v>0?'+':'')+v:'—'}</td>`:'';
     return `<tr><td class="r pr">${p.overall_rank}</td><td class="nm">${esc(p.player)}${src}</td>
       <td><span class="pos pos-${p.position}">${p.position}${p.pos_rank}</span></td>
       <td>${esc(p.team||'')}</td><td class="r">${Number(p.proj_ppg).toFixed(1)}</td>
-      <td class="r">${Number(p.proj_points).toFixed(0)}</td><td class="r">${Number(p.vor).toFixed(0)}</td>${valcell}</tr>`;
+      <td class="r">${Number(p.vor).toFixed(0)}</td>${ecrcell}${valcell}</tr>`;
   }).join('');
-  const note = hasAdp?'' : `<div class="note" style="margin:0 0 12px">This is our <b>pure projection board</b> (recency-weighted production × value-over-replacement, so it flows like a real draft — elite RB/WR first, QBs slide). Drop an ADP export at <code>data/raw/adp_underdog.csv</code> (columns: player, position, adp) to light up value-vs-ADP.</div>`;
+  const note = `<div class="note" style="margin:0 0 12px">Ranked by <b>our</b> value-over-replacement projection (so it flows like a real draft). <b>Tier</b> + <b>ECR</b> = FantasyPros expert consensus (tiers mark the draft value cliffs); <b>ADP</b> = Underdog best-ball market; <b>Value</b> = ADP − our rank (green = we're higher than the market).${hasAdp?'':' Drop <code>data/raw/adp_underdog.csv</code> to light up ADP/Value.'}</div>`;
   return note + `<div style="overflow-x:auto"><table class="ftbl"><thead>${head}</thead><tbody>${b}</tbody></table></div>`;
 }
 function ftValueTable(rows, kind){

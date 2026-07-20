@@ -300,6 +300,23 @@ def with_adp(board: pd.DataFrame) -> pd.DataFrame:
         board["our_rank"] = np.nan
         board.loc[have, "our_rank"] = board.loc[have, "overall_rank"].rank(method="min")
         board["value"] = (board["adp"] - board["our_rank"]).round(1)
+    return _with_ecr(board)
+
+
+def _with_ecr(board: pd.DataFrame) -> pd.DataFrame:
+    """Attach FantasyPros expert-consensus rank + draft TIER + strength-of-schedule, if the
+    ECR export (data/raw/ecr_2026.csv: player, position, ecr, tier, sos) is present. Tiers are
+    the drafter's real tool — they mark the value cliffs where a position falls off."""
+    board = board.copy()
+    path = RAW / "ecr_2026.csv"
+    if not path.exists():
+        board["ecr"] = None; board["tier"] = None; board["sos"] = None
+        return board
+    ecr = pd.read_csv(path)
+    ecr["_k"] = ecr["player"].map(_namekey)
+    ecr = ecr.drop_duplicates("_k")
+    board["_k"] = board.get("player", board.get("player_name")).map(_namekey)
+    board = board.merge(ecr[["_k", "ecr", "tier", "sos"]], on="_k", how="left").drop(columns="_k")
     return board
 
 
@@ -315,7 +332,8 @@ def value_board(max_adp: int = 216, top: int = 30, scoring: str = "half"):
     b = with_adp(project(scoring))
     d = b[b["adp"].notna() & (b["adp"] <= max_adp) & (b["source"] == "production")].copy()
     d = d.sort_values("value", ascending=False)
-    cols = ["player", "position", "team", "proj_ppg", "our_rank", "adp", "value", "pos_rank"]
+    cols = ["player", "position", "team", "proj_ppg", "our_rank", "adp", "value", "pos_rank", "tier"]
+    cols = [c for c in cols if c in d.columns]
     targets = d.head(top)[cols]
     fades = d.tail(top).sort_values("value")[cols]
     return targets, fades
