@@ -81,7 +81,8 @@ def _composite_2025():
 # were buried. These value tables are computed straight from PBP (which DOES include the
 # current season) — recency-weighted passing+rushing EPA for QBs, and real production
 # (yards + TDs + touches + EPA) for skill players.
-_PBP_W = {2025: 0.60, 2024: 0.30, 2023: 0.10}   # recency weights across the seasons we have
+_PBP_W = {2025: 0.32, 2024: 0.24, 2023: 0.18, 2022: 0.14, 2021: 0.12}   # 5-yr recency weights
+_COV_SHRINK = 35.0   # targets of regression toward league-average coverage (tames small samples)
 _PBP_AGG = None
 _SKILL_CACHE = None
 
@@ -270,7 +271,9 @@ def _coverage(roster):
     pf = pf[pf.season == 2025]
     agg = pf.groupby("pfr_player_name").agg(tgt=("def_targets", "sum"),
                                             rate=("def_passer_rating_allowed", "mean")).reset_index()
-    agg = agg[agg.tgt >= 20]
+    agg = agg[agg.tgt >= 15]
+    lg = float(agg["rate"].mean()); K = _COV_SHRINK        # shrink low-target rates toward league mean
+    agg["rate"] = (agg.tgt / (agg.tgt + K)) * agg["rate"] + (K / (agg.tgt + K)) * lg
     agg["k"] = agg["pfr_player_name"].map(_key)
     agg["cov"] = -agg["rate"]                      # lower passer rating allowed = better
     bykey = agg.groupby("k")["cov"].mean()
@@ -384,7 +387,10 @@ def _player_pct():
     pf = pd.read_parquet(RAW / "pfr_defense.parquet"); pf = pf[pf.season == 2025]
     cov = pf.groupby("pfr_player_name").agg(tgt=("def_targets", "sum"),
                                             rate=("def_passer_rating_allowed", "mean")).reset_index()
-    cov = cov[cov.tgt >= 20]; cov["k"] = cov["pfr_player_name"].map(_key)
+    cov = cov[cov.tgt >= 15]
+    _lg = float(cov["rate"].mean()); _K = _COV_SHRINK      # small-target regression toward mean
+    cov["rate"] = (cov.tgt / (cov.tgt + _K)) * cov["rate"] + (_K / (cov.tgt + _K)) * _lg
+    cov["k"] = cov["pfr_player_name"].map(_key)
     cov_pct = (-cov.groupby("k")["rate"].mean()).rank(pct=True) * 100  # DB/LB by coverage
     _PCT_CACHE = (skill, skill_nm, prod, prod_nm, qb_pct, dl_pct, cov_pct)
     return _PCT_CACHE
