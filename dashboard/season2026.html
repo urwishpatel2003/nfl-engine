@@ -618,8 +618,13 @@ function schCard(g){
     fin = `<div class="gc-final">Final: ${g.away} ${g.away_score} — ${g.home_score} ${g.home}${mark}</div>`;
   }
   const top = g.pick_rank;
+  // the pick's actual number: lay it if we're on the favorite, take it if we're on the dog
+  const pickNum = g.vegas_spread==null ? null : (g.ats_pick===g.home ? -g.vegas_spread : g.vegas_spread);
+  const pickStr = pickNum==null ? g.ats_pick
+      : Math.abs(pickNum)<0.05 ? `${g.ats_pick} PK`
+      : `${g.ats_pick} ${pickNum>0?'+':''}${pickNum}`;
   const edgeRow = g.cover_prob!=null
-    ? `<div class="gc-edge"><span>ATS pick · cover prob</span><b>${g.ats_pick} · ${Math.round(g.cover_prob*100)}%</b></div>` : '';
+    ? `<div class="gc-edge"><span>ATS pick · cover prob</span><b>${pickStr} · ${Math.round(g.cover_prob*100)}%</b></div>` : '';
   const totalRow = g.total_prob!=null
     ? `<div class="gc-row"><span>Total pick</span><b>${g.total_pick} ${g.vegas_total??''} · ${Math.round(g.total_prob*100)}%</b></div>` : '';
   const blendRow = g.blend_margin!=null
@@ -633,7 +638,7 @@ function schCard(g){
       <div class="gc-tm"><img src="${g.home_logo}" onerror="this.style.visibility='hidden'"><div class="gc-ab">${g.home}</div><div class="gc-sc">${pred?g.pred_home.toFixed(0):'–'}</div></div>
     </div>
     <div class="gc-prob"><div style="width:${ap}%;background:${g.away_color}"></div><div style="width:${hp}%;background:${g.home_color}"></div></div>
-    <div class="gc-row"><span>Model pick</span><b>${pred?`${fav} -${Math.abs(g.pred_margin).toFixed(1)}`:'—'}</b></div>
+    <div class="gc-row"><span>Model proj</span><b>${pred?`${fav} -${Math.abs(g.pred_margin).toFixed(1)}`:'—'}</b></div>
     <div class="gc-row"><span>Vegas line</span><b>${veg}</b></div>
     ${blendRow}
     ${edgeRow}
@@ -671,8 +676,11 @@ async function viewSchedule(params){
   const picks = d.games.filter(g=>g.pick_rank).sort((a,b)=>a.pick_rank-b.pick_rank);
   const strip = picks.length ? `<div class="card" style="padding:14px">
       <h2 style="margin:0 0 10px">🔥 Top 5 picks <span>biggest model disagreement with the Vegas line</span></h2>
-      <div class="toppicks">${picks.map(g=>`<div class="tp" onclick="go('#/matchup?home=${g.home}&away=${g.away}')">
-        <span class="rk">${g.pick_rank}</span><b>${g.ats_pick}</b>&nbsp;${g.away}@${g.home} · ${Math.round(g.cover_prob*100)}% cover · ${Math.abs(g.edge).toFixed(1)} pt edge</div>`).join('')}</div>
+      <div class="toppicks">${picks.map(g=>{
+        const pn = g.vegas_spread==null?null:(g.ats_pick===g.home?-g.vegas_spread:g.vegas_spread);
+        const ps = pn==null?g.ats_pick:Math.abs(pn)<0.05?`${g.ats_pick} PK`:`${g.ats_pick} ${pn>0?'+':''}${pn}`;
+        return `<div class="tp" onclick="go('#/matchup?home=${g.home}&away=${g.away}')">
+        <span class="rk">${g.pick_rank}</span><b>${ps}</b>&nbsp;${g.away}@${g.home} · ${Math.round(g.cover_prob*100)}% cover · ${Math.abs(g.edge).toFixed(1)} pt edge</div>`;}).join('')}</div>
       <div style="color:var(--muted);font-size:11px;margin-top:8px">Ranked by key-number-aware cover probability. These are the model's strongest disagreements with the market — not guaranteed winners (it doesn't reliably beat NFL spreads out-of-sample; see the backtest).</div>
     </div>` : '';
   body.innerHTML = strip + `<div id="schAcc"></div>`
