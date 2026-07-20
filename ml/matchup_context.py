@@ -178,44 +178,45 @@ def _scheme_tables(season):
 
 
 def _offense_vs_defense(off_t, def_t, tab) -> tuple:
-    """Points bonus for the OFFENSE from scheme mismatches + notes (percentile-based)."""
+    """Points bonus for the OFFENSE from scheme mismatches + notes. Each side's scheme is
+    read from its COORDINATOR'S source team (his prior team if he's new = 'carries his scheme';
+    the team itself otherwise), and the edge is scaled by how confident that source is."""
+    from ml.coaching import off_source, def_source
+    o_team, o_conf = off_source(off_t)                 # whose offense + how sure
+    d_team, d_conf = def_source(def_t)                 # whose defense + how sure
+
     def p(col, t):
         return tab.get(col, {}).get(t, 0.5)
     b, notes = 0.0, []
-    dlabel = str(tab.get("label", {}).get(def_t, "") or "")
-    # play-action punishes an aggressive/blitzing front
-    if p("play_action_rate", off_t) > 0.65 and (p("avg_blitzers", def_t) > 0.6 or "Blitz" in dlabel):
+    dlabel = str(tab.get("label", {}).get(d_team, "") or "")
+    if p("play_action_rate", o_team) > 0.65 and (p("avg_blitzers", d_team) > 0.6 or "Blitz" in dlabel):
         b += 0.8; notes.append("play-action vs aggressive front")
-    # pre-snap motion stresses man coverage
-    if p("motion_rate", off_t) > 0.65 and "Man" in dlabel:
+    if p("motion_rate", o_team) > 0.65 and "Man" in dlabel:
         b += 0.6; notes.append("motion vs man coverage")
-    # a run-happy QB vs a defense that leaks scramble EPA (poor contain)
-    if p("qb_rush_rate", off_t) > 0.65:
-        cont = p("def_qb_scramble_epa_allowed", def_t)     # high = leaky contain
+    if p("qb_rush_rate", o_team) > 0.65:
+        cont = p("def_qb_scramble_epa_allowed", d_team)
         if cont > 0.65:
             b += 0.9; notes.append("mobile QB vs poor contain")
         elif cont < 0.35:
             b -= 0.6; notes.append("mobile QB vs strong contain")
+    b *= o_conf * (0.5 + 0.5 * d_conf)                 # dampen for new-coordinator uncertainty
+    if o_team != off_t:
+        notes.append(f"new OC — scheme modeled on {o_team}")
+    elif o_conf < 1.0:
+        notes.append("new OC — scheme uncertain")
     return round(b, 2), notes
 
 
 def scheme_matchup(home: str, away: str, season=None) -> dict:
-    """Per-team scheme-mismatch points + notes. A team that changed its head coach for 2026
-    has its 2025-derived scheme edge regressed (we don't know the new play-caller's scheme)."""
-    from ml.coaching import scheme_confidence, team_coaching
+    """Per-team scheme-mismatch points + notes. Each side's scheme follows its coordinator: a
+    new OC/DC borrows his prior team's style (fingerprint), and unknown new hires are regressed."""
+    from ml.coaching import team_coaching
     s = _styles()
     if season is None:
         season = int(s["season"].max()) if not s.empty else None
     tab = _scheme_tables(season) if season is not None else {"label": {}}
     h_b, h_notes = _offense_vs_defense(home, away, tab)   # home offense vs away defense
     a_b, a_notes = _offense_vs_defense(away, home, tab)   # away offense vs home defense
-    # regress the scheme edge toward 0 for a new-staff offense (scheme uncertainty)
-    h_conf, a_conf = scheme_confidence(home), scheme_confidence(away)
-    h_b, a_b = round(h_b * h_conf, 2), round(a_b * a_conf, 2)
-    if h_conf < 1.0 and h_notes:
-        h_notes = h_notes + ["new staff — scheme uncertain"]
-    if a_conf < 1.0 and a_notes:
-        a_notes = a_notes + ["new staff — scheme uncertain"]
     hs, aws = _style_row(home, season), _style_row(away, season)
     return {
         "home_delta": h_b, "away_delta": a_b,

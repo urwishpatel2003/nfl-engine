@@ -369,12 +369,13 @@ async function viewTeam(team){
 
     ${(()=>{const C=d.coaching; if(!C||!C.hc) return '';
       const tagChips=a=>(a&&a.length)?a.map(t=>`<span class="chip">${esc(t)}</span>`).join(''):'<span class="chip" style="opacity:.6">not set — verify</span>';
+      const srcNote=s=>(s&&s!=='self'&&s!=='regress')?` · scheme ~ ${esc(s)}`:(s==='regress'?' · scheme regressed':'');
+      const nu=`<span style="color:var(--warn)"> · NEW</span>`;
       return `<div class="card"><h2>Coaching &amp; scheme <span>2026 staff${C.hc_new?' · NEW head coach':''}</span></h2>
       <div class="chips">
         <span class="chip lbl">HC: ${esc(C.hc)}</span>
-        ${C.oc?`<span class="chip">Play-caller: ${esc(C.oc)}</span>`:'<span class="chip" style="opacity:.6">OC: verify</span>'}
-        ${C.dc?`<span class="chip">DC: ${esc(C.dc)}</span>`:'<span class="chip" style="opacity:.6">DC: verify</span>'}
-        ${C.hc_new?`<span class="chip" style="background:#3a2a12;color:#fbbf24">⚠ new staff — 2025 scheme regressed toward neutral</span>`:''}
+        <span class="chip">OC: ${esc(C.oc||'verify')}${C.oc_new?nu:''}${srcNote(C.off_src)}</span>
+        <span class="chip">DC: ${esc(C.dc||'verify')}${C.dc_new?nu:''}${srcNote(C.def_src)}</span>
       </div>
       <div class="bxs" style="margin-top:10px">Offensive scheme</div><div class="chips">${tagChips(C.off_tags)}</div>
       <div class="bxs" style="margin-top:8px">Defensive scheme</div><div class="chips">${tagChips(C.def_tags)}</div>

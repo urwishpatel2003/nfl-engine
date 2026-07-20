@@ -9,8 +9,12 @@
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "regress",
+  "def_src": "self",
+  "oc_new": true,
+  "dc_new": false
  },
  "ATL": {
   "hc": "Raheem Morris",
@@ -22,8 +26,12 @@
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "regress",
+  "def_src": "self",
+  "oc_new": true,
+  "dc_new": false
  },
  "BAL": {
   "hc": "Jesse Minter",
@@ -38,8 +46,12 @@
   ],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "CHI",
+  "def_src": "MIA",
+  "oc_new": true,
+  "dc_new": true
  },
  "BUF": {
   "hc": "Sean McDermott",
@@ -51,8 +63,12 @@
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "NO",
+  "def_src": "regress",
+  "oc_new": true,
+  "dc_new": true
  },
  "CAR": {
   "hc": "Dave Canales",
@@ -64,8 +80,12 @@
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "self",
+  "def_src": "self",
+  "oc_new": false,
+  "dc_new": false
  },
  "CHI": {
   "hc": "Ben Johnson",
@@ -85,8 +105,12 @@
   ],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "self",
+  "def_src": "NO",
+  "oc_new": false,
+  "dc_new": true
  },
  "CIN": {
   "hc": "Zac Taylor",
@@ -100,8 +124,12 @@
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "self",
+  "def_src": "self",
+  "oc_new": false,
+  "dc_new": false
  },
  "CLE": {
   "hc": "Todd Monken",
@@ -113,8 +141,12 @@
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "regress",
+  "def_src": "regress",
+  "oc_new": true,
+  "dc_new": true
  },
  "DAL": {
   "hc": "Brian Schottenheimer",
@@ -126,8 +158,12 @@
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "regress",
+  "def_src": "regress",
+  "oc_new": true,
+  "dc_new": true
  },
  "DEN": {
   "hc": "Sean Payton",
@@ -145,8 +181,12 @@
   ],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "self",
+  "def_src": "self",
+  "oc_new": false,
+  "dc_new": false
  },
  "DET": {
   "hc": "Dan Campbell",
@@ -158,8 +198,12 @@
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "ARI",
+  "def_src": "self",
+  "oc_new": true,
+  "dc_new": false
  },
  "GB": {
   "hc": "Matt LaFleur",
@@ -175,8 +219,12 @@
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": true
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": true,
+  "off_src": "self",
+  "def_src": "regress",
+  "oc_new": false,
+  "dc_new": true
  },
  "HOU": {
   "hc": "DeMeco Ryans",
@@ -191,8 +239,12 @@
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "LA",
+  "def_src": "self",
+  "oc_new": true,
+  "dc_new": false
  },
  "IND": {
   "hc": "Shane Steichen",
@@ -207,8 +259,12 @@
   ],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "self",
+  "def_src": "self",
+  "oc_new": false,
+  "dc_new": false
  },
  "JAX": {
   "hc": "Liam Coen",
@@ -220,8 +276,12 @@
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "regress",
+  "def_src": "self",
+  "oc_new": true,
+  "dc_new": false
  },
  "KC": {
   "hc": "Andy Reid",
@@ -240,8 +300,12 @@
   ],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "self",
+  "def_src": "self",
+  "oc_new": false,
+  "dc_new": false
  },
  "LA": {
   "hc": "Sean McVay",
@@ -258,8 +322,12 @@
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "self",
+  "def_src": "self",
+  "oc_new": false,
+  "dc_new": false
  },
  "LAC": {
   "hc": "Jim Harbaugh",
@@ -276,8 +344,12 @@
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "MIA",
+  "def_src": "regress",
+  "oc_new": true,
+  "dc_new": true
  },
  "LV": {
   "hc": "Klint Kubliak",
@@ -289,8 +361,12 @@
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "NO",
+  "def_src": "regress",
+  "oc_new": true,
+  "dc_new": true
  },
  "MIA": {
   "hc": "Jeff Hafley",
@@ -302,8 +378,12 @@
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "HOU",
+  "def_src": "regress",
+  "oc_new": true,
+  "dc_new": true
  },
  "MIN": {
   "hc": "Kevin O'Connell",
@@ -324,8 +404,12 @@
   ],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "self",
+  "def_src": "self",
+  "oc_new": false,
+  "dc_new": false
  },
  "NE": {
   "hc": "Mike Vrabel",
@@ -337,8 +421,12 @@
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "self",
+  "def_src": "self",
+  "oc_new": false,
+  "dc_new": false
  },
  "NO": {
   "hc": "Kellen Moore",
@@ -356,8 +444,12 @@
   ],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "self",
+  "def_src": "regress",
+  "oc_new": false,
+  "dc_new": true
  },
  "NYG": {
   "hc": "John Harbaugh",
@@ -373,8 +465,12 @@
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "KC",
+  "def_src": "regress",
+  "oc_new": true,
+  "dc_new": true
  },
  "NYJ": {
   "hc": "Aaron Glenn",
@@ -386,8 +482,12 @@
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "regress",
+  "def_src": "self",
+  "oc_new": true,
+  "dc_new": false
  },
  "PHI": {
   "hc": "Nick Sirianni",
@@ -404,8 +504,12 @@
   ],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "self",
+  "def_src": "self",
+  "oc_new": false,
+  "dc_new": false
  },
  "PIT": {
   "hc": "Mike McCarthy",
@@ -420,8 +524,12 @@
   ],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "regress",
+  "def_src": "regress",
+  "oc_new": true,
+  "dc_new": true
  },
  "SEA": {
   "hc": "Mike Macdonald",
@@ -433,8 +541,12 @@
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "regress",
+  "def_src": "self",
+  "oc_new": true,
+  "dc_new": false
  },
  "SF": {
   "hc": "Kyle Shanahan",
@@ -451,8 +563,12 @@
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": true
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": true,
+  "off_src": "self",
+  "def_src": "regress",
+  "oc_new": false,
+  "dc_new": true
  },
  "TB": {
   "hc": "Todd Bowles",
@@ -467,8 +583,12 @@
   ],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "LA",
+  "def_src": "self",
+  "oc_new": true,
+  "dc_new": false
  },
  "TEN": {
   "hc": "Robert Saleh",
@@ -488,8 +608,12 @@
   ],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "NYG",
+  "def_src": "regress",
+  "oc_new": true,
+  "dc_new": true
  },
  "WAS": {
   "hc": "Dan Quinn",
@@ -501,7 +625,11 @@
   "def_tags": [],
   "oc_prev": null,
   "dc_prev": null,
-  "source": "HC from schedule data; OC/DC from Wikipedia (2026), verified July 2026",
-  "verify": false
+  "source": "HC from schedule; OC/DC from public 2026 listings; scheme source = coordinator prior team (best-effort, editable)",
+  "verify": false,
+  "off_src": "regress",
+  "def_src": "regress",
+  "oc_new": true,
+  "dc_new": true
  }
 }

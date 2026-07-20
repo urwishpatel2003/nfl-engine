@@ -74,6 +74,29 @@ def scheme_confidence(team: str) -> float:
     return NEW_HC_CONFIDENCE if _hc_change().get(team, False) else 1.0
 
 
+def _source(team, key, changed_hint):
+    """(scheme_team, confidence) for one side:
+       fingerprint (borrow another team's style) → that team, full confidence;
+       'self'/unchanged → the team itself, full confidence;
+       'regress'/changed-but-unknown → the team itself, low confidence."""
+    src = _table().get(team, {}).get(key)
+    if src and src not in ("self", "regress"):
+        return src, 1.0                                # new coordinator: use his prior team's style
+    if src == "regress" or (src is None and changed_hint):
+        return team, NEW_HC_CONFIDENCE                 # changed but scheme unknown → regress
+    return team, 1.0                                   # continuity
+
+
+def off_source(team: str):
+    """(team whose OFFENSIVE style 2026 reflects, confidence) — the OC's prior team if he's new."""
+    return _source(team, "off_src", _hc_change().get(team, False))
+
+
+def def_source(team: str):
+    """(team whose DEFENSIVE style 2026 reflects, confidence) — the DC's prior team if he's new."""
+    return _source(team, "def_src", _hc_change().get(team, False))
+
+
 def clear():
     global _TABLE, _HC_CHANGE
     _TABLE = _HC_CHANGE = None
