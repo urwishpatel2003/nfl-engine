@@ -382,23 +382,44 @@ _PROFILE_METRICS = [
     ("def_quality_score",    "Overall defense grade", True),
 ]
 
-# boolean archetype flags in team_styles → human tendency labels
-_FLAG_LABELS = {
-    "run_heavy_off": "Run-heavy offense", "pass_heavy_off": "Pass-heavy offense",
-    "deep_pass_off": "Deep passing attack", "short_pass_off": "Short passing game",
-    "fast_pace": "Fast tempo", "slow_pace": "Slow tempo",
-    "blitz_heavy_def": "Blitz-heavy defense", "high_play_action": "High play-action",
-    "motion_heavy_off": "Heavy pre-snap motion", "mobile_qb_offense": "Mobile QB",
-    "elite_mobile_qb": "Elite mobile QB", "fourth_down_aggressive": "Aggressive on 4th down",
-    "elite_rz_offense": "Elite red-zone offense", "elite_rz_defense": "Elite red-zone defense",
-    "elite_2min": "Elite two-minute offense", "leaky_under_pressure": "Struggles under pressure",
-    "poor_qb_contain": "Poor QB contain", "elite_qb_contain": "Elite QB contain",
-}
+# Tendency chips from REAL league percentiles. The boolean archetype flags in team_styles
+# are miscalibrated (poor_qb_contain is True for all 32 teams, elite_mobile_qb for 27, and
+# most others never fire), so we derive tendencies from the continuous columns instead.
+# (column, tag when top of league, tag when bottom, top/bottom fraction that qualifies)
+_TENDENCY_SPEC = [
+    ("pass_rate_overall",    "Pass-heavy offense",        "Run-heavy offense",   0.18),
+    ("avg_air_yards",        "Deep passing attack",       "Short passing game",  0.16),
+    ("pace",                 "Fast tempo",                "Slow tempo",          0.16),
+    ("play_action_rate",     "High play-action",          None,                  0.16),
+    ("motion_rate",          "Heavy pre-snap motion",     None,                  0.16),
+    ("qb_rush_rate",         "Mobile QB",                 None,                  0.16),
+    ("avg_blitzers",         "Blitz-heavy defense",       None,                  0.16),
+    ("off_epa_per_play",     "Explosive offense",         None,                  0.12),
+    ("rz_td_rate",           "Elite red-zone offense",    None,                  0.12),
+    ("two_min_epa",          "Strong two-minute offense", None,                  0.15),
+    ("third_down_stop_rate", "Strong third-down defense", None,                  0.16),
+    ("sack_rate_gen",        "Heavy pass rush",           None,                  0.16),
+    ("def_epa_per_play",     None,                        "Stingy defense",      0.15),
+]
 
 
-def _tendencies(row) -> list:
-    return [lbl for flag, lbl in _FLAG_LABELS.items()
-            if flag in row and bool(row[flag]) and not pd.isna(row[flag])]
+def _tendencies(team: str, season: int) -> list:
+    """Real per-team tendencies from where the team sits in the league distribution."""
+    s = styles_df()
+    s = s[s["season"] == season]
+    tags = []
+    for col, hi, lo, frac in _TENDENCY_SPEC:
+        if col not in s.columns:
+            continue
+        cv = s[["team", col]].dropna()
+        if team not in set(cv["team"]):
+            continue
+        p = float(cv[col].rank(pct=True)[cv["team"] == team].iloc[0])
+        if hi and p >= 1 - frac:
+            tags.append(hi)
+        elif lo and p <= frac:
+            tags.append(lo)
+    return tags
 
 
 def _profile_percentiles(team: str, season: int) -> list:
@@ -487,7 +508,7 @@ def api_team_profile():
         "rating": float(rr["rating"].iloc[0]) if len(rr) else None,
         "style": style, "situational": situational,
         "strengths": strengths, "weaknesses": weaknesses,
-        "tendencies": _tendencies(row),
+        "tendencies": _tendencies(team, season),
         "units": _units_display(team),
         "coaching": team_coaching(team),
         "groups": _DEPTH_CACHE[team],
@@ -655,7 +676,7 @@ def api_matchup_full():
             "pace": safe_json(r.get("pace")),
             "blitz_rate": safe_json(r.get("blitz_rate")),
             "play_action_rate": safe_json(r.get("play_action_rate")),
-            "tendencies": _tendencies(r),
+            "tendencies": _tendencies(t, season),
         }
 
     def form(t):
