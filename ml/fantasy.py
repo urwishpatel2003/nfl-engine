@@ -26,6 +26,7 @@ Fantasy scoring is noisy; treat the board as a lean, not gospel. The value/under
 strongest where opportunity and production disagree.
 """
 
+import math
 import re
 from pathlib import Path
 
@@ -47,7 +48,20 @@ _PASS_Y, _PASS_TD, _INT = 0.04, 4.0, 1.0
 _RUSH_Y, _RUSH_TD = 0.1, 6.0
 _REC_Y, _REC_TD = 0.1, 6.0
 _REC_PT = {"half": 0.5, "full": 1.0}
-SCORINGS = {"half": "Best Ball · Half-PPR", "full": "Full PPR"}
+
+# Three draftable formats. Best Ball (Underdog Best Ball Mania) is season-long half-PPR with NO
+# kickers or defenses; the two redraft formats add K/DST. Each grades "value" against the market
+# that matches it. (Kicker/defense scoring barely differs by PPR, so K/DST come from the one
+# complete source — the ECR export — in both redraft formats.)
+FORMATS = {
+    "bestball": {"label": "Best Ball", "scoring": "half", "kdst": False, "anchor": "adp", "market": "Underdog ADP"},
+    "half":     {"label": "Half PPR",  "scoring": "half", "kdst": True,  "anchor": "adp", "market": "Underdog ADP"},
+    "full":     {"label": "Full PPR",  "scoring": "full", "kdst": True,  "anchor": "ecr", "market": "PPR ECR"},
+}
+
+
+def _fmt(fmt):
+    return FORMATS.get(fmt, FORMATS["bestball"])
 
 FANTASY_POS = ["QB", "RB", "WR", "TE"]      # Underdog rosters are all offense
 _PROJ_SEASONS = [2025, 2024, 2023]          # recency window for the draft board
@@ -61,12 +75,14 @@ _REPLACEMENT = {"QB": 16, "RB": 30, "WR": 42, "TE": 14}
 
 _STATS = {}       # season -> per-player stats DataFrame (cached)
 _ROSTER = None
+_KDST = None
 
 
 def clear():
-    global _STATS, _ROSTER
+    global _STATS, _ROSTER, _KDST
     _STATS = {}
     _ROSTER = None
+    _KDST = None
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -147,8 +163,10 @@ def season_stats(season: int) -> pd.DataFrame:
     return _STATS[season]
 
 
-def _score(fp: pd.DataFrame, scoring: str = "half") -> pd.DataFrame:
-    """Attach points + ppg for the chosen scoring (only the per-reception value differs)."""
+def _score(fp: pd.DataFrame, fmt: str = "bestball") -> pd.DataFrame:
+    """Attach points + ppg for the chosen format's scoring (only the per-reception value differs).
+    Accepts a format key ('bestball'/'half'/'full') or a raw scoring ('half'/'full')."""
+    scoring = FORMATS[fmt]["scoring"] if fmt in FORMATS else fmt
     rec_pt = _REC_PT.get(scoring, 0.5)
     d = fp.copy()
     d["points"] = (d.get("pass_yds", 0) * _PASS_Y + d.get("pass_td", 0) * _PASS_TD
@@ -161,12 +179,12 @@ def _score(fp: pd.DataFrame, scoring: str = "half") -> pd.DataFrame:
 
 
 def season_board(season: int, pos: str | None = None, min_games: int = 1,
-                 scoring: str = "half") -> pd.DataFrame:
-    """Ranked board for a completed season (offense skill positions only), for the given scoring."""
+                 fmt: str = "bestball") -> pd.DataFrame:
+    """Ranked board for a completed season (offense skill positions only), for the given format."""
     fp = season_stats(season)
     if fp.empty:
         return fp
-    fp = _score(fp, scoring)
+    fp = _score(fp, fmt)
     d = fp[fp["position"].isin(FANTASY_POS) & (fp["games"] >= min_games)].copy()
     if pos:
         d = d[d["position"] == pos.upper()]
@@ -200,11 +218,11 @@ def _rookie_prior(pos: str, draft_number) -> float:
     return round(base + span * cap, 2)
 
 
-def project(scoring: str = "half") -> pd.DataFrame:
+def project(fmt: str = "bestball") -> pd.DataFrame:
     """2026 fantasy draft board: each rostered skill player projected on recency-weighted PPG
-    from 2023-25 (renormalized over the seasons he actually played) in the chosen scoring, with a
+    from 2023-25 (renormalized over the seasons he actually played) in the format's scoring, with a
     draft-capital prior for players who have no history yet (rookies)."""
-    hist = {s: _score(season_stats(s), scoring).set_index("pid") for s in _PROJ_SEASONS}
+    hist = {s: _score(season_stats(s), fmt).set_index("pid") for s in _PROJ_SEASONS}
     roster = _rosters_2026()
     rows = []
     for r in roster.itertuples():
@@ -246,14 +264,14 @@ def project(scoring: str = "half") -> pd.DataFrame:
 # ──────────────────────────────────────────────────────────────────
 #  Undervalued by OPPORTUNITY vs output (positive-regression / breakout)
 # ──────────────────────────────────────────────────────────────────
-def breakouts(season: int = 2025, top: int = 25, scoring: str = "half") -> pd.DataFrame:
+def breakouts(season: int = 2025, top: int = 25, fmt: str = "bestball") -> pd.DataFrame:
     """Players whose OPPORTUNITY (target share for WR/TE, touch share for RB) outran their
     fantasy output — the classic 'volume is there, points will follow' profile. No ADP needed.
     Youth is a tiebreaker (ascending players regress up harder)."""
     fp = season_stats(season)
     if fp.empty:
         return fp
-    fp = _score(fp, scoring)
+    fp = _score(fp, fmt)
     d = fp[fp["position"].isin(["RB", "WR", "TE"]) & (fp["games"] >= 6)].copy()
     # opportunity metric per position
     d["touch_share"] = d["rush_share"].fillna(0) + d["target_share"].fillna(0)
@@ -275,48 +293,86 @@ def breakouts(season: int = 2025, top: int = 25, scoring: str = "half") -> pd.Da
 # ──────────────────────────────────────────────────────────────────
 #  Optional market overlay — value vs Underdog ADP (drop-in CSV)
 # ──────────────────────────────────────────────────────────────────
-def draft_path(slot: int, scoring: str = "half", teams: int = 12, rounds: int = 18) -> dict:
-    """A round-by-round plan for a snake draft from `slot` (1..teams). We simulate the rest of
-    the room drafting by market order (ADP for half-PPR, PPR ECR for full), and at each of YOUR
-    picks take the best-value player still on the board (highest VOR) under best-ball roster
-    construction. Returns each pick + a couple of alternatives that should also be there."""
+def _kdst_pool():
+    """K and DST as a draft pool from the ECR export (the only complete K/DST source). Nominal
+    projections — these are streamed, low-variance positions — with market = ECR rank so they land
+    late, and replacement-level VOR so a path only takes them when the roster forces it."""
+    global _KDST
+    if _KDST is not None:
+        return _KDST
+    path = RAW / "ecr_2026.csv"
+    if not path.exists():
+        _KDST = []
+        return _KDST
+    e = pd.read_csv(path)
+    e = e[e["position"].isin(["K", "DST"])].copy().sort_values("ecr")
+    e["pr"] = e.groupby("position")["ecr"].rank(method="min").astype(int)
+    pool = []
+    for r in e.itertuples():
+        base = 8.0 if r.position == "K" else 7.0
+        pool.append({"player_id": f"{r.position}_{str(getattr(r, 'team', '')) or r.player}".replace(" ", ""),
+                     "player": r.player, "position": r.position, "team": getattr(r, "team", ""),
+                     "proj_ppg": base, "proj_points": round(base * 17, 1), "vor": -1.0,
+                     "market": float(r.ecr), "value": None, "tier": int(r.tier),
+                     "pos_rank": int(r.pr), "source": "market", "overall_rank": 9999,
+                     "our_rank": None, "order": float(r.ecr)})
+    _KDST = pool
+    return _KDST
+
+
+def draft_path(slot, fmt="bestball", teams=12, roster=None):
+    """Round-by-round plan for a custom-size snake with a custom roster. `roster` = per-position
+    target counts (QB/RB/WR/TE/K/DST); the draft runs sum(roster) rounds and fills exactly those.
+    Best Ball allows no K/DST (they're forced to 0). The room drafts by market; at your picks we
+    take the best-value player available (highest VOR) with best-ball structure: wait on QB/TE,
+    load RB/WR early, K/DST last, guarantee the core."""
+    teams = max(2, int(teams))
     slot = max(1, min(teams, int(slot)))
-    b = attach_value(with_adp(project(scoring)), scoring)
-    label = b["market_label"].iloc[0] if len(b) else _ANCHOR[scoring][1]
+    default = {"QB": 2, "RB": 5, "WR": 8, "TE": 3, "K": 0, "DST": 0}
+    roster = {**default, **{k.upper(): int(v) for k, v in (roster or {}).items()}}
+    roster = {k: max(0, int(v)) for k, v in roster.items()}
+    if not _fmt(fmt)["kdst"]:                          # Best Ball: no kickers/defenses
+        roster["K"] = roster["DST"] = 0
+    rounds = sum(roster.values())
+    if rounds <= 0:
+        roster, rounds = default, sum(default.values())
+
+    b = attach_value(with_adp(project(fmt)), fmt)
+    label = b["market_label"].iloc[0] if len(b) else _fmt(fmt)["market"]
     b = b.copy()
     mx = float(b["market"].max()) if b["market"].notna().any() else 0.0
-    # draft-order proxy: market rank; players the market doesn't rank go after everyone (by our rank)
     b["order"] = b["market"].fillna(mx + b["overall_rank"])
     recs = b.sort_values("order").to_dict("records")
+    if roster.get("K", 0) or roster.get("DST", 0):        # add K/DST only if the roster uses them
+        recs = recs + [p for p in _kdst_pool() if roster.get(p["position"], 0) > 0]
+        recs.sort(key=lambda x: x["order"])
 
-    # Round-gated position limits — how many of a position you may hold BY a given round. This
-    # encodes best-ball structure: wait on QB/TE (you only start one), load RB/WR early where
-    # startable depth is scarce. MIN guarantees a bye-safe core gets filled by the end.
-    GATE = {"QB": [(6, 1), (11, 2), (18, 3)], "TE": [(5, 1), (10, 2), (18, 3)],
-            "RB": [(18, 7)], "WR": [(18, 8)]}
-    MIN = {"QB": 2, "RB": 4, "WR": 5, "TE": 2}
-    counts = {"QB": 0, "RB": 0, "WR": 0, "TE": 0}
+    counts = {p: 0 for p in roster}
     taken = set()
 
-    def _cap_at(pos, r):
-        for gr, n in GATE[pos]:
-            if r <= gr:
-                return n
-        return GATE[pos][-1][1]
+    def cap_at(pos, r):
+        t = roster.get(pos, 0)
+        if t == 0:
+            return 0
+        if pos in ("K", "DST"):                            # only draftable in the final rounds
+            return t if r > rounds - (roster.get("K", 0) + roster.get("DST", 0)) else 0
+        if pos in ("QB", "TE"):                             # ramp the 2nd+ later (wait on them)
+            return min(t, max(1, math.ceil(t * r / rounds)))
+        return t                                            # RB/WR: full target anytime
 
-    def my_overall(r):                              # snake: even rounds reverse
+    def my_overall(r):                                      # snake: even rounds reverse
         return (r - 1) * teams + slot if r % 2 == 1 else r * teams - slot + 1
     mine = {my_overall(r): r for r in range(1, rounds + 1)}
 
     def _vor(p):
         v = p.get("vor")
-        return v if v == v else -1e9                # NaN-safe
+        return v if v == v else -1e9
 
     def _slim(p):
-        return {"player": p["player"], "position": p["position"], "team": p["team"],
-                "proj_ppg": p["proj_ppg"], "vor": p["vor"], "market": p["market"],
-                "value": p["value"], "tier": p.get("tier"), "pos_rank": p["pos_rank"],
-                "source": p["source"]}
+        return {"player": p["player"], "position": p["position"], "team": p.get("team"),
+                "proj_ppg": p["proj_ppg"], "vor": p["vor"], "market": p.get("market"),
+                "value": p.get("value"), "tier": p.get("tier"), "pos_rank": p.get("pos_rank"),
+                "source": p.get("source")}
 
     picks, total = [], teams * rounds
     for pick in range(1, total + 1):
@@ -326,29 +382,29 @@ def draft_path(slot: int, scoring: str = "half", teams: int = 12, rounds: int = 
         if pick in mine:
             r = mine[pick]
             my_left = rounds - r + 1
-            need = sum(max(0, MIN[p] - counts[p]) for p in MIN)
-            base = [p for p in avail if counts[p["position"]] < _cap_at(p["position"], r)] or avail
-            if need >= my_left:                     # running out of picks → force required slots
-                base = [p for p in base if counts[p["position"]] < MIN[p["position"]]] or base
+            need = sum(max(0, roster[p] - counts[p]) for p in roster)
+            base = [p for p in avail if counts.get(p["position"], 0) < cap_at(p["position"], r)]
+            if not base:                                   # gates blocked everything → any unfilled slot
+                base = [p for p in avail if counts.get(p["position"], 0) < roster.get(p["position"], 0)] or avail
+            if need >= my_left:                            # out of room → force still-unfilled positions
+                base = [p for p in base if counts.get(p["position"], 0) < roster.get(p["position"], 0)] or base
             ranked = sorted(base, key=lambda x: -_vor(x))
-            # prefer the best player who likely WON'T last to our next pick; else take best available.
-            # The field takes the next `intervening` best-available-by-market before our next turn
-            # (0 at the turn, where our picks are back-to-back — so nothing leaves and we take BPA).
+            # take the best player who likely WON'T last to our next pick; else best-available.
             nxt = my_overall(r + 1) if r < rounds else total + 1
             intervening = max(0, nxt - pick - 1)
             gone = {p["player_id"] for p in avail[:intervening]}   # avail is already market-order sorted
             wontlast = [p for p in ranked if p["player_id"] in gone]
             sel = (wontlast or ranked)[0]
-            counts[sel["position"]] += 1
+            counts[sel["position"]] = counts.get(sel["position"], 0) + 1
             taken.add(sel["player_id"])
             alts = [a for a in ranked if a["player_id"] != sel["player_id"]][:3]
             picks.append({"round": r, "overall_pick": pick, **_slim(sel),
                           "alts": [_slim(a) for a in alts]})
         else:
-            taken.add(avail[0]["player_id"])         # the field takes best-available by market
+            taken.add(avail[0]["player_id"])               # the field takes best-available by market
 
-    return {"slot": slot, "teams": teams, "rounds": rounds, "scoring": scoring,
-            "market_label": label, "counts": counts,
+    return {"slot": slot, "teams": teams, "rounds": rounds, "scoring": fmt,
+            "market_label": label, "roster": roster, "counts": counts,
             "roster_ppg": round(sum(p["proj_ppg"] for p in picks), 1), "picks": picks}
 
 
@@ -372,17 +428,13 @@ def with_adp(board: pd.DataFrame) -> pd.DataFrame:
     return _with_ecr(board)
 
 
-# which market list anchors "value" in each scoring (Underdog ADP is half-PPR best ball; the
-# FantasyPros ECR export is full PPR — so full-PPR value is measured against ECR, not the ADP).
-_ANCHOR = {"half": ("adp", "Underdog ADP"), "full": ("ecr", "PPR ECR")}
-
-
-def attach_value(board: pd.DataFrame, scoring: str = "half") -> pd.DataFrame:
-    """Compute our_rank + value against the FORMAT-APPROPRIATE market anchor. Both are put on
-    the same scale first (re-rank our board over just the players the anchor covers) so
-    value = anchor_rank − our_rank; +value = we're higher than that market = a target."""
+def attach_value(board: pd.DataFrame, fmt: str = "bestball") -> pd.DataFrame:
+    """Compute our_rank + value against the FORMAT-APPROPRIATE market anchor (Best Ball & Half PPR
+    → Underdog ADP; Full PPR → PPR ECR). Both are put on the same scale first (re-rank our board
+    over just the players the anchor covers) so value = anchor_rank − our_rank; +value = we're
+    higher than that market = a target."""
     board = board.copy()
-    col, label = _ANCHOR.get(scoring, _ANCHOR["half"])
+    col, label = _fmt(fmt)["anchor"], _fmt(fmt)["market"]
     board["market"] = board.get(col)
     board["market_label"] = label
     if "overall_rank" in board.columns:
@@ -410,16 +462,16 @@ def _with_ecr(board: pd.DataFrame) -> pd.DataFrame:
     return board
 
 
-def value_board(max_adp: int = 216, top: int = 30, scoring: str = "half"):
+def value_board(max_adp: int = 216, top: int = 30, fmt: str = "bestball"):
     """Market-vs-us within the draftable pool (default ADP ≤ 216 = 18 rounds × 12 teams).
     Restricted to players with real PRODUCTION history — our projection for rookies/depth is a
     crude prior, so calling the market wrong on them is noise, not signal. Sorted by value:
     positive = we're higher than ADP (target), negative = market reaches vs our board (fade).
 
-    The market anchor matches the format: half-PPR → Underdog best-ball ADP; full-PPR →
-    FantasyPros PPR expert ranks — so each format is graded against its own market."""
-    b = attach_value(with_adp(project(scoring)), scoring)
-    label = b["market_label"].iloc[0] if len(b) else _ANCHOR[scoring][1]
+    The market anchor matches the format (Best Ball / Half PPR → Underdog ADP; Full PPR → PPR
+    ECR), so each format is graded against its own market."""
+    b = attach_value(with_adp(project(fmt)), fmt)
+    label = b["market_label"].iloc[0] if len(b) else _fmt(fmt)["market"]
     d = b[b["market"].notna() & (b["market"] <= max_adp) & (b["source"] == "production")].copy()
     d = d.sort_values("value", ascending=False)
     cols = ["player", "position", "team", "proj_ppg", "our_rank", "market", "value", "pos_rank", "tier"]

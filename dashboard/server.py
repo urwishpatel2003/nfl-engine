@@ -824,30 +824,33 @@ def api_fantasy():
     a real draft), plus opportunity-vs-production 'undervalued/breakout' candidates. If an ADP CSV
     is dropped at data/raw/adp_underdog.csv, the board also shows ADP + value vs our rank."""
     from ml.fantasy import (project, breakouts, with_adp, attach_value, value_board,
-                            draft_path, SCORINGS)
+                            draft_path, FORMATS)
     view = request.args.get('view', 'board')
     pos = request.args.get('pos')
-    scoring = request.args.get('scoring', 'half')
-    if scoring not in SCORINGS:
-        scoring = 'half'
+    fmt = request.args.get('scoring', 'bestball')        # 'scoring' param carries the format key
+    if fmt not in FORMATS:
+        fmt = 'bestball'
     if view == 'path':
         slot = int(request.args.get('slot', 6))
-        return jsonify(_native(draft_path(slot, scoring=scoring)))
+        teams = int(request.args.get('teams', 12))
+        roster = {p: int(request.args.get(p.lower(), d)) for p, d in
+                  (('QB', 2), ('RB', 5), ('WR', 8), ('TE', 3), ('K', 0), ('DST', 0))}
+        return jsonify(_native(draft_path(slot, fmt=fmt, teams=teams, roster=roster)))
     if view == 'breakouts':
-        d = breakouts(2025, top=int(request.args.get('top', 25)), scoring=scoring)
-        return jsonify(_native({"view": "breakouts", "season": 2025, "scoring": scoring,
+        d = breakouts(2025, top=int(request.args.get('top', 25)), fmt=fmt)
+        return jsonify(_native({"view": "breakouts", "season": 2025, "scoring": fmt,
                                 "players": d.to_dict('records')}))
     if view == 'values':
-        tg, fd, market = value_board(top=int(request.args.get('top', 30)), scoring=scoring)
-        return jsonify(_native({"view": "values", "scoring": scoring, "market_label": market,
+        tg, fd, market = value_board(top=int(request.args.get('top', 30)), fmt=fmt)
+        return jsonify(_native({"view": "values", "scoring": fmt, "market_label": market,
                                 "targets": tg.to_dict('records'), "fades": fd.to_dict('records')}))
-    b = attach_value(with_adp(project(scoring)), scoring)
+    b = attach_value(with_adp(project(fmt)), fmt)
     label = b['market_label'].iloc[0] if len(b) else ''
     if pos and pos.upper() in ('QB', 'RB', 'WR', 'TE'):
         b = b[b['position'] == pos.upper()]
     has_adp = bool(b['adp'].notna().any())
     b = b.head(int(request.args.get('limit', 240)))
-    return jsonify(_native({"view": "board", "has_adp": has_adp, "scoring": scoring,
+    return jsonify(_native({"view": "board", "has_adp": has_adp, "scoring": fmt,
                             "market_label": label, "count": len(b), "players": b.to_dict('records')}))
 
 

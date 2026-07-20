@@ -210,6 +210,15 @@
   .ftbl .nm{font-weight:600}
   .tier{display:inline-block;background:#1b2c4a;border:1px solid #2f4a78;color:#9fc2ff;
         font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:5px}
+  /* draft-path config bar */
+  .cfgbar{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:14px}
+  .cfgk{display:block;color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
+  .rosgrid{display:flex;gap:8px;flex-wrap:wrap}
+  .ros{display:flex;align-items:center;gap:5px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:4px 7px}
+  .ros .rlbl{font-size:11px;font-weight:700;color:var(--muted);min-width:30px}
+  .ros button{width:24px;height:24px;padding:0;background:#1b2c4a;color:#cfe0ff;border:1px solid #2f4a78;border-radius:6px;font-size:16px;line-height:1;cursor:pointer}
+  .ros button:hover{border-color:var(--accent)}
+  .ros .rn{width:18px;text-align:center;font-weight:700;font-variant-numeric:tabular-nums}
   .val-pos{color:var(--good);font-weight:700}.val-neg{color:var(--bad);font-weight:700}
   .ftgap{height:8px;background:#0e1626;border-radius:4px;overflow:hidden;min-width:60px}
   .ftgap i{display:block;height:100%;background:linear-gradient(90deg,#3b82f6,#22c55e)}
@@ -672,26 +681,35 @@ async function viewMatchup(home, away, neutral){
 
 // ── VIEW: fantasy (best-ball draft board) ───────────────────────────
 const FT_POS = ['ALL','QB','RB','WR','TE'];
-const FT_SCORING = [['half','Best Ball · ½-PPR'],['full','Full PPR']];
+const FT_SCORING = [['bestball','Best Ball'],['half','Half PPR'],['full','Full PPR']];
+const FT_FMT_SUB = {bestball:'Underdog Best Ball · half-PPR · no K/DST', half:'Half-PPR redraft · with K/DST', full:'Full-PPR redraft · with K/DST'};
 async function viewFantasy(params){
   const mode = (params && params.get('mode')) || 'board';
   const pos  = (params && params.get('pos')) || 'ALL';
-  const sc   = (params && params.get('scoring')) || 'half';
-  const slot = (params && params.get('slot')) || '6';
+  const sc   = (params && params.get('scoring')) || 'bestball';
+  const teams= (params && params.get('teams')) || '12';
+  let slotN = parseInt((params && params.get('slot')) || '6') || 1;
+  slotN = Math.max(1, Math.min(parseInt(teams)||12, slotN));
+  const slot = ''+slotN;
+  const rq = {qb:(params&&params.get('qb'))||'2', rb:(params&&params.get('rb'))||'5',
+              wr:(params&&params.get('wr'))||'8', te:(params&&params.get('te'))||'3',
+              k:(params&&params.get('k'))||'0', dst:(params&&params.get('dst'))||'0'};
+  FT_PATH = {scoring:sc, teams, slot, ...rq};
+  const pathParams = `&teams=${teams}&slot=${slot}&qb=${rq.qb}&rb=${rq.rb}&wr=${rq.wr}&te=${rq.te}&k=${rq.k}&dst=${rq.dst}`;
   const q=(m,extra='')=>`#/fantasy?mode=${m}&scoring=${sc}${extra}`;   // preserve scoring across modes
-  const scExtra = mode==='board' ? '&pos='+pos : mode==='path' ? '&slot='+slot : '';
+  const scExtra = mode==='board' ? '&pos='+pos : mode==='path' ? pathParams : '';
   app().innerHTML = `<div class="pad">
     <div class="viewhead">
-      <div class="ttl">Fantasy Draft <span>${sc==='full'?'Full PPR':'Underdog Best Ball · half-PPR'} · our 2026 projections</span></div>
+      <div class="ttl">Fantasy Draft <span>${FT_FMT_SUB[sc]||''} · our 2026 projections</span></div>
       <div class="segbar">
         <button class="${mode==='board'?'on':''}" onclick="go('${q('board','&pos='+pos)}')">Draft Board</button>
-        <button class="${mode==='path'?'on':''}" onclick="go('${q('path','&slot='+slot)}')">Draft Path</button>
+        <button class="${mode==='path'?'on':''}" onclick="go('${q('path',pathParams)}')">Draft Path</button>
         <button class="${mode==='values'?'on':''}" onclick="go('${q('values')}')">Value vs ADP</button>
         <button class="${mode==='breakouts'?'on':''}" onclick="go('${q('breakouts')}')">Breakouts</button>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
-      <span style="color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.5px">Scoring</span>
+      <span style="color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.5px">Format</span>
       <div class="segbar">${FT_SCORING.map(([k,lbl])=>`<button class="${sc===k?'on':''}" onclick="go('#/fantasy?mode=${mode}&scoring=${k}${scExtra}')">${lbl}</button>`).join('')}</div>
     </div>
     <div class="card"><div id="ftBody"><div class="loading">Crunching play-by-play…</div></div></div>
@@ -705,8 +723,8 @@ async function viewFantasy(params){
       const d=await j('/api/fantasy?view=values&top=30&scoring='+sc);
       body.innerHTML = ftValues(d,sc);
     }else if(mode==='path'){
-      const d=await j('/api/fantasy?view=path&scoring='+sc+'&slot='+slot);
-      body.innerHTML = ftSlotPicker(slot,sc) + ftPath(d);
+      const d=await j(`/api/fantasy?view=path&scoring=${sc}${pathParams}`);
+      body.innerHTML = ftPathConfig() + ftPath(d);
     }else{
       const d=await j('/api/fantasy?view=board&limit=240&scoring='+sc+(pos!=='ALL'?'&pos='+pos:''));
       body.innerHTML = ftPosFilter(pos,sc) + ftBoard(d);
@@ -716,8 +734,23 @@ async function viewFantasy(params){
 function ftPosFilter(pos,sc){
   return `<div class="posfil">${FT_POS.map(p=>`<span class="pf ${p===pos?'on':''}" onclick="go('#/fantasy?mode=board&scoring=${sc}&pos=${p}')">${p}</span>`).join('')}</div>`;
 }
-function ftSlotPicker(slot,sc){
-  return `<div class="posfil"><span style="color:var(--muted);font-size:12px;align-self:center;margin-right:2px;text-transform:uppercase;letter-spacing:.5px">Draft slot</span>${Array.from({length:12},(_,i)=>i+1).map(n=>`<span class="pf ${(''+n)===(''+slot)?'on':''}" onclick="go('#/fantasy?mode=path&scoring=${sc}&slot=${n}')">${n}</span>`).join('')}</div>`;
+let FT_PATH = {};
+const FT_ROS = [['qb','QB'],['rb','RB'],['wr','WR'],['te','TE'],['k','K'],['dst','DST']];
+function ftPathGo(o){
+  const p = {...FT_PATH, ...o};
+  if(p.scoring==='bestball'){ p.k='0'; p.dst='0'; }   // Best Ball has no kickers/defenses
+  const t = parseInt(p.teams)||12; let s = parseInt(p.slot)||1; s = Math.max(1, Math.min(t, s)); p.slot = ''+s;
+  go(`#/fantasy?mode=path&scoring=${p.scoring}&teams=${p.teams}&slot=${p.slot}&qb=${p.qb}&rb=${p.rb}&wr=${p.wr}&te=${p.te}&k=${p.k}&dst=${p.dst}`);
+}
+function ftStep(key,delta){ const cur=parseInt(FT_PATH[key]||'0')||0; ftPathGo({[key]: Math.max(0,Math.min(15,cur+delta))}); }
+function ftPathConfig(){
+  const P=FT_PATH, t=parseInt(P.teams)||12, sizes=[8,10,12,14];
+  const ros = P.scoring==='bestball' ? FT_ROS.filter(([k])=>k!=='k'&&k!=='dst') : FT_ROS;   // no K/DST in Best Ball
+  const total=ros.reduce((a,[k])=>a+(parseInt(P[k])||0),0);
+  const size=`<div style="margin-bottom:12px"><span class="cfgk">League size</span><div class="segbar">${sizes.map(n=>`<button class="${n==t?'on':''}" onclick="ftPathGo({teams:${n}})">${n}-team</button>`).join('')}</div></div>`;
+  const rosbar=`<div style="margin-bottom:12px"><span class="cfgk">Roster — ${total} rounds${P.scoring==='bestball'?' · Best Ball (no K/DST)':''}</span><div class="rosgrid">${ros.map(([k,lbl])=>`<div class="ros"><span class="rlbl">${lbl}</span><button onclick="ftStep('${k}',-1)">−</button><span class="rn">${parseInt(P[k])||0}</span><button onclick="ftStep('${k}',1)">+</button></div>`).join('')}</div></div>`;
+  const slotbar=`<div><span class="cfgk">Draft slot</span><div class="posfil" style="margin-top:0">${Array.from({length:t},(_,i)=>i+1).map(n=>`<span class="pf ${(''+n)===(''+P.slot)?'on':''}" onclick="ftPathGo({slot:${n}})">${n}</span>`).join('')}</div></div>`;
+  return `<div class="cfgbar">${size}${rosbar}${slotbar}</div>`;
 }
 function ftPath(d){
   const picks=d.picks||[]; if(!picks.length) return '<div class="loading">No path generated.</div>';
@@ -734,7 +767,8 @@ function ftPath(d){
       <td class="r ${v>0?'val-pos':v<0?'val-neg':''}">${v!=null?(v>0?'+':'')+Math.round(v):'—'}</td>
       <td class="pr" style="font-size:11px">${alts}</td></tr>`;
   }).join('');
-  return `<div class="note" style="margin:0 0 12px">Simulated 12-team snake from <b>slot ${esc(''+d.slot)}</b>: the room drafts by <b>${esc(mkt)}</b>, and at each of your picks we take the best-value player still on the board (highest VOR) under best-ball rules — wait on QB/TE, load RB/WR early, guarantee a bye-safe core. <b>Build: ${c.QB}QB · ${c.RB}RB · ${c.WR}WR · ${c.TE}TE</b>. "Alternatives" should also be there if you'd rather pivot.</div>
+  const bd=['QB','RB','WR','TE','K','DST'].filter(p=>(c[p]||0)>0).map(p=>`${c[p]}${p}`).join(' · ');
+  return `<div class="note" style="margin:0 0 12px">Simulated <b>${esc(''+d.teams)}-team</b> snake from <b>slot ${esc(''+d.slot)}</b> (${esc(''+d.rounds)} rounds): the room drafts by <b>${esc(mkt)}</b>, and at each of your picks we take the best-value player still on the board (highest VOR) under best-ball rules — wait on QB/TE, load RB/WR early, K/DST last, fill your exact roster. <b>Build: ${esc(bd)}</b>. "Alternatives" should also be there if you'd rather pivot.</div>
     <div style="overflow-x:auto"><table class="ftbl"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
 }
 function ftBoard(d){
