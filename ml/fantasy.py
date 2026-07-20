@@ -275,6 +275,83 @@ def breakouts(season: int = 2025, top: int = 25, scoring: str = "half") -> pd.Da
 # ──────────────────────────────────────────────────────────────────
 #  Optional market overlay — value vs Underdog ADP (drop-in CSV)
 # ──────────────────────────────────────────────────────────────────
+def draft_path(slot: int, scoring: str = "half", teams: int = 12, rounds: int = 18) -> dict:
+    """A round-by-round plan for a snake draft from `slot` (1..teams). We simulate the rest of
+    the room drafting by market order (ADP for half-PPR, PPR ECR for full), and at each of YOUR
+    picks take the best-value player still on the board (highest VOR) under best-ball roster
+    construction. Returns each pick + a couple of alternatives that should also be there."""
+    slot = max(1, min(teams, int(slot)))
+    b = attach_value(with_adp(project(scoring)), scoring)
+    label = b["market_label"].iloc[0] if len(b) else _ANCHOR[scoring][1]
+    b = b.copy()
+    mx = float(b["market"].max()) if b["market"].notna().any() else 0.0
+    # draft-order proxy: market rank; players the market doesn't rank go after everyone (by our rank)
+    b["order"] = b["market"].fillna(mx + b["overall_rank"])
+    recs = b.sort_values("order").to_dict("records")
+
+    # Round-gated position limits — how many of a position you may hold BY a given round. This
+    # encodes best-ball structure: wait on QB/TE (you only start one), load RB/WR early where
+    # startable depth is scarce. MIN guarantees a bye-safe core gets filled by the end.
+    GATE = {"QB": [(6, 1), (11, 2), (18, 3)], "TE": [(5, 1), (10, 2), (18, 3)],
+            "RB": [(18, 7)], "WR": [(18, 8)]}
+    MIN = {"QB": 2, "RB": 4, "WR": 5, "TE": 2}
+    counts = {"QB": 0, "RB": 0, "WR": 0, "TE": 0}
+    taken = set()
+
+    def _cap_at(pos, r):
+        for gr, n in GATE[pos]:
+            if r <= gr:
+                return n
+        return GATE[pos][-1][1]
+
+    def my_overall(r):                              # snake: even rounds reverse
+        return (r - 1) * teams + slot if r % 2 == 1 else r * teams - slot + 1
+    mine = {my_overall(r): r for r in range(1, rounds + 1)}
+
+    def _vor(p):
+        v = p.get("vor")
+        return v if v == v else -1e9                # NaN-safe
+
+    def _slim(p):
+        return {"player": p["player"], "position": p["position"], "team": p["team"],
+                "proj_ppg": p["proj_ppg"], "vor": p["vor"], "market": p["market"],
+                "value": p["value"], "tier": p.get("tier"), "pos_rank": p["pos_rank"],
+                "source": p["source"]}
+
+    picks, total = [], teams * rounds
+    for pick in range(1, total + 1):
+        avail = [p for p in recs if p["player_id"] not in taken]
+        if not avail:
+            break
+        if pick in mine:
+            r = mine[pick]
+            my_left = rounds - r + 1
+            need = sum(max(0, MIN[p] - counts[p]) for p in MIN)
+            base = [p for p in avail if counts[p["position"]] < _cap_at(p["position"], r)] or avail
+            if need >= my_left:                     # running out of picks → force required slots
+                base = [p for p in base if counts[p["position"]] < MIN[p["position"]]] or base
+            ranked = sorted(base, key=lambda x: -_vor(x))
+            # prefer the best player who likely WON'T last to our next pick; else take best available.
+            # The field takes the next `intervening` best-available-by-market before our next turn
+            # (0 at the turn, where our picks are back-to-back — so nothing leaves and we take BPA).
+            nxt = my_overall(r + 1) if r < rounds else total + 1
+            intervening = max(0, nxt - pick - 1)
+            gone = {p["player_id"] for p in avail[:intervening]}   # avail is already market-order sorted
+            wontlast = [p for p in ranked if p["player_id"] in gone]
+            sel = (wontlast or ranked)[0]
+            counts[sel["position"]] += 1
+            taken.add(sel["player_id"])
+            alts = [a for a in ranked if a["player_id"] != sel["player_id"]][:3]
+            picks.append({"round": r, "overall_pick": pick, **_slim(sel),
+                          "alts": [_slim(a) for a in alts]})
+        else:
+            taken.add(avail[0]["player_id"])         # the field takes best-available by market
+
+    return {"slot": slot, "teams": teams, "rounds": rounds, "scoring": scoring,
+            "market_label": label, "counts": counts,
+            "roster_ppg": round(sum(p["proj_ppg"] for p in picks), 1), "picks": picks}
+
+
 def with_adp(board: pd.DataFrame) -> pd.DataFrame:
     """If data/raw/adp_underdog.csv exists (columns: player, position, adp), merge it and
     compute value = our overall_rank − ADP (positive = we like him more than the market =
