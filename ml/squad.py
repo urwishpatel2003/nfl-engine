@@ -36,7 +36,11 @@ PROC = Path(__file__).parent.parent / "data" / "processed"
 
 # QB is the dominant position in the NFL, so it carries the most weight. Coaching is
 # down-weighted: it's noisy, partly results-derived, and blind to 2026 staff changes.
-WEIGHTS = {"qb": 0.40, "skill": 0.17, "ol": 0.10, "rush": 0.12, "cover": 0.13, "coach": 0.05}
+# Team-quality weights. Offense ~51% / defense ~41% / coaching ~8% — defense now carries real
+# weight AND a proper team-level opponent-adjusted signal (def_team = run + pass), not just
+# noisy individual pass-rush/coverage. QB is still the biggest single factor but no longer 40%.
+WEIGHTS = {"qb": 0.30, "skill": 0.13, "ol": 0.08,
+           "def_team": 0.20, "rush": 0.09, "cover": 0.12, "coach": 0.08}
 RATING_SCALE = 9.0   # maps the blended z-score to ~points; sets the spread of the ranking
 
 
@@ -288,6 +292,21 @@ def _ol():
     return -_z(ol["sack_rate_allowed"]) + _z(ol.get("ypc", pd.Series(0, index=ol.index)))
 
 
+def _def_team():
+    """Opponent-adjusted TEAM defense (run + pass EPA suppressed), higher = better. A complete,
+    schedule-adjusted defensive signal — much stronger than name-matched individual stats."""
+    from ml.adjust import adjusted_unit_epa
+    adj = adjusted_unit_epa(2025)
+    if adj:
+        return pd.Series({t: -(d.get("def_pass", 0.0) + d.get("def_rush", 0.0)) for t, d in adj.items()})
+    p = PROC / "team_styles.parquet"                               # fallback: raw def EPA
+    if p.exists():
+        s = pd.read_parquet(p); s = s[s["season"] == s["season"].max()]
+        if "def_epa_per_play" in s.columns:
+            return -s.set_index("team")["def_epa_per_play"]
+    return pd.Series(dtype=float)
+
+
 def _coaching():
     # multi-year (2023-2025) mean, so a single strong season doesn't spike a team
     c = pd.read_parquet(PROC / "coaching_scores.parquet")
@@ -305,6 +324,7 @@ def squad_ratings(breakdown: bool = False) -> pd.DataFrame:
     g["qb"]    = _qb_starter()                                      # depth-chart starter, EPA/play
     g["skill"] = _offense_group(roster, skill_val, ["WR", "RB", "TE"], 5)
     g["ol"]    = _ol()
+    g["def_team"] = _def_team()                                    # opponent-adjusted team defense (run+pass)
     g["rush"]  = _pass_rush(roster)
     g["cover"] = _coverage(roster)
     g["coach"] = _coaching()
