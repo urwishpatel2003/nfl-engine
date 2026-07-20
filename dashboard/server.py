@@ -818,6 +818,27 @@ def api_backtest():
     return jsonify(_native(res))
 
 
+@app.route('/api/fantasy')
+def api_fantasy():
+    """Best-ball fantasy: our 2026 VOR-ranked draft board (value-over-replacement so it flows like
+    a real draft), plus opportunity-vs-production 'undervalued/breakout' candidates. If an ADP CSV
+    is dropped at data/raw/adp_underdog.csv, the board also shows ADP + value vs our rank."""
+    from ml.fantasy import project, breakouts, with_adp
+    view = request.args.get('view', 'board')
+    pos = request.args.get('pos')
+    if view == 'breakouts':
+        d = breakouts(2025, top=int(request.args.get('top', 25)))
+        return jsonify(_native({"view": "breakouts", "season": 2025,
+                                "players": d.to_dict('records')}))
+    b = with_adp(project())
+    if pos and pos.upper() in ('QB', 'RB', 'WR', 'TE'):
+        b = b[b['position'] == pos.upper()]
+    has_adp = bool(b['adp'].notna().any())
+    b = b.head(int(request.args.get('limit', 240)))
+    return jsonify(_native({"view": "board", "has_adp": has_adp, "count": len(b),
+                            "players": b.to_dict('records')}))
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  DATA REFRESH — download latest nflverse data + rebuild light tables
 #  Runs in a background thread (POST /api/refresh) or on an in-process
@@ -850,7 +871,7 @@ def clear_caches():
         ml.backtest_spreads._BLEND_W = None           # recompute optimal blend after refresh
     except Exception:
         pass
-    for modname in ("ml.matchup_context", "ml.coaching"):
+    for modname in ("ml.matchup_context", "ml.coaching", "ml.fantasy"):
         try:
             import importlib
             importlib.import_module(modname).clear()

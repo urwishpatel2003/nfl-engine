@@ -188,6 +188,30 @@
   .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
   svg text{fill:var(--muted)}
 
+  /* ── fantasy board ── */
+  .segbar{display:inline-flex;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:3px;gap:2px}
+  .segbar button{width:auto;background:transparent;color:var(--muted);padding:7px 14px;font-size:13px;border-radius:7px}
+  .segbar button.on{background:var(--accent);color:#fff}
+  .posfil{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0}
+  .posfil .pf{padding:6px 13px;border-radius:20px;border:1px solid var(--line);background:var(--panel2);
+              color:var(--muted);font-size:12.5px;font-weight:600;cursor:pointer}
+  .posfil .pf.on{background:#16233b;border-color:var(--accent);color:var(--txt)}
+  .ftbl{width:100%;border-collapse:collapse;font-size:13px}
+  .ftbl th{text-align:left;color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;
+           padding:8px 10px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel)}
+  .ftbl th.r,.ftbl td.r{text-align:right;font-variant-numeric:tabular-nums}
+  .ftbl td{padding:8px 10px;border-bottom:1px solid #1a2334}
+  .ftbl tr:hover td{background:#161f33}
+  .ftbl .pos{display:inline-block;min-width:34px;text-align:center;font-size:10.5px;font-weight:700;
+             padding:2px 6px;border-radius:5px}
+  .pos-QB{background:#2a1836;color:#d6a8ff}.pos-RB{background:#0f2a1c;color:#7fe3ad}
+  .pos-WR{background:#13233f;color:#8fc0ff}.pos-TE{background:#33260f;color:#f0c079}
+  .ftbl .pr{color:var(--muted);font-size:11px}
+  .ftbl .nm{font-weight:600}
+  .val-pos{color:var(--good);font-weight:700}.val-neg{color:var(--bad);font-weight:700}
+  .ftgap{height:8px;background:#0e1626;border-radius:4px;overflow:hidden;min-width:60px}
+  .ftgap i{display:block;height:100%;background:linear-gradient(90deg,#3b82f6,#22c55e)}
+
   /* ── polish: consistent capitalization + clearer emphasis ── */
   .cap{text-transform:capitalize}
   /* offense/defense scheme labels rendered as colored pills (not run-on muted text) */
@@ -230,6 +254,7 @@
     <a href="#/team">Team</a>
     <a href="#/trends">Trends</a>
     <a href="#/matchup">Matchup</a>
+    <a href="#/fantasy">Fantasy</a>
     <a href="#/refresh">Refresh</a>
   </nav>
 </header>
@@ -321,6 +346,7 @@ async function route(){
     else if(view==='team')     await viewTeam(arg || TEAMS[0].team);
     else if(view==='trends')   await viewTrends(arg || (RANKINGS[0]&&RANKINGS[0].team));
     else if(view==='matchup')  await viewMatchup(params.get('home'), params.get('away'), params.get('neutral')==='1');
+    else if(view==='fantasy')  await viewFantasy(params);
     else if(view==='refresh')  await viewRefresh();
     else                       await viewRankings();
   }catch(e){ app().innerHTML = `<div class="note warn pad">Something went wrong loading this view: ${esc(e.message)}</div>`; }
@@ -640,6 +666,66 @@ async function viewMatchup(home, away, neutral){
   const p = await j(`/api/matchup_players?home=${h}&away=${a}`);
   const box=document.getElementById('mBox');
   box.innerHTML = p.error? '<div class="loading">No projection available.</div>' : boxTeam(a,p.teams[a])+boxTeam(h,p.teams[h]);
+}
+
+// ── VIEW: fantasy (best-ball draft board) ───────────────────────────
+const FT_POS = ['ALL','QB','RB','WR','TE'];
+async function viewFantasy(params){
+  const mode = (params && params.get('mode')) || 'board';
+  const pos  = (params && params.get('pos')) || 'ALL';
+  app().innerHTML = `<div class="pad">
+    <div class="viewhead">
+      <div class="ttl">Best-Ball Fantasy <span>Underdog half-PPR · our 2026 projections</span></div>
+      <div class="segbar">
+        <button class="${mode==='board'?'on':''}" onclick="go('#/fantasy?mode=board&pos=${pos}')">Draft Board</button>
+        <button class="${mode==='breakouts'?'on':''}" onclick="go('#/fantasy?mode=breakouts')">Undervalued</button>
+      </div>
+    </div>
+    <div class="card"><div id="ftBody"><div class="loading">Crunching play-by-play…</div></div></div>
+  </div>`;
+  const body=document.getElementById('ftBody');
+  try{
+    if(mode==='breakouts'){
+      const d=await j('/api/fantasy?view=breakouts&top=30');
+      body.innerHTML = ftBreakouts(d.players||[]);
+    }else{
+      const d=await j('/api/fantasy?view=board&limit=240'+(pos!=='ALL'?'&pos='+pos:''));
+      body.innerHTML = ftPosFilter(pos) + ftBoard(d);
+    }
+  }catch(e){ body.innerHTML=`<div class="note warn">Could not load fantasy data: ${esc(e.message)}</div>`; }
+}
+function ftPosFilter(pos){
+  return `<div class="posfil">${FT_POS.map(p=>`<span class="pf ${p===pos?'on':''}" onclick="go('#/fantasy?mode=board&pos=${p}')">${p}</span>`).join('')}</div>`;
+}
+function ftBoard(d){
+  const hasAdp=d.has_adp, rows=d.players||[];
+  if(!rows.length) return '<div class="loading">No players.</div>';
+  const head=`<tr><th class="r">#</th><th>Player</th><th>Pos</th><th>Team</th><th class="r">Proj PPG</th><th class="r">Proj Pts</th><th class="r">VOR</th>${hasAdp?'<th class="r">ADP</th><th class="r">Value</th>':''}</tr>`;
+  const b=rows.map(p=>{
+    const src=(p.source&&p.source!=='production')?` <span class="pr">${esc(p.source)}</span>`:'';
+    const v=p.value;
+    const valcell=hasAdp?`<td class="r">${p.adp!=null?Number(p.adp).toFixed(1):'—'}</td><td class="r ${v>0?'val-pos':v<0?'val-neg':''}">${v!=null?(v>0?'+':'')+v:'—'}</td>`:'';
+    return `<tr><td class="r pr">${p.overall_rank}</td><td class="nm">${esc(p.player)}${src}</td>
+      <td><span class="pos pos-${p.position}">${p.position}${p.pos_rank}</span></td>
+      <td>${esc(p.team||'')}</td><td class="r">${Number(p.proj_ppg).toFixed(1)}</td>
+      <td class="r">${Number(p.proj_points).toFixed(0)}</td><td class="r">${Number(p.vor).toFixed(0)}</td>${valcell}</tr>`;
+  }).join('');
+  const note = hasAdp?'' : `<div class="note" style="margin:0 0 12px">This is our <b>pure projection board</b> (recency-weighted production × value-over-replacement, so it flows like a real draft — elite RB/WR first, QBs slide). Drop an ADP export at <code>data/raw/adp_underdog.csv</code> (columns: player, position, adp) to light up value-vs-ADP.</div>`;
+  return note + `<div style="overflow-x:auto"><table class="ftbl"><thead>${head}</thead><tbody>${b}</tbody></table></div>`;
+}
+function ftBreakouts(rows){
+  if(!rows.length) return '<div class="loading">No breakout candidates.</div>';
+  const head=`<tr><th>Player</th><th>Pos</th><th>Team</th><th class="r">2025 PPG</th><th>Opportunity vs production</th><th class="r">Exp</th></tr>`;
+  const b=rows.map(p=>{
+    const gap=Math.round(p.gap), w=Math.min(100,Math.max(6,gap*2));
+    return `<tr><td class="nm">${esc(p.player_name)}</td>
+      <td><span class="pos pos-${p.position}">${p.position}</span></td><td>${esc(p.team||'')}</td>
+      <td class="r">${Number(p.ppg).toFixed(1)}</td>
+      <td><div style="display:flex;align-items:center;gap:8px"><div class="ftgap" style="flex:1"><i style="width:${w}%"></i></div><span class="pr">opp ${Math.round(p.opp_pctl)} · prod ${Math.round(p.prod_pctl)} → +${gap}</span></div></td>
+      <td class="r">${p.years_exp!=null?p.years_exp:'—'}</td></tr>`;
+  }).join('');
+  return `<div class="note" style="margin:0 0 12px">Players who earned the <b>volume</b> in 2025 — target share (WR/TE) or touch share (RB) — but not yet the fantasy points. That's the profile that regresses <b>up</b>. Ranked by the opportunity-minus-production gap; younger players weighted higher.</div>
+    <div style="overflow-x:auto"><table class="ftbl"><thead>${head}</thead><tbody>${b}</tbody></table></div>`;
 }
 
 // ── VIEW: schedule (weekly slate, auto-predicted) ───────────────────
