@@ -661,6 +661,8 @@ def api_matchup_full():
     res["schemes"] = {home: scheme(home), away: scheme(away)}
     res["form"] = {home: form(home), away: form(away)}
     res["injuries"] = {home: latest_injuries(home), away: latest_injuries(away)}
+    from ml.spreads import simulate
+    res["simulation"] = simulate(res["pred_margin"], res["pred_total"])
     return jsonify(_native(res))
 
 
@@ -734,6 +736,8 @@ def api_schedule():
     # over/under read. Rank the top-5 plays by cover probability (accounts for key numbers,
     # not just raw edge).
     from ml.spreads import ats_pick as _ats_pick, total_prob as _total_prob
+    from ml.backtest_spreads import blend_weight
+    w = blend_weight()                               # optimal market-anchored ensemble weight
     scored = [g for g in games if g.get("pred_margin") is not None and g.get("vegas_spread") is not None]
     for g in scored:
         a = _ats_pick(g["pred_margin"], g["vegas_spread"])
@@ -741,6 +745,8 @@ def api_schedule():
         g["ats_pick"] = g["home"] if a["side"] == "home" else g["away"]
         g["cover_prob"] = a["cover_prob"]
         g["push_prob"] = a["push"]
+        g["blend_margin"] = round((1 - w) * g["pred_margin"] + w * g["vegas_spread"], 1)
+        g["blend_weight"] = w
         if g.get("pred_total") is not None and g.get("vegas_total") is not None:
             tp = _total_prob(g["pred_total"], g["vegas_total"])
             over = tp["over"] >= tp["under"]
@@ -794,6 +800,11 @@ def clear_caches():
             getattr(importlib.import_module(modname), cachename).clear()
         except Exception:
             pass
+    try:
+        import ml.backtest_spreads
+        ml.backtest_spreads._BLEND_W = None           # recompute optimal blend after refresh
+    except Exception:
+        pass
     for mod, attr in [("ml.matchup_engine", "_UNITS"), ("ml.squad", "_PCT_CACHE"),
                       ("ml.squad", "_META_CACHE"), ("ml.squad", "_SKILL_CACHE"),
                       ("ml.squad", "_PBP_AGG"), ("ml.projections", "_PROFILE_CACHE"),

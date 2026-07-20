@@ -487,6 +487,20 @@ function injPanel(tm, iv){
   return hdr+iv.players.map(p=>`<div class="inj"><span class="bn">${esc(p.name)} <span style="color:var(--muted)">${esc(p.position||'')}</span></span>
     <span><span class="st st-${esc(p.status)}">${esc(p.status)}</span> <span style="color:var(--muted);font-size:11px">${esc(p.injury)}</span></span></div>`).join('')+`</div>`;
 }
+function simPanel(r){
+  const s=r.simulation; if(!s) return '';
+  const km=s.key_margins||{};
+  const rows=[3,7,6,10,14,4].map(k=>{const p=(km[k]||0)*100;const w=Math.min(100,p*5);
+    return `<div class="swrow"><div class="lb">Margin = ${k}</div><div class="bw"><i style="width:${Math.max(2,w)}%;background:#8fc0ff"></i></div><div class="pv">${p.toFixed(1)}%</div></div>`;}).join('');
+  return `<div class="card"><h2>Simulation <span>empirical outcome distribution over every past NFL game</span></h2>
+    <div class="tiles">
+      <div class="tile"><div class="k">Home win prob</div><div class="v">${Math.round(s.home_win_prob*100)}%</div></div>
+      <div class="tile"><div class="k">Likely margin (10–90%)</div><div class="v">${s.margin_p10} to ${s.margin_p90}</div></div>
+      <div class="tile"><div class="k">Likely total (10–90%)</div><div class="v">${s.total_p10}–${s.total_p90}</div></div>
+    </div>
+    <div class="bxs" style="margin-top:12px">Key numbers — chance the game is decided by exactly this margin (why half-points matter)</div>
+    ${rows}</div>`;
+}
 function injImpactNote(r){
   const ii=r.injury_impact; if(!ii) return '';
   const side=t=>{ const d=ii[t]; if(!d||!d.pts) return ''; return `<b>${t}</b> −${d.pts} pts${d.players&&d.players.length?` (${d.players.map(esc).join(', ')})`:''}`; };
@@ -542,6 +556,7 @@ async function viewMatchup(home, away, neutral){
     </div>
     ${renderUnits(r)}
   </div>
+  ${simPanel(r)}
   <div class="card" style="margin-top:20px"><h2>Schemes</h2><div class="box">${schemePanel(r.away, r.schemes[r.away])}${schemePanel(r.home, r.schemes[r.home])}</div></div>
   <div class="card"><h2>Recent form <span>${r.form[r.home]&&r.form[r.home].season||''}</span></h2><div class="box">${formPanel(r.away, r.form[r.away])}${formPanel(r.home, r.form[r.home])}</div></div>
   <div class="card"><h2>Latest injuries <span>Out/Doubtful players are removed from the projection &amp; spread</span></h2>
@@ -575,6 +590,8 @@ function schCard(g){
     ? `<div class="gc-edge"><span>ATS pick · cover prob</span><b>${g.ats_pick} · ${Math.round(g.cover_prob*100)}%</b></div>` : '';
   const totalRow = g.total_prob!=null
     ? `<div class="gc-row"><span>Total pick</span><b>${g.total_pick} ${g.vegas_total??''} · ${Math.round(g.total_prob*100)}%</b></div>` : '';
+  const blendRow = g.blend_margin!=null
+    ? `<div class="gc-row"><span>Best est · model+market</span><b>${g.blend_margin>=0?g.home:g.away} -${Math.abs(g.blend_margin).toFixed(1)}</b></div>` : '';
   return `<div class="gcard${top?' top':''}" onclick="go('#/matchup?home=${g.home}&away=${g.away}')">
     ${top?`<div class="gc-badge">🔥 Top Pick #${top}</div>`:''}
     ${g.neutral?`<div class="gc-badge" style="left:auto;right:12px;background:#0e7490">🌍 Neutral</div>`:''}
@@ -586,6 +603,7 @@ function schCard(g){
     <div class="gc-prob"><div style="width:${ap}%;background:${g.away_color}"></div><div style="width:${hp}%;background:${g.home_color}"></div></div>
     <div class="gc-row"><span>Model pick</span><b>${pred?`${fav} -${Math.abs(g.pred_margin).toFixed(1)}`:'—'}</b></div>
     <div class="gc-row"><span>Vegas line</span><b>${veg}</b></div>
+    ${blendRow}
     ${edgeRow}
     <div class="gc-row"><span>Total · model / Vegas</span><b>${pred?g.pred_total.toFixed(1):'—'} / ${g.vegas_total??'—'}</b></div>
     ${totalRow}
@@ -634,7 +652,7 @@ async function viewSchedule(params){
     if(b && !b.error){
       const beat = b.model_margin_mae < b.market_margin_mae;
       document.getElementById('schAcc').innerHTML = `<div class="note ${beat?'':'warn'}">
-        <b>Model check (${b.season}, in-sample):</b> margin MAE ${b.model_margin_mae} vs closing line ${b.market_margin_mae}
+        <b>Model check (${b.season}, in-sample):</b> margin MAE ${b.model_margin_mae} vs closing line ${b.market_margin_mae}${b.blended_margin_mae!=null?` · blended ${b.blended_margin_mae} (best est = ${Math.round((b.blend_weight||0)*100)}% market)`:''}
         · straight-up ${Math.round(b.winner_acc*100)}% · ATS ${Math.round(b.ats_in_sample*100)}%.
         <span style="opacity:.85">${esc(b.note)}</span></div>`;
     }

@@ -61,6 +61,27 @@ def total_prob(pred_total: float, total_line: float) -> dict:
     return {"over": round(over, 3), "under": round(under, 3), "push": round(push, 3)}
 
 
+def simulate(pred_margin: float, pred_total: float) -> dict:
+    """Empirical game simulation: recenter the full history of real NFL margins & totals on
+    the model's prediction (a bootstrap over every actual outcome, so key-number spikes are
+    built in) and read off win prob, the likely margin range, and key-number probabilities."""
+    m, t = _hist()
+    ms = m + (pred_margin - float(m.mean()))
+    ts = t + (pred_total - float(t.mean()))
+    rk = np.abs(np.round(ms))
+    key_margins = {int(k): round(float(np.mean(rk == k)), 3) for k in (1, 2, 3, 4, 6, 7, 10, 13, 14)}
+    return {
+        "home_win_prob": round(float(np.mean(ms > 0)), 3),
+        "median_margin": round(float(np.median(ms)), 1),
+        "margin_p10": round(float(np.percentile(ms, 10)), 1),
+        "margin_p90": round(float(np.percentile(ms, 90)), 1),
+        "median_total": round(float(np.median(ts)), 1),
+        "total_p10": round(float(np.percentile(ts, 10)), 1),
+        "total_p90": round(float(np.percentile(ts, 90)), 1),
+        "key_margins": key_margins,     # P(|final margin| == k) — the numbers that decide spreads
+    }
+
+
 def ats_pick(pred_margin: float, spread_line: float) -> dict:
     """The model's against-the-spread pick + its cover probability and edge."""
     c = cover_prob(pred_margin, spread_line)
