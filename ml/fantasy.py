@@ -41,10 +41,13 @@ def _namekey(s) -> str:
 
 RAW = Path(__file__).parent.parent / "data" / "raw"
 
-# Underdog half-PPR weights
+# Scoring weights. Passing/rushing/receiving-yard & TD values are identical across the common
+# formats; only the per-reception value changes: Underdog Best Ball is HALF-PPR (0.5), Full PPR = 1.0.
 _PASS_Y, _PASS_TD, _INT = 0.04, 4.0, 1.0
 _RUSH_Y, _RUSH_TD = 0.1, 6.0
-_REC, _REC_Y, _REC_TD = 0.5, 0.1, 6.0
+_REC_Y, _REC_TD = 0.1, 6.0
+_REC_PT = {"half": 0.5, "full": 1.0}
+SCORINGS = {"half": "Best Ball · Half-PPR", "full": "Full PPR"}
 
 FANTASY_POS = ["QB", "RB", "WR", "TE"]      # Underdog rosters are all offense
 _PROJ_SEASONS = [2025, 2024, 2023]          # recency window for the draft board
@@ -123,13 +126,7 @@ def season_stats(season: int) -> pd.DataFrame:
             df.index.name = "pid"
             fp = fp.join(df)
     fp = fp.fillna(0.0)
-
-    fp["points"] = (fp.get("pass_yds", 0) * _PASS_Y + fp.get("pass_td", 0) * _PASS_TD
-                    - fp.get("interceptions", 0) * _INT
-                    + fp.get("rush_yds", 0) * _RUSH_Y + fp.get("rush_td", 0) * _RUSH_TD
-                    + fp.get("receptions", 0) * _REC + fp.get("rec_yds", 0) * _REC_Y
-                    + fp.get("rec_td", 0) * _REC_TD)
-    fp["ppg"] = fp["points"] / fp["games"].clip(lower=1)
+    # NOTE: points/ppg are scoring-dependent → computed on demand by _score(), not cached here.
 
     # opportunity shares (map each player to his primary team's volume)
     prim = rec_team.reindex(fp.index).fillna(rush_team.reindex(fp.index))
@@ -150,11 +147,26 @@ def season_stats(season: int) -> pd.DataFrame:
     return _STATS[season]
 
 
-def season_board(season: int, pos: str | None = None, min_games: int = 1) -> pd.DataFrame:
-    """Ranked half-PPR board for a completed season (offense skill positions only)."""
+def _score(fp: pd.DataFrame, scoring: str = "half") -> pd.DataFrame:
+    """Attach points + ppg for the chosen scoring (only the per-reception value differs)."""
+    rec_pt = _REC_PT.get(scoring, 0.5)
+    d = fp.copy()
+    d["points"] = (d.get("pass_yds", 0) * _PASS_Y + d.get("pass_td", 0) * _PASS_TD
+                   - d.get("interceptions", 0) * _INT
+                   + d.get("rush_yds", 0) * _RUSH_Y + d.get("rush_td", 0) * _RUSH_TD
+                   + d.get("receptions", 0) * rec_pt + d.get("rec_yds", 0) * _REC_Y
+                   + d.get("rec_td", 0) * _REC_TD)
+    d["ppg"] = d["points"] / d["games"].clip(lower=1)
+    return d
+
+
+def season_board(season: int, pos: str | None = None, min_games: int = 1,
+                 scoring: str = "half") -> pd.DataFrame:
+    """Ranked board for a completed season (offense skill positions only), for the given scoring."""
     fp = season_stats(season)
     if fp.empty:
         return fp
+    fp = _score(fp, scoring)
     d = fp[fp["position"].isin(FANTASY_POS) & (fp["games"] >= min_games)].copy()
     if pos:
         d = d[d["position"] == pos.upper()]
@@ -188,11 +200,11 @@ def _rookie_prior(pos: str, draft_number) -> float:
     return round(base + span * cap, 2)
 
 
-def project() -> pd.DataFrame:
-    """2026 fantasy draft board: each rostered skill player projected on recency-weighted
-    half-PPR PPG from 2023-25 (renormalized over the seasons he actually played), with a
+def project(scoring: str = "half") -> pd.DataFrame:
+    """2026 fantasy draft board: each rostered skill player projected on recency-weighted PPG
+    from 2023-25 (renormalized over the seasons he actually played) in the chosen scoring, with a
     draft-capital prior for players who have no history yet (rookies)."""
-    hist = {s: season_stats(s).set_index("pid") for s in _PROJ_SEASONS}
+    hist = {s: _score(season_stats(s), scoring).set_index("pid") for s in _PROJ_SEASONS}
     roster = _rosters_2026()
     rows = []
     for r in roster.itertuples():
@@ -234,13 +246,14 @@ def project() -> pd.DataFrame:
 # ──────────────────────────────────────────────────────────────────
 #  Undervalued by OPPORTUNITY vs output (positive-regression / breakout)
 # ──────────────────────────────────────────────────────────────────
-def breakouts(season: int = 2025, top: int = 25) -> pd.DataFrame:
+def breakouts(season: int = 2025, top: int = 25, scoring: str = "half") -> pd.DataFrame:
     """Players whose OPPORTUNITY (target share for WR/TE, touch share for RB) outran their
     fantasy output — the classic 'volume is there, points will follow' profile. No ADP needed.
     Youth is a tiebreaker (ascending players regress up harder)."""
     fp = season_stats(season)
     if fp.empty:
         return fp
+    fp = _score(fp, scoring)
     d = fp[fp["position"].isin(["RB", "WR", "TE"]) & (fp["games"] >= 6)].copy()
     # opportunity metric per position
     d["touch_share"] = d["rush_share"].fillna(0) + d["target_share"].fillna(0)
@@ -290,12 +303,16 @@ def with_adp(board: pd.DataFrame) -> pd.DataFrame:
     return board
 
 
-def value_board(max_adp: int = 216, top: int = 30) -> pd.DataFrame:
+def value_board(max_adp: int = 216, top: int = 30, scoring: str = "half"):
     """Market-vs-us within the draftable pool (default ADP ≤ 216 = 18 rounds × 12 teams).
     Restricted to players with real PRODUCTION history — our projection for rookies/depth is a
     crude prior, so calling the market wrong on them is noise, not signal. Sorted by value:
-    positive = we're higher than ADP (target), negative = market reaches vs our board (fade)."""
-    b = with_adp(project())
+    positive = we're higher than ADP (target), negative = market reaches vs our board (fade).
+
+    NOTE: the ADP file is Underdog Best Ball (half-PPR). Viewing this under Full PPR compares a
+    full-PPR projection to a half-PPR market — which is itself useful (it surfaces reception-heavy
+    players the best-ball market underprices) but is a cross-format read, so we label it."""
+    b = with_adp(project(scoring))
     d = b[b["adp"].notna() & (b["adp"] <= max_adp) & (b["source"] == "production")].copy()
     d = d.sort_values("value", ascending=False)
     cols = ["player", "position", "team", "proj_ppg", "our_rank", "adp", "value", "pos_rank"]

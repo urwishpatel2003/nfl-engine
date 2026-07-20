@@ -670,36 +670,43 @@ async function viewMatchup(home, away, neutral){
 
 // ── VIEW: fantasy (best-ball draft board) ───────────────────────────
 const FT_POS = ['ALL','QB','RB','WR','TE'];
+const FT_SCORING = [['half','Best Ball · ½-PPR'],['full','Full PPR']];
 async function viewFantasy(params){
   const mode = (params && params.get('mode')) || 'board';
   const pos  = (params && params.get('pos')) || 'ALL';
+  const sc   = (params && params.get('scoring')) || 'half';
+  const q=(m,extra='')=>`#/fantasy?mode=${m}&scoring=${sc}${extra}`;   // preserve scoring across modes
   app().innerHTML = `<div class="pad">
     <div class="viewhead">
-      <div class="ttl">Best-Ball Fantasy <span>Underdog half-PPR · our 2026 projections</span></div>
+      <div class="ttl">Fantasy Draft <span>${sc==='full'?'Full PPR':'Underdog Best Ball · half-PPR'} · our 2026 projections</span></div>
       <div class="segbar">
-        <button class="${mode==='board'?'on':''}" onclick="go('#/fantasy?mode=board&pos=${pos}')">Draft Board</button>
-        <button class="${mode==='values'?'on':''}" onclick="go('#/fantasy?mode=values')">Value vs ADP</button>
-        <button class="${mode==='breakouts'?'on':''}" onclick="go('#/fantasy?mode=breakouts')">Breakouts</button>
+        <button class="${mode==='board'?'on':''}" onclick="go('${q('board','&pos='+pos)}')">Draft Board</button>
+        <button class="${mode==='values'?'on':''}" onclick="go('${q('values')}')">Value vs ADP</button>
+        <button class="${mode==='breakouts'?'on':''}" onclick="go('${q('breakouts')}')">Breakouts</button>
       </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      <span style="color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.5px">Scoring</span>
+      <div class="segbar">${FT_SCORING.map(([k,lbl])=>`<button class="${sc===k?'on':''}" onclick="go('#/fantasy?mode=${mode}&scoring=${k}${mode==='board'?'&pos='+pos:''}')">${lbl}</button>`).join('')}</div>
     </div>
     <div class="card"><div id="ftBody"><div class="loading">Crunching play-by-play…</div></div></div>
   </div>`;
   const body=document.getElementById('ftBody');
   try{
     if(mode==='breakouts'){
-      const d=await j('/api/fantasy?view=breakouts&top=30');
+      const d=await j('/api/fantasy?view=breakouts&top=30&scoring='+sc);
       body.innerHTML = ftBreakouts(d.players||[]);
     }else if(mode==='values'){
-      const d=await j('/api/fantasy?view=values&top=30');
-      body.innerHTML = ftValues(d);
+      const d=await j('/api/fantasy?view=values&top=30&scoring='+sc);
+      body.innerHTML = ftValues(d,sc);
     }else{
-      const d=await j('/api/fantasy?view=board&limit=240'+(pos!=='ALL'?'&pos='+pos:''));
-      body.innerHTML = ftPosFilter(pos) + ftBoard(d);
+      const d=await j('/api/fantasy?view=board&limit=240&scoring='+sc+(pos!=='ALL'?'&pos='+pos:''));
+      body.innerHTML = ftPosFilter(pos,sc) + ftBoard(d);
     }
   }catch(e){ body.innerHTML=`<div class="note warn">Could not load fantasy data: ${esc(e.message)}</div>`; }
 }
-function ftPosFilter(pos){
-  return `<div class="posfil">${FT_POS.map(p=>`<span class="pf ${p===pos?'on':''}" onclick="go('#/fantasy?mode=board&pos=${p}')">${p}</span>`).join('')}</div>`;
+function ftPosFilter(pos,sc){
+  return `<div class="posfil">${FT_POS.map(p=>`<span class="pf ${p===pos?'on':''}" onclick="go('#/fantasy?mode=board&scoring=${sc}&pos=${p}')">${p}</span>`).join('')}</div>`;
 }
 function ftBoard(d){
   const hasAdp=d.has_adp, rows=d.players||[];
@@ -729,10 +736,12 @@ function ftValueTable(rows, kind){
   }).join('');
   return `<div style="overflow-x:auto"><table class="ftbl"><thead>${head}</thead><tbody>${b}</tbody></table></div>`;
 }
-function ftValues(d){
+function ftValues(d,sc){
   const tg=d.targets||[], fd=d.fades||[];
   if(!tg.length && !fd.length) return '<div class="loading">No ADP loaded.</div>';
-  return `<div class="note" style="margin:0 0 12px">Our projection vs <b>Underdog ADP</b> (FantasyPros), draftable pool only, established players (we don't second-guess the market on unproven rookies). <b>Value = ADP − our rank</b>: positive = we're higher than the market.</div>
+  const xnote = sc==='full'
+    ? `<div class="note warn" style="margin:0 0 12px">Cross-format read: the ADP is <b>Underdog half-PPR best ball</b>, but the projection is <b>Full PPR</b> — so this surfaces reception-heavy players the best-ball market underprices for full-PPR leagues.</div>` : '';
+  return xnote + `<div class="note" style="margin:0 0 12px">Our projection vs <b>Underdog ADP</b> (FantasyPros), draftable pool only, established players (we don't second-guess the market on unproven rookies). <b>Value = ADP − our rank</b>: positive = we're higher than the market.</div>
     <h2 style="margin:6px 0 10px;font-size:14px">🟢 Targets <span style="color:var(--muted);font-weight:400;font-size:12px">we like more than ADP — draft with confidence, or reach a round early</span></h2>
     ${ftValueTable(tg,'t')}
     <h2 style="margin:20px 0 10px;font-size:14px">🔴 Fades <span style="color:var(--muted);font-weight:400;font-size:12px">market drafts above our production board — often rookies/injury bets we can't project</span></h2>
