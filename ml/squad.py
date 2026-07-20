@@ -181,11 +181,19 @@ def _skill_value():
     return _SKILL_CACHE
 
 
+# QB rating is recency-weighted over five seasons and regressed toward the mean by volume.
+_QB_W = {2025: 0.30, 2024: 0.24, 2023: 0.18, 2022: 0.15, 2021: 0.13}
+_QB_SHRINK = 650.0        # attempts of regression toward league mean (tames small samples)
+
+
 def _qb_value_table():
-    """Multi-year (recency + volume weighted) passing+rushing EPA per play from PBP.
-    Includes the current season, which seasonal_stats.parquet does not."""
+    """QB EFFICIENCY value: recency+volume-weighted passing+rushing EPA/play over up to five
+    seasons of PBP, regressed toward the league mean by attempts so small samples (e.g. a
+    rookie's 900 snaps) don't spike to the top. This is an efficiency/production rating —
+    scheme- and supporting-cast-influenced — not an isolated talent grade; a great-scheme QB
+    legitimately grades near the top by these numbers."""
     rows = []
-    for s, w in _PBP_W.items():
+    for s, w in _QB_W.items():
         p = RAW / f"pbp_{s}.parquet"
         if not p.exists():
             continue
@@ -197,15 +205,21 @@ def _qb_value_table():
         pa = d[d["pass_attempt"] == 1].groupby("passer_player_id").agg(pe=("epa", "sum"), pn=("play_id", "count"))
         ru = d[d["rush_attempt"] == 1].groupby("rusher_player_id").agg(re=("epa", "sum"), rn=("play_id", "count"))
         j = pa.join(ru, how="left").fillna(0.0)
-        j = j[j["pn"] >= 100]                                # real QB workload that season
-        j["epa_play"] = (j["pe"] + j["re"]) / (j["pn"] + j["rn"]).clip(lower=1)
-        j["w"] = w * j["pn"]; j = j.reset_index().rename(columns={"passer_player_id": "pid"})
-        rows.append(j[["pid", "epa_play", "w"]])
+        j = j[j["pn"] >= 60]
+        j["wepa"] = (j["pe"] + j["re"]) * w                 # weighted EPA total
+        j["wpl"] = (j["pn"] + j["rn"]) * w                  # weighted play total
+        j["att"] = j["pn"]
+        rows.append(j.reset_index().rename(columns={"passer_player_id": "pid"})[["pid", "wepa", "wpl", "att"]])
     if not rows:
         return pd.Series(dtype=float)
-    allq = pd.concat(rows, ignore_index=True)
-    return allq.groupby("pid").apply(
-        lambda x: (x.epa_play * x.w).sum() / x.w.sum(), include_groups=False)
+    g = pd.concat(rows, ignore_index=True).groupby("pid").agg(
+        wepa=("wepa", "sum"), wpl=("wpl", "sum"), att=("att", "sum"))
+    g = g[g["att"] >= 300]                                  # qualified starters
+    g["epa_play"] = g["wepa"] / g["wpl"].clip(lower=1)
+    mean = float(g["epa_play"].mean())
+    a, k = g["att"], _QB_SHRINK
+    g["value"] = (a / (a + k)) * g["epa_play"] + (k / (a + k)) * mean   # attempts-shrinkage
+    return g["value"]
 
 
 def _qb_starter():
