@@ -23,6 +23,17 @@ import numpy as np
 
 app = Flask(__name__, static_folder=str(Path(__file__).parent))
 
+
+@app.after_request
+def _no_cache(resp):
+    """Never let the browser/edge serve a stale page or API response — the model and data
+    change on every deploy/refresh, so always revalidate."""
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
+
+
 PROC = Path(__file__).parent.parent / "data" / "processed"
 RAW  = Path(__file__).parent.parent / "data" / "raw"
 
