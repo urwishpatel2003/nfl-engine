@@ -774,8 +774,10 @@ def api_schedule():
         games.append(rec)
 
     # Turn each point estimate into a key-number-aware ATS pick + cover probability, and an
-    # over/under read. Rank the top-5 plays by cover probability (accounts for key numbers,
-    # not just raw edge).
+    # over/under read. Two-stage top-5: FIRST require a genuine disagreement with the line
+    # (|edge| ≥ MIN_EDGE points — otherwise a near-coinflip dog getting a great key-number
+    # price can outrank a real edge), THEN rank the qualifiers by cover probability so key
+    # numbers still break ties among plays that actually have an edge.
     from ml.spreads import ats_pick as _ats_pick, total_prob as _total_prob
     from ml.backtest_spreads import blend_weight
     w = blend_weight()                               # optimal market-anchored ensemble weight
@@ -793,7 +795,9 @@ def api_schedule():
             over = tp["over"] >= tp["under"]
             g["total_pick"] = "Over" if over else "Under"
             g["total_prob"] = tp["over"] if over else tp["under"]
-    for i, g in enumerate(sorted(scored, key=lambda x: -x["cover_prob"])[:5], 1):
+    MIN_EDGE = 2.5                                    # min points vs the line to count as a real play
+    qualified = [g for g in scored if abs(g.get("edge") or 0) >= MIN_EDGE]
+    for i, g in enumerate(sorted(qualified, key=lambda x: -x["cover_prob"])[:5], 1):
         g["pick_rank"] = i
 
     _SCHED_PRED[(season, week)] = games

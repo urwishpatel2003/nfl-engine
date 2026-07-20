@@ -716,16 +716,16 @@ async function viewSchedule(params){
   if(!d.games||!d.games.length){ body.innerHTML=`<div class="note warn">No games found for this week.</div>`; return; }
   const picks = d.games.filter(g=>g.pick_rank).sort((a,b)=>a.pick_rank-b.pick_rank);
   const strip = picks.length ? `<div class="card" style="padding:14px">
-      <h2 style="margin:0 0 10px">🔥 Top 5 picks <span>biggest model disagreement with the Vegas line</span></h2>
+      <h2 style="margin:0 0 10px">🔥 Top 5 picks <span>real edge (≥2.5 pts vs the line), ranked by cover probability</span></h2>
       <div class="toppicks">${picks.map(g=>{
         const pn = g.vegas_spread==null?null:(g.ats_pick===g.home?-g.vegas_spread:g.vegas_spread);
         const ps = pn==null?g.ats_pick:Math.abs(pn)<0.05?`${g.ats_pick} PK`:`${g.ats_pick} ${pn>0?'+':''}${pn}`;
         return `<div class="tp" onclick="go('#/matchup?home=${g.home}&away=${g.away}')">
         <span class="rk">${g.pick_rank}</span><b>${ps}</b>&nbsp;${g.away}@${g.home} · ${Math.round(g.cover_prob*100)}% cover · ${Math.abs(g.edge).toFixed(1)} pt edge</div>`;}).join('')}</div>
-      <div style="color:var(--muted);font-size:11px;margin-top:8px">Ranked by key-number-aware cover probability. These are the model's strongest disagreements with the market — not guaranteed winners (it doesn't reliably beat NFL spreads out-of-sample; see the backtest).</div>
+      <div style="color:var(--muted);font-size:11px;margin-top:8px">Two-stage: only games where the model disagrees with the line by ≥2.5 points qualify, then those are ranked by key-number-aware cover probability (so a real edge in a good key-number spot rises). Fewer than 5 may show if the slate is efficient — and these are not guaranteed winners (the model doesn't reliably beat NFL spreads out-of-sample; see the backtest).</div>
     </div>` : '';
   body.innerHTML = strip + `<div id="schAcc"></div>`
-    + `<div class="note">Click any game for the full breakdown (schemes, form, injuries, box score). ${picks.length?'Top-5 plays (by cover probability) highlighted below.':''}</div>`
+    + `<div class="note">Click any game for the full breakdown (schemes, form, injuries, box score). ${picks.length?'Qualifying edge plays highlighted below.':''}</div>`
     + `<div class="sched">${d.games.map(schCard).join('')}</div>`;
   // honest accuracy vs the market (background; cached server-side)
   try{
