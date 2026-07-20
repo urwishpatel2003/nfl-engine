@@ -433,7 +433,10 @@ def _roster_meta():
     olp = PROC / "ol_rankings_2025.csv"
     ol_pct = (pd.read_csv(olp).set_index("team")["composite"].rank(pct=True) * 100) if olp.exists() else pd.Series(dtype=float)
     kp = PROC / "kicker_rankings_2025.csv"
-    k_pct = (pd.read_csv(kp).dropna(subset=["player_id"]).set_index("player_id")["composite"].rank(pct=True) * 100) if kp.exists() else pd.Series(dtype=float)
+    # drop_duplicates so a player who appears twice (traded mid-season → two team rows) doesn't
+    # give a non-unique index; k_pct.get(id) must return a scalar, not a Series (see _first).
+    k_pct = (pd.read_csv(kp).dropna(subset=["player_id"]).drop_duplicates("player_id")
+             .set_index("player_id")["composite"].rank(pct=True) * 100) if kp.exists() else pd.Series(dtype=float)
     _META_CACHE = (draft, exp, ol_pct, k_pct)
     return _META_CACHE
 
@@ -465,7 +468,14 @@ def team_depth_chart(team: str) -> list:
 
     def _first(*vals):
         for v in vals:
-            if v is not None and not pd.isna(v):
+            if v is None:
+                continue
+            if isinstance(v, pd.Series):        # a non-unique lookup index returned multiple rows
+                v = v.dropna()                  # → collapse to the first valid value, don't crash
+                if v.empty:
+                    continue
+                v = v.iloc[0]
+            if not pd.isna(v):
                 return v
         return None
 
