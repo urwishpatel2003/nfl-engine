@@ -129,7 +129,7 @@
   .meta{display:flex;justify-content:space-around;margin-top:16px;text-align:center}
   .meta div .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
   .meta div .v{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px}
-  .units{margin-top:18px}
+  .units{margin-top:0}
   .uh{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;text-align:center}
   .ur{display:grid;grid-template-columns:34px 1fr 88px 1fr 34px;align-items:center;gap:6px;margin:5px 0;font-size:11px}
   .ur .uv{font-variant-numeric:tabular-nums;color:var(--muted)}
@@ -187,6 +187,35 @@
   .rfstat{font-size:13px;color:var(--muted);margin-top:12px}
   .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
   svg text{fill:var(--muted)}
+
+  /* ── polish: consistent capitalization + clearer emphasis ── */
+  .cap{text-transform:capitalize}
+  /* offense/defense scheme labels rendered as colored pills (not run-on muted text) */
+  .labs{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .lab{font-size:11px;font-weight:600;padding:3px 10px;border-radius:6px;letter-spacing:.2px;text-transform:capitalize}
+  .lab .t{opacity:.62;text-transform:uppercase;font-size:9px;letter-spacing:.5px;margin-right:5px;font-weight:700}
+  .lab.off{background:#0f2419;color:#7fe3ad;border:1px solid #1f5137}
+  .lab.def{background:#281420;color:#f2a1bb;border:1px solid #5a2438}
+  .lab.neu{background:var(--panel2);color:var(--txt);border:1px solid var(--line);text-transform:none}
+  /* rating block in the team header — make the headline number pop */
+  .thead .rt{margin-left:auto;text-align:center;background:var(--panel2);border:1px solid var(--line);
+             border-radius:12px;padding:9px 18px;min-width:100px}
+  .thead .rt .big{font-size:30px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+  .thead .rt .k{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.6px}
+  .thead .rt .k.top{margin-bottom:4px}
+  .qbline{color:var(--txt);font-size:13px;margin-top:5px}
+  .qbline .qbk{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px;margin-right:5px}
+  /* scheme-tag chips: uniform look regardless of source casing */
+  .chip.tag{text-transform:capitalize;background:#16233b;border-color:#2a3b5c;color:#cfe0ff}
+  /* matchup hero: dominant score + spread, everything else secondary */
+  .mhero{background:linear-gradient(180deg,var(--panel2) 0,var(--panel) 100%);}
+  .spreadpill{display:inline-flex;align-items:center;gap:7px;background:#12233f;border:1px solid #2f4a78;
+              color:#9fcaff;font-weight:700;font-size:14px;padding:7px 16px;border-radius:22px}
+  .spreadpill .sk{color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px}
+  .herometa{display:flex;justify-content:center;gap:26px;margin-top:16px;flex-wrap:wrap}
+  .herometa .hm{text-align:center}
+  .herometa .hm .k{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px}
+  .herometa .hm .v{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:3px}
 </style>
 </head>
 <body>
@@ -219,6 +248,9 @@ const esc = s => (s==null?'':String(s));
 const f1 = x => x==null? '—' : (x>0?'+':'') + Number(x).toFixed(1);
 const f2 = x => x==null? '—' : (x>0?'+':'') + Number(x).toFixed(2);
 const pc = x => x==null? '—' : Math.round(Number(x)*100) + '%';
+// tidy a data-driven label: fix the missing-apostrophe style label, trim. Casing is handled
+// in CSS via .cap so "spread", "West Coast", "aggressive blitz" all render uniformly.
+const nlbl = s => (s==null||s==='')? '' : String(s).replace(/\bDont\b/g,"Don't").trim();
 
 function ratingColor(r){ if(r==null) return '#3a465e'; const h=Math.round(r*1.2); return `hsl(${h},60%,50%)`; }
 function pctlColor(p){ const h=Math.round(p*1.2); return `hsl(${h},62%,48%)`; }
@@ -352,15 +384,20 @@ async function viewTeam(team){
     <div class="card">
       <div class="thead">
         <img src="${d.logo}" onerror="this.style.visibility='hidden'">
-        <div>
+        <div style="flex:1;min-width:200px">
           <div class="nm">${d.name}</div>
-          <div class="sub">${d.qb?('QB1 '+d.qb+' · '):''}${esc(S.offense_label||'')} offense · ${esc(S.defense_label||'')} defense · ${d.season} data</div>
+          ${d.qb?`<div class="qbline"><span class="qbk">QB1</span>${esc(d.qb)}</div>`:''}
+          <div class="labs" style="margin-top:8px">
+            <span class="lab off"><span class="t">Off</span>${esc(nlbl(S.offense_label))||'—'}</span>
+            <span class="lab def"><span class="t">Def</span>${esc(nlbl(S.defense_label))||'—'}</span>
+            <span class="lab neu">${d.season} data</span>
+          </div>
         </div>
-        <div class="rt"><div class="k">Rank</div><div class="big">#${d.rank??'—'}</div><div class="k">rating ${f1(d.rating)}</div></div>
+        <div class="rt"><div class="k top">Power Rank</div><div class="big">#${d.rank??'—'}</div><div class="k" style="margin-top:5px">Rating ${f1(d.rating)}</div></div>
       </div>
-      <div style="margin-top:12px" class="chips">
-        ${(d.tendencies||[]).map(t=>`<span class="chip lbl">${esc(t)}</span>`).join('') || '<span class="chip">No standout tendencies</span>'}
-      </div>
+      ${(d.tendencies&&d.tendencies.length)?`<div style="margin-top:14px" class="chips">
+        ${d.tendencies.map(t=>`<span class="chip tag">${esc(t)}</span>`).join('')}
+      </div>`:''}
       <div style="margin-top:14px" class="chips">
         <a class="chip" href="#/trends/${d.team}">📈 View trends</a>
         <a class="chip" href="#/matchup?home=${d.team}">⚔️ Simulate a matchup</a>
@@ -368,7 +405,7 @@ async function viewTeam(team){
     </div>
 
     ${(()=>{const C=d.coaching; if(!C||!C.hc) return '';
-      const tagChips=a=>(a&&a.length)?a.map(t=>`<span class="chip">${esc(t)}</span>`).join(''):'<span class="chip" style="opacity:.6">not set — verify</span>';
+      const tagChips=a=>(a&&a.length)?a.map(t=>`<span class="chip tag">${esc(t)}</span>`).join(''):'<span class="chip" style="opacity:.6">Not set — verify</span>';
       const srcNote=s=>(s&&s!=='self'&&s!=='regress')?` · scheme ~ ${esc(s)}`:(s==='regress'?' · scheme regressed':'');
       const nu=`<span style="color:var(--warn)"> · NEW</span>`;
       return `<div class="card"><h2>Coaching &amp; scheme <span>2026 staff${C.hc_new?' · NEW head coach':''}</span></h2>
@@ -388,7 +425,7 @@ async function viewTeam(team){
     </div>
 
     <div class="grid2">
-      <div class="card"><h2>Style of play <span>${esc(S.offense_label||'')} · ${esc(S.defense_label||'')}</span></h2>
+      <div class="card"><h2>Style of Play <span class="cap">${esc(nlbl(S.offense_label))} · ${esc(nlbl(S.defense_label))}</span></h2>
         <div class="tiles">${styleTiles.map(([k,v])=>`<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('')}</div></div>
       <div class="card"><h2>Situational</h2>
         <div class="tiles">${sitTiles.map(([k,v])=>`<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('')}</div></div>
@@ -477,15 +514,16 @@ function renderUnits(r){
 }
 function schemePanel(tm, sc){
   if(!sc) return '';
-  return `<div class="bxt"><div class="bh">${tm}</div>
-    <div class="chips"><span class="chip lbl">${esc(sc.offense_label||'?')} off</span><span class="chip lbl">${esc(sc.defense_label||'?')} def</span></div>
-    <div class="tiles" style="margin-top:8px">
+  const m=META[tm]||{};
+  return `<div class="bxt"><div class="bh"><img src="${m.logo||''}" onerror="this.style.display='none'">${tm}</div>
+    <div class="labs"><span class="lab off"><span class="t">Off</span>${esc(nlbl(sc.offense_label))||'—'}</span><span class="lab def"><span class="t">Def</span>${esc(nlbl(sc.defense_label))||'—'}</span></div>
+    <div class="tiles" style="margin-top:10px">
       <div class="tile"><div class="k">Pass rate</div><div class="v">${pc(sc.pass_rate)}</div></div>
       <div class="tile"><div class="k">Pace</div><div class="v">${sc.pace!=null?Number(sc.pace).toFixed(1):'—'}</div></div>
       <div class="tile"><div class="k">Blitz</div><div class="v">${pc(sc.blitz_rate)}</div></div>
       <div class="tile"><div class="k">Play-action</div><div class="v">${pc(sc.play_action_rate)}</div></div>
     </div>
-    <div class="chips" style="margin-top:8px">${(sc.tendencies||[]).map(t=>`<span class="chip">${esc(t)}</span>`).join('')}</div></div>`;
+    ${(sc.tendencies&&sc.tendencies.length)?`<div class="chips" style="margin-top:10px">${sc.tendencies.map(t=>`<span class="chip tag">${esc(t)}</span>`).join('')}</div>`:''}</div>`;
 }
 function formPanel(tm, fm){
   if(!fm||!fm.summary) return `<div class="bxt"><div class="bh">${tm}</div><div class="loading">No form data.</div></div>`;
@@ -572,20 +610,23 @@ async function viewMatchup(home, away, neutral){
   const hp=Math.round(r.home_win_prob*100), ap=100-hp;
   const fav = r.pred_margin>=0? r.home : r.away;
   res.innerHTML = `<div class="result" style="display:block">
-    <div class="score">
-      <div class="tm"><img src="${r.away_logo}" onerror="this.style.visibility='hidden'"><div class="pts">${r.pred_away_score.toFixed(1)}</div><div class="ab">${r.away}</div></div>
-      <div class="vs">@</div>
-      <div class="tm"><img src="${r.home_logo}" onerror="this.style.visibility='hidden'"><div class="pts">${r.pred_home_score.toFixed(1)}</div><div class="ab">${r.home}</div></div>
+    <div class="mhero card" style="margin-top:16px">
+      <div class="score">
+        <div class="tm"><img src="${r.away_logo}" onerror="this.style.visibility='hidden'"><div class="pts">${r.pred_away_score.toFixed(1)}</div><div class="ab">${r.away}</div></div>
+        <div class="vs">@</div>
+        <div class="tm"><img src="${r.home_logo}" onerror="this.style.visibility='hidden'"><div class="pts">${r.pred_home_score.toFixed(1)}</div><div class="ab">${r.home}</div></div>
+      </div>
+      <div style="text-align:center;margin-top:14px"><span class="spreadpill"><span class="sk">Projected</span>${fav} -${Math.abs(r.pred_margin).toFixed(1)}</span></div>
+      <div class="prob"><div class="probbar">
+        <div class="h" style="width:${hp}%;background:${r.home_color}">${hp}% ${r.home}</div>
+        <div class="a" style="width:${ap}%;background:${r.away_color}">${r.away} ${ap}%</div></div></div>
+      <div class="herometa">
+        <div class="hm"><div class="k">Total</div><div class="v">${r.pred_total.toFixed(1)}</div></div>
+        <div class="hm"><div class="k">Win prob</div><div class="v">${fav==r.home?hp:ap}% ${fav}</div></div>
+        <div class="hm"><div class="k">Margin range</div><div class="v">${r.simulation?`${r.simulation.margin_p10} to ${r.simulation.margin_p90}`:'—'}</div></div>
+      </div>
     </div>
-    <div class="prob"><div class="probbar">
-      <div class="h" style="width:${hp}%;background:${r.home_color}">${hp}% ${r.home}</div>
-      <div class="a" style="width:${ap}%;background:${r.away_color}">${r.away} ${ap}%</div></div></div>
-    <div class="meta">
-      <div><div class="k">Spread</div><div class="v">${fav} -${Math.abs(r.pred_margin).toFixed(1)}</div></div>
-      <div><div class="k">Total</div><div class="v">${r.pred_total.toFixed(1)}</div></div>
-      <div><div class="k">Favorite</div><div class="v">${fav}</div></div>
-    </div>
-    ${renderUnits(r)}
+    ${(()=>{const u=renderUnits(r);return u?`<div class="card">${u}</div>`:'';})()}
   </div>
   ${simPanel(r)}
   ${matchupEdges(r)}
