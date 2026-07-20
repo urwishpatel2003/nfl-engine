@@ -292,15 +292,28 @@ def with_adp(board: pd.DataFrame) -> pd.DataFrame:
     adp = adp.drop_duplicates("_k")
     board["_k"] = board.get("player", board.get("player_name")).map(_namekey)
     board = board.merge(adp[["_k", "adp"]], on="_k", how="left").drop(columns="_k")
+    return _with_ecr(board)
+
+
+# which market list anchors "value" in each scoring (Underdog ADP is half-PPR best ball; the
+# FantasyPros ECR export is full PPR — so full-PPR value is measured against ECR, not the ADP).
+_ANCHOR = {"half": ("adp", "Underdog ADP"), "full": ("ecr", "PPR ECR")}
+
+
+def attach_value(board: pd.DataFrame, scoring: str = "half") -> pd.DataFrame:
+    """Compute our_rank + value against the FORMAT-APPROPRIATE market anchor. Both are put on
+    the same scale first (re-rank our board over just the players the anchor covers) so
+    value = anchor_rank − our_rank; +value = we're higher than that market = a target."""
+    board = board.copy()
+    col, label = _ANCHOR.get(scoring, _ANCHOR["half"])
+    board["market"] = board.get(col)
+    board["market_label"] = label
     if "overall_rank" in board.columns:
-        # Put both on the SAME scale: re-rank our board over just the players who have an ADP,
-        # then value = ADP − our-rank-in-that-pool. (Comparing our 900-deep board straight to a
-        # 400-deep ADP made the tail explode.) +value = we rank him higher than the market = target.
-        have = board["adp"].notna()
+        have = board["market"].notna()
         board["our_rank"] = np.nan
         board.loc[have, "our_rank"] = board.loc[have, "overall_rank"].rank(method="min")
-        board["value"] = (board["adp"] - board["our_rank"]).round(1)
-    return _with_ecr(board)
+        board["value"] = (board["market"] - board["our_rank"]).round(1)
+    return board
 
 
 def _with_ecr(board: pd.DataFrame) -> pd.DataFrame:
@@ -326,14 +339,14 @@ def value_board(max_adp: int = 216, top: int = 30, scoring: str = "half"):
     crude prior, so calling the market wrong on them is noise, not signal. Sorted by value:
     positive = we're higher than ADP (target), negative = market reaches vs our board (fade).
 
-    NOTE: the ADP file is Underdog Best Ball (half-PPR). Viewing this under Full PPR compares a
-    full-PPR projection to a half-PPR market — which is itself useful (it surfaces reception-heavy
-    players the best-ball market underprices) but is a cross-format read, so we label it."""
-    b = with_adp(project(scoring))
-    d = b[b["adp"].notna() & (b["adp"] <= max_adp) & (b["source"] == "production")].copy()
+    The market anchor matches the format: half-PPR → Underdog best-ball ADP; full-PPR →
+    FantasyPros PPR expert ranks — so each format is graded against its own market."""
+    b = attach_value(with_adp(project(scoring)), scoring)
+    label = b["market_label"].iloc[0] if len(b) else _ANCHOR[scoring][1]
+    d = b[b["market"].notna() & (b["market"] <= max_adp) & (b["source"] == "production")].copy()
     d = d.sort_values("value", ascending=False)
-    cols = ["player", "position", "team", "proj_ppg", "our_rank", "adp", "value", "pos_rank", "tier"]
+    cols = ["player", "position", "team", "proj_ppg", "our_rank", "market", "value", "pos_rank", "tier"]
     cols = [c for c in cols if c in d.columns]
     targets = d.head(top)[cols]
     fades = d.tail(top).sort_values("value")[cols]
-    return targets, fades
+    return targets, fades, label

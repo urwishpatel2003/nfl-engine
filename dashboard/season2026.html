@@ -725,31 +725,30 @@ function ftBoard(d){
       <td>${esc(p.team||'')}</td><td class="r">${Number(p.proj_ppg).toFixed(1)}</td>
       <td class="r">${Number(p.vor).toFixed(0)}</td>${ecrcell}${valcell}</tr>`;
   }).join('');
-  const note = `<div class="note" style="margin:0 0 12px">Ranked by <b>our</b> value-over-replacement projection (so it flows like a real draft). <b>Tier</b> + <b>ECR</b> = FantasyPros expert consensus (tiers mark the draft value cliffs); <b>ADP</b> = Underdog best-ball market; <b>Value</b> = ADP − our rank (green = we're higher than the market).${hasAdp?'':' Drop <code>data/raw/adp_underdog.csv</code> to light up ADP/Value.'}</div>`;
+  const mkt=d.market_label||'market';
+  const note = `<div class="note" style="margin:0 0 12px">Ranked by <b>our</b> value-over-replacement projection (so it flows like a real draft). <b>Tier</b> + <b>ECR</b> = FantasyPros PPR consensus (tiers mark the draft value cliffs); <b>ADP</b> = Underdog best-ball (½-PPR) market; <b>Value</b> = <b>${esc(mkt)}</b> − our rank, matched to the scoring you picked (green = we're higher than that market).${hasAdp?'':' Drop <code>data/raw/adp_underdog.csv</code> to light up ADP/Value.'}</div>`;
   return note + `<div style="overflow-x:auto"><table class="ftbl"><thead>${head}</thead><tbody>${b}</tbody></table></div>`;
 }
-function ftValueTable(rows, kind){
-  const head=`<tr><th>Player</th><th>Pos</th><th>Team</th><th class="r">Proj PPG</th><th class="r">Our #</th><th class="r">ADP</th><th class="r">Value</th></tr>`;
+function ftValueTable(rows, mkt){
+  const head=`<tr><th>Player</th><th>Pos</th><th>Team</th><th class="r">Proj PPG</th><th class="r">Our #</th><th class="r">${esc(mkt)}</th><th class="r">Value</th></tr>`;
   const b=rows.map(p=>{
     const v=p.value;
     return `<tr><td class="nm">${esc(p.player)}</td>
       <td><span class="pos pos-${p.position}">${p.position}${p.pos_rank}</span></td><td>${esc(p.team||'')}</td>
       <td class="r">${Number(p.proj_ppg).toFixed(1)}</td>
-      <td class="r pr">${Math.round(p.our_rank)}</td><td class="r">${Math.round(p.adp)}</td>
+      <td class="r pr">${Math.round(p.our_rank)}</td><td class="r">${Math.round(p.market)}</td>
       <td class="r ${v>0?'val-pos':'val-neg'}">${v>0?'+':''}${Math.round(v)}</td></tr>`;
   }).join('');
   return `<div style="overflow-x:auto"><table class="ftbl"><thead>${head}</thead><tbody>${b}</tbody></table></div>`;
 }
 function ftValues(d,sc){
-  const tg=d.targets||[], fd=d.fades||[];
-  if(!tg.length && !fd.length) return '<div class="loading">No ADP loaded.</div>';
-  const xnote = sc==='full'
-    ? `<div class="note warn" style="margin:0 0 12px">Cross-format read: the ADP is <b>Underdog half-PPR best ball</b>, but the projection is <b>Full PPR</b> — so this surfaces reception-heavy players the best-ball market underprices for full-PPR leagues.</div>` : '';
-  return xnote + `<div class="note" style="margin:0 0 12px">Our projection vs <b>Underdog ADP</b> (FantasyPros), draftable pool only, established players (we don't second-guess the market on unproven rookies). <b>Value = ADP − our rank</b>: positive = we're higher than the market.</div>
-    <h2 style="margin:6px 0 10px;font-size:14px">🟢 Targets <span style="color:var(--muted);font-weight:400;font-size:12px">we like more than ADP — draft with confidence, or reach a round early</span></h2>
-    ${ftValueTable(tg,'t')}
+  const tg=d.targets||[], fd=d.fades||[], mkt=d.market_label||'Market';
+  if(!tg.length && !fd.length) return '<div class="loading">No market list loaded for this format.</div>';
+  return `<div class="note" style="margin:0 0 12px">Our <b>${sc==='full'?'Full PPR':'half-PPR'}</b> projection vs <b>${esc(mkt)}</b>, draftable pool only, established players (we don't second-guess the market on unproven rookies). <b>Value = ${esc(mkt)} − our rank</b>: positive = we're higher than the market.</div>
+    <h2 style="margin:6px 0 10px;font-size:14px">🟢 Targets <span style="color:var(--muted);font-weight:400;font-size:12px">we like more than ${esc(mkt)} — draft with confidence, or reach a round early</span></h2>
+    ${ftValueTable(tg,mkt)}
     <h2 style="margin:20px 0 10px;font-size:14px">🔴 Fades <span style="color:var(--muted);font-weight:400;font-size:12px">market drafts above our production board — often rookies/injury bets we can't project</span></h2>
-    ${ftValueTable(fd,'f')}`;
+    ${ftValueTable(fd,mkt)}`;
 }
 function ftBreakouts(rows){
   if(!rows.length) return '<div class="loading">No breakout candidates.</div>';

@@ -823,7 +823,7 @@ def api_fantasy():
     """Best-ball fantasy: our 2026 VOR-ranked draft board (value-over-replacement so it flows like
     a real draft), plus opportunity-vs-production 'undervalued/breakout' candidates. If an ADP CSV
     is dropped at data/raw/adp_underdog.csv, the board also shows ADP + value vs our rank."""
-    from ml.fantasy import project, breakouts, with_adp, value_board, SCORINGS
+    from ml.fantasy import project, breakouts, with_adp, attach_value, value_board, SCORINGS
     view = request.args.get('view', 'board')
     pos = request.args.get('pos')
     scoring = request.args.get('scoring', 'half')
@@ -834,16 +834,17 @@ def api_fantasy():
         return jsonify(_native({"view": "breakouts", "season": 2025, "scoring": scoring,
                                 "players": d.to_dict('records')}))
     if view == 'values':
-        tg, fd = value_board(top=int(request.args.get('top', 30)), scoring=scoring)
-        return jsonify(_native({"view": "values", "has_adp": True, "scoring": scoring,
+        tg, fd, market = value_board(top=int(request.args.get('top', 30)), scoring=scoring)
+        return jsonify(_native({"view": "values", "scoring": scoring, "market_label": market,
                                 "targets": tg.to_dict('records'), "fades": fd.to_dict('records')}))
-    b = with_adp(project(scoring))
+    b = attach_value(with_adp(project(scoring)), scoring)
+    label = b['market_label'].iloc[0] if len(b) else ''
     if pos and pos.upper() in ('QB', 'RB', 'WR', 'TE'):
         b = b[b['position'] == pos.upper()]
     has_adp = bool(b['adp'].notna().any())
     b = b.head(int(request.args.get('limit', 240)))
     return jsonify(_native({"view": "board", "has_adp": has_adp, "scoring": scoring,
-                            "count": len(b), "players": b.to_dict('records')}))
+                            "market_label": label, "count": len(b), "players": b.to_dict('records')}))
 
 
 # ═══════════════════════════════════════════════════════════════════
