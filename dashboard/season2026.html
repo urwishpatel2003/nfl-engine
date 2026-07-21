@@ -235,6 +235,12 @@
   .ppbadge{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;margin-left:6px}
   .ppbadge.lean-o{background:#0f2a1c;color:#7fe3ad}.ppbadge.lean-u{background:#2a1620;color:#f2a1bb}
   .ppbadge.lean-n{background:var(--panel2);color:var(--muted);border:1px solid var(--line)}
+  /* season win totals */
+  .wt img{width:24px;height:24px;object-fit:contain;vertical-align:middle}
+  .wbig{font-size:17px;font-weight:800;font-variant-numeric:tabular-nums}
+  .wdist{display:inline-flex;align-items:flex-end;gap:1px;height:26px}
+  .wdist i{width:6px;background:#26324d;border-radius:1px}
+  .wdist i.md{background:var(--accent)}
   .val-pos{color:var(--good);font-weight:700}.val-neg{color:var(--bad);font-weight:700}
   .ftgap{height:8px;background:#0e1626;border-radius:4px;overflow:hidden;min-width:60px}
   .ftgap i{display:block;height:100%;background:linear-gradient(90deg,#3b82f6,#22c55e)}
@@ -283,6 +289,7 @@
     <a href="#/matchup">Matchup</a>
     <a href="#/fantasy">Fantasy</a>
     <a href="#/props">Props</a>
+    <a href="#/season">Season</a>
     <a href="#/refresh">Refresh</a>
   </nav>
 </header>
@@ -376,6 +383,7 @@ async function route(){
     else if(view==='matchup')  await viewMatchup(params.get('home'), params.get('away'), params.get('neutral')==='1');
     else if(view==='fantasy')  await viewFantasy(params);
     else if(view==='props')    await viewProps(params);
+    else if(view==='season')   await viewSeason(params);
     else if(view==='refresh')  await viewRefresh();
     else                       await viewRankings();
   }catch(e){ app().innerHTML = `<div class="note warn pad">Something went wrong loading this view: ${esc(e.message)}</div>`; }
@@ -944,6 +952,72 @@ async function viewProps(params){
   const lb=document.getElementById('ppLines');
   if(lb) lb.addEventListener('click',()=>go(`#/props?home=${h}&away=${a}&neutral=${neutral?1:0}&lines=1`));
   PP_ROWS.forEach((_,i)=>{ if(document.getElementById('pp-'+i)) ppUpdate(i); });   // prime all rows
+}
+
+// ── VIEW: season projections (team wins + player totals) ────────────
+function svWinDist(dist,mode){
+  const mx=Math.max(...dist,0.001);
+  return `<span class="wdist" title="win distribution 0–17">${dist.map((p,i)=>`<i class="${i===mode?'md':''}" style="height:${Math.max(2,Math.round(p/mx*26))}px"></i>`).join('')}</span>`;
+}
+function svWins(d){
+  const rows=(d.teams||[]).map(t=>{
+    const logo=META[t.team]?META[t.team].logo:'';
+    return `<tr><td class="r pr">${t.rank}</td>
+      <td class="wt"><img src="${logo}" onerror="this.style.visibility='hidden'"> <b>${t.team}</b></td>
+      <td class="r"><span class="wbig">${t.proj_wins}</span></td>
+      <td class="c">${t.record}</td><td class="c">${t.win_line}</td>
+      <td class="r ${t.p_over>=0.5?'val-pos':'val-neg'}">${Math.round(t.p_over*100)}%</td>
+      <td>${svWinDist(t.dist,t.mode_wins)}</td></tr>`;
+  }).join('');
+  return `<div class="note" style="margin:0 0 12px">Expected regular-season wins — we price all 272 games with our matchup model, then take the exact win distribution over each team's schedule. <b>O/U</b> = fair line (median), <b>Over</b> = P(more wins than the line). Games treated as independent (ignores injury/bye luck).</div>
+    <div style="overflow-x:auto"><table class="ftbl"><thead><tr><th class="r">#</th><th>Team</th><th class="r">Proj Wins</th><th class="c">Record</th><th class="c">O/U</th><th class="r">Over</th><th>Win distribution 0–17</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function svPlayersControls(sc,pos){
+  const fmts=[['half','Half PPR'],['full','Full PPR']], posf=['ALL','QB','RB','WR','TE'];
+  return `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+    <div class="segbar">${fmts.map(([k,l])=>`<button class="${sc===k?'on':''}" onclick="go('#/season?mode=players&scoring=${k}&pos=${pos}')">${l}</button>`).join('')}</div>
+    <div class="posfil" style="margin:0">${posf.map(p=>`<span class="pf ${p===pos?'on':''}" onclick="go('#/season?mode=players&scoring=${sc}&pos=${p}')">${p}</span>`).join('')}</div>
+  </div>`;
+}
+function svPlayers(d){
+  const rows=(d.players||[]).map(p=>{
+    const isQB=p.position==='QB';
+    const pa=isQB?(p.pass_yds||''):'' , paTd=isQB&&p.pass_td>=0.5?p.pass_td:'';   // hide trick-play noise
+    return `<tr>
+    <td class="r pr">${p.overall_rank}</td><td class="nm">${esc(p.player)}</td>
+    <td><span class="pos pos-${p.position}">${p.position}${p.pos_rank}</span></td>
+    <td>${esc(p.team||'')}</td><td class="r">${p.games}</td>
+    <td class="r">${pa}</td><td class="r">${paTd}</td>
+    <td class="r">${p.rush_yds>0?p.rush_yds:''}</td><td class="r">${p.rec||''}</td><td class="r">${p.rec_yds||''}</td>
+    <td class="r">${p.total_td}</td><td class="r"><b>${p.fpts}</b></td></tr>`;
+  }).join('');
+  return `<div class="note" style="margin:0 0 12px">Projected full-season stat totals + fantasy points (recency-weighted 2023–25 per-game rates × projected games). Blank = negligible for that position; rookies with no NFL history are omitted.</div>
+    <div style="overflow-x:auto"><table class="ftbl"><thead><tr><th class="r">#</th><th>Player</th><th>Pos</th><th>Team</th><th class="r">G</th><th class="r">Pass Yds</th><th class="r">Pass TD</th><th class="r">Rush Yds</th><th class="r">Rec</th><th class="r">Rec Yds</th><th class="r">TD</th><th class="r">Fantasy</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+async function viewSeason(params){
+  const mode=(params&&params.get('mode'))||'wins';
+  const sc=(params&&params.get('scoring'))||'half';
+  const pos=(params&&params.get('pos'))||'ALL';
+  app().innerHTML=`<div class="pad">
+    <div class="viewhead">
+      <div class="ttl">Season Projections <span>2026 · our model</span></div>
+      <div class="segbar">
+        <button class="${mode==='wins'?'on':''}" onclick="go('#/season?mode=wins')">Team Wins</button>
+        <button class="${mode==='players'?'on':''}" onclick="go('#/season?mode=players&scoring=${sc}')">Player Totals</button>
+      </div>
+    </div>
+    <div class="card"><div id="svBody"><div class="loading">Projecting the season…</div></div></div>
+  </div>`;
+  const body=document.getElementById('svBody');
+  try{
+    if(mode==='players'){
+      const d=await j(`/api/season?view=players&scoring=${sc}${pos!=='ALL'?'&pos='+pos:''}&limit=250`);
+      body.innerHTML=svPlayersControls(sc,pos)+svPlayers(d);
+    }else{
+      const d=await j('/api/season?view=wins');
+      body.innerHTML=svWins(d);
+    }
+  }catch(e){ body.innerHTML=`<div class="note warn">Could not load season projections: ${esc(e.message)}</div>`; }
 }
 
 // ── VIEW: schedule (weekly slate, auto-predicted) ───────────────────
