@@ -95,6 +95,20 @@
   .pr-odn{font-size:11px;font-weight:700;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
   .pr-odn.g{color:var(--good)}.pr-odn.b{color:var(--bad)}
   @media(max-width:560px){.pr-row{grid-template-columns:22px 24px 1fr auto 120px;gap:7px}}
+  /* rankings as team boxes */
+  .pr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:12px;margin-bottom:4px}
+  .pr-card{background:var(--panel2);border:1px solid var(--line);border-left:4px solid var(--line);
+           border-radius:12px;padding:13px 14px;cursor:pointer}
+  .pr-card:hover{border-color:var(--accent)}
+  .pc-top{display:flex;align-items:center;gap:9px}
+  .pc-rank{font-size:19px;font-weight:800;color:var(--muted);min-width:22px}
+  .pc-top img{width:34px;height:34px;object-fit:contain}
+  .pc-nm{min-width:0;flex:1}
+  .pc-team{font-weight:700;font-size:15px}
+  .pc-qb{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pc-wins{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;margin:9px 0 9px}
+  .pc-wins span{font-size:10px;font-weight:400;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+  .pc-od{display:flex;flex-direction:column;gap:5px}
 
   /* chips + tiles */
   .chips{display:flex;flex-wrap:wrap;gap:6px}
@@ -432,16 +446,17 @@ function go(hash){ location.hash = hash; }
 // ── VIEW: rankings ──────────────────────────────────────────────────
 const RANK_TIERS = [[1,4,'🏆 Contenders'],[5,12,'Playoff Picture'],[13,22,'In the Hunt'],[23,32,'Rebuilding']];
 function odClass(rk){ return rk==null?'':(rk<=8?'g':(rk>=25?'b':'')); }
-function rankRow(d){
+function rankCard(d){
   const of=d.off_rank, df=d.def_rank;
   const ofw=of!=null?Math.round((33-of)/32*100):0, dfw=df!=null?Math.round((33-df)/32*100):0;
-  const wins=d.proj_wins!=null?`<b>${d.proj_wins.toFixed(1)}</b><span>proj wins</span>`:'';
-  return `<div class="pr-row" title="rating ${f1(d.rating)}" onclick="go('#/team/${d.team}')">
-    <div class="pr-rank">${d.rank}</div>
-    <img class="pr-logo" src="${d.logo}" onerror="this.style.visibility='hidden'">
-    <div class="pr-tm"><div class="pr-ab">${d.team}</div><div class="pr-qb">${esc(d.qb||'')}</div></div>
-    <div class="pr-wins">${wins}</div>
-    <div class="pr-od">
+  return `<div class="pr-card" title="rating ${f1(d.rating)}" style="border-left-color:${d.color}" onclick="go('#/team/${d.team}')">
+    <div class="pc-top">
+      <span class="pc-rank">${d.rank}</span>
+      <img src="${d.logo}" onerror="this.style.visibility='hidden'">
+      <div class="pc-nm"><div class="pc-team">${d.team}</div><div class="pc-qb">${esc(d.qb||'')}</div></div>
+    </div>
+    <div class="pc-wins">${d.proj_wins!=null?d.proj_wins.toFixed(1):'—'}<span> proj wins</span></div>
+    <div class="pc-od">
       <div class="pr-odrow"><span class="pr-odlbl">OFF</span><div class="pr-bar"><i style="width:${ofw}%;background:#22c55e"></i></div><span class="pr-odn ${odClass(of)}">${of!=null?'#'+of:'—'}</span></div>
       <div class="pr-odrow"><span class="pr-odlbl">DEF</span><div class="pr-bar"><i style="width:${dfw}%;background:#3b82f6"></i></div><span class="pr-odn ${odClass(df)}">${df!=null?'#'+df:'—'}</span></div>
     </div>
@@ -453,7 +468,7 @@ async function viewRankings(){
   RANK_TIERS.forEach(([lo,hi,label])=>{
     const teams=data.filter(d=>d.rank>=lo&&d.rank<=hi);
     if(!teams.length) return;
-    body += `<div class="tierhdr">${label} <span>#${lo}–${hi}</span></div>` + teams.map(rankRow).join('');
+    body += `<div class="tierhdr">${label} <span>#${lo}–${hi}</span></div><div class="pr-grid">${teams.map(rankCard).join('')}</div>`;
   });
   app().innerHTML = `
     <div class="note"><b>2026 roster-talent ranking</b> — each team rated by the players on its current roster
