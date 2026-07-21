@@ -63,6 +63,15 @@ FORMATS = {
 def _fmt(fmt):
     return FORMATS.get(fmt, FORMATS["bestball"])
 
+
+# Per-format default draft roster. Best Ball = 18-man, no K/DST. The redraft formats add 1 K + 1
+# DST and lean to the format: Full PPR is WR-heavy (fewer RB), Half PPR is more RB-leaning (fewer WR).
+DEFAULT_ROSTER = {
+    "bestball": {"QB": 2, "RB": 5, "WR": 8, "TE": 3, "K": 0, "DST": 0},
+    "half":     {"QB": 2, "RB": 5, "WR": 7, "TE": 3, "K": 1, "DST": 1},
+    "full":     {"QB": 2, "RB": 4, "WR": 8, "TE": 3, "K": 1, "DST": 1},
+}
+
 FANTASY_POS = ["QB", "RB", "WR", "TE"]      # Underdog rosters are all offense
 _PROJ_SEASONS = [2025, 2024, 2023]          # recency window for the draft board
 _PROJ_W = {2025: 0.60, 2024: 0.30, 2023: 0.10}
@@ -328,7 +337,7 @@ def draft_path(slot, fmt="bestball", teams=12, roster=None):
     load RB/WR early, K/DST last, guarantee the core."""
     teams = max(2, int(teams))
     slot = max(1, min(teams, int(slot)))
-    default = {"QB": 2, "RB": 5, "WR": 8, "TE": 3, "K": 0, "DST": 0}
+    default = dict(DEFAULT_ROSTER.get(fmt, DEFAULT_ROSTER["bestball"]))
     roster = {**default, **{k.upper(): int(v) for k, v in (roster or {}).items()}}
     roster = {k: max(0, int(v)) for k, v in roster.items()}
     if not _fmt(fmt)["kdst"]:                          # Best Ball: no kickers/defenses

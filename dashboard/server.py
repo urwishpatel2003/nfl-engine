@@ -831,10 +831,11 @@ def api_fantasy():
     if fmt not in FORMATS:
         fmt = 'bestball'
     if view == 'path':
+        from ml.fantasy import DEFAULT_ROSTER
+        dr = DEFAULT_ROSTER.get(fmt, DEFAULT_ROSTER['bestball'])
         slot = int(request.args.get('slot', 6))
         teams = int(request.args.get('teams', 12))
-        roster = {p: int(request.args.get(p.lower(), d)) for p, d in
-                  (('QB', 2), ('RB', 5), ('WR', 8), ('TE', 3), ('K', 0), ('DST', 0))}
+        roster = {p: int(request.args.get(p.lower(), dr[p])) for p in ('QB', 'RB', 'WR', 'TE', 'K', 'DST')}
         return jsonify(_native(draft_path(slot, fmt=fmt, teams=teams, roster=roster)))
     if view == 'breakouts':
         d = breakouts(2025, top=int(request.args.get('top', 25)), fmt=fmt)

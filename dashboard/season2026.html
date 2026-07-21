@@ -709,6 +709,7 @@ async function viewMatchup(home, away, neutral){
 const FT_POS = ['ALL','QB','RB','WR','TE'];
 const FT_SCORING = [['bestball','Best Ball'],['half','Half PPR'],['full','Full PPR']];
 const FT_FMT_SUB = {bestball:'Underdog Best Ball · half-PPR · no K/DST', half:'Half-PPR redraft · with K/DST', full:'Full-PPR redraft · with K/DST'};
+const FT_DEFAULT_ROSTER = {bestball:{qb:2,rb:5,wr:8,te:3,k:0,dst:0}, half:{qb:2,rb:5,wr:7,te:3,k:1,dst:1}, full:{qb:2,rb:4,wr:8,te:3,k:1,dst:1}};
 async function viewFantasy(params){
   const mode = (params && params.get('mode')) || 'board';
   const pos  = (params && params.get('pos')) || 'ALL';
@@ -717,13 +718,15 @@ async function viewFantasy(params){
   let slotN = parseInt((params && params.get('slot')) || '6') || 1;
   slotN = Math.max(1, Math.min(parseInt(teams)||12, slotN));
   const slot = ''+slotN;
-  const rq = {qb:(params&&params.get('qb'))||'2', rb:(params&&params.get('rb'))||'5',
-              wr:(params&&params.get('wr'))||'8', te:(params&&params.get('te'))||'3',
-              k:(params&&params.get('k'))||'0', dst:(params&&params.get('dst'))||'0'};
+  const dr = FT_DEFAULT_ROSTER[sc] || FT_DEFAULT_ROSTER.bestball;     // format-specific default roster
+  const rq = {qb:(params&&params.get('qb'))||''+dr.qb, rb:(params&&params.get('rb'))||''+dr.rb,
+              wr:(params&&params.get('wr'))||''+dr.wr, te:(params&&params.get('te'))||''+dr.te,
+              k:(params&&params.get('k'))||''+dr.k, dst:(params&&params.get('dst'))||''+dr.dst};
   FT_PATH = {scoring:sc, teams, slot, ...rq};
   const pathParams = `&teams=${teams}&slot=${slot}&qb=${rq.qb}&rb=${rq.rb}&wr=${rq.wr}&te=${rq.te}&k=${rq.k}&dst=${rq.dst}`;
   const q=(m,extra='')=>`#/fantasy?mode=${m}&scoring=${sc}${extra}`;   // preserve scoring across modes
-  const scExtra = mode==='board' ? '&pos='+pos : mode==='path' ? pathParams : '';
+  // switching FORMAT in path mode drops the roster params so the new format's default applies
+  const scExtra = mode==='board' ? '&pos='+pos : mode==='path' ? `&teams=${teams}&slot=${slot}` : '';
   app().innerHTML = `<div class="pad">
     <div class="viewhead">
       <div class="ttl">Fantasy Draft <span>${FT_FMT_SUB[sc]||''} · our 2026 projections</span></div>
