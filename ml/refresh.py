@@ -174,6 +174,19 @@ def rebuild_light(log=_default_log) -> dict:
         out["team_styles"] = f"error: {str(e)[:200]}"
         log(f"  team_styles FAILED — {e}", "WARN")
 
+    # Season projections: precomputed + stored (win totals fold in completed games from the
+    # refreshed schedule; player totals pick up refreshed styles/SOS). This is the weekly update.
+    try:
+        import importlib
+        import ml.season as _season
+        importlib.reload(_season)                       # ensure it reads the just-refreshed data
+        res = _season.build_season()
+        out["season_projections"] = f"ok ({res['games_played']} games played)"
+        log(f"  season projections rebuilt ({res['games_played']} games played)")
+    except Exception as e:
+        out["season_projections"] = f"error: {str(e)[:200]}"
+        log(f"  season projections FAILED — {e}", "WARN")
+
     return out
 
 

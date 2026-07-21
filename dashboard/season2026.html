@@ -959,6 +959,11 @@ function svWinDist(dist,mode){
   const mx=Math.max(...dist,0.001);
   return `<span class="wdist" title="win distribution 0–17">${dist.map((p,i)=>`<i class="${i===mode?'md':''}" style="height:${Math.max(2,Math.round(p/mx*26))}px"></i>`).join('')}</span>`;
 }
+function svStamp(d){
+  const s=d.status||{}; if(!s.generated_at) return '';
+  const dt=String(s.generated_at).slice(0,10);
+  return ` <span style="color:var(--muted);font-weight:400">· as of ${esc(dt)}${s.games_played?` (${s.games_played} games played)`:' (preseason)'}</span>`;
+}
 function svWins(d){
   const rows=(d.teams||[]).map(t=>{
     const logo=META[t.team]?META[t.team].logo:'';
@@ -969,7 +974,7 @@ function svWins(d){
       <td class="r ${t.p_over>=0.5?'val-pos':'val-neg'}">${Math.round(t.p_over*100)}%</td>
       <td>${svWinDist(t.dist,t.mode_wins)}</td></tr>`;
   }).join('');
-  return `<div class="note" style="margin:0 0 12px">Expected regular-season wins — we price all 272 games with our matchup model, then take the exact win distribution over each team's schedule. <b>O/U</b> = fair line (median), <b>Over</b> = P(more wins than the line). Games treated as independent (ignores injury/bye luck).</div>
+  return `<div class="note" style="margin:0 0 12px">Expected regular-season wins over each team's <b>actual 2026 schedule</b> — priced game-by-game, then the exact win distribution. <b>O/U</b> = fair line (median), <b>Over</b> = P(more wins than the line). Precomputed &amp; stored, refreshed weekly${svStamp(d)}.</div>
     <div style="overflow-x:auto"><table class="ftbl"><thead><tr><th class="r">#</th><th>Team</th><th class="r">Proj Wins</th><th class="c">Record</th><th class="c">O/U</th><th class="r">Over</th><th>Win distribution 0–17</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 function svPlayersControls(sc,pos){
@@ -991,7 +996,7 @@ function svPlayers(d){
     <td class="r">${p.rush_yds>0?p.rush_yds:''}</td><td class="r">${p.rec||''}</td><td class="r">${p.rec_yds||''}</td>
     <td class="r">${p.total_td}</td><td class="r"><b>${p.fpts}</b></td></tr>`;
   }).join('');
-  return `<div class="note" style="margin:0 0 12px">Projected full-season stat totals + fantasy points (recency-weighted 2023–25 per-game rates × projected games). Blank = negligible for that position; rookies with no NFL history are omitted.</div>
+  return `<div class="note" style="margin:0 0 12px">Projected full-season stat totals + fantasy points — recency-weighted 2023–25 per-game rates × projected games, <b>schedule-adjusted</b> by each team's strength of schedule. Blank = negligible for that position; rookies with no NFL history omitted. Stored, refreshed weekly${svStamp(d)}.</div>
     <div style="overflow-x:auto"><table class="ftbl"><thead><tr><th class="r">#</th><th>Player</th><th>Pos</th><th>Team</th><th class="r">G</th><th class="r">Pass Yds</th><th class="r">Pass TD</th><th class="r">Rush Yds</th><th class="r">Rec</th><th class="r">Rec Yds</th><th class="r">TD</th><th class="r">Fantasy</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 async function viewSeason(params){

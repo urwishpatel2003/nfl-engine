@@ -890,8 +890,9 @@ def api_props():
 def api_season():
     """Season-long projections: team win totals (expected wins + fair O/U line + P(over) from the
     Poisson-binomial over each team's 2026 schedule) or player season stat totals + fantasy points."""
-    from ml.season import team_win_totals, player_season_totals
+    from ml.season import team_win_totals, player_season_totals, status
     view = request.args.get('view', 'wins')
+    st = status()
     if view == 'players':
         from ml.fantasy import FORMATS
         fmt = request.args.get('scoring', 'half')
@@ -902,9 +903,10 @@ def api_season():
         if pos and pos.upper() in ('QB', 'RB', 'WR', 'TE'):
             d = d[d['position'] == pos.upper()]
         d = d.head(int(request.args.get('limit', 200)))
-        return jsonify(_native({"view": "players", "scoring": fmt, "players": d.to_dict('records')}))
+        return jsonify(_native({"view": "players", "scoring": fmt, "status": st,
+                                "players": d.to_dict('records')}))
     w = team_win_totals()
-    return jsonify(_native({"view": "wins", "teams": w.to_dict('records')}))
+    return jsonify(_native({"view": "wins", "status": st, "teams": w.to_dict('records')}))
 
 
 # ═══════════════════════════════════════════════════════════════════
