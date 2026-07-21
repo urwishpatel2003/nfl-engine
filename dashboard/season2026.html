@@ -97,18 +97,16 @@
   @media(max-width:560px){.pr-row{grid-template-columns:22px 24px 1fr auto 120px;gap:7px}}
   /* rankings as team boxes */
   .pr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-bottom:4px}
-  .pr-card{background:var(--panel2);border:1px solid var(--line);border-left:4px solid var(--line);
-           border-radius:12px;padding:13px 14px;cursor:pointer}
+  .pr-card{background:var(--panel2);border:1px solid var(--line);border-top:3px solid var(--line);
+           border-radius:12px;padding:14px 14px 13px;cursor:pointer;position:relative;text-align:center}
   .pr-card:hover{border-color:var(--accent)}
-  .pc-top{display:flex;align-items:center;gap:9px}
-  .pc-rank{font-size:19px;font-weight:800;color:var(--muted);min-width:22px}
-  .pc-top img{width:34px;height:34px;object-fit:contain}
-  .pc-nm{min-width:0;flex:1}
+  .pc-rank-badge{position:absolute;top:10px;left:12px;font-size:13px;font-weight:800;color:var(--muted)}
+  .pc-logo-lg{width:56px;height:56px;object-fit:contain;display:block;margin:4px auto 9px}
   .pc-team{font-weight:700;font-size:14px;line-height:1.15}
-  .pc-qb{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
-  .pc-wins{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;margin:9px 0 9px}
+  .pc-qb{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px}
+  .pc-wins{font-size:23px;font-weight:800;font-variant-numeric:tabular-nums;margin:10px 0 10px}
   .pc-wins span{font-size:10px;font-weight:400;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
-  .pc-od{display:flex;flex-direction:column;gap:5px}
+  .pc-od{display:flex;flex-direction:column;gap:5px;text-align:left}
 
   /* chips + tiles */
   .chips{display:flex;flex-wrap:wrap;gap:6px}
@@ -449,12 +447,11 @@ function odClass(rk){ return rk==null?'':(rk<=8?'g':(rk>=25?'b':'')); }
 function rankCard(d){
   const of=d.off_rank, df=d.def_rank;
   const ofw=of!=null?Math.round((33-of)/32*100):0, dfw=df!=null?Math.round((33-df)/32*100):0;
-  return `<div class="pr-card" title="rating ${f1(d.rating)}" style="border-left-color:${d.color}" onclick="go('#/team/${d.team}')">
-    <div class="pc-top">
-      <span class="pc-rank">${d.rank}</span>
-      <img src="${d.logo}" onerror="this.style.visibility='hidden'">
-      <div class="pc-nm"><div class="pc-team">${esc(d.name||d.team)}</div><div class="pc-qb">${d.team}${d.qb?' · '+esc(d.qb):''}</div></div>
-    </div>
+  return `<div class="pr-card" title="rating ${f1(d.rating)}" style="border-top-color:${d.color}" onclick="go('#/team/${d.team}')">
+    <span class="pc-rank-badge">#${d.rank}</span>
+    <img class="pc-logo-lg" src="${d.logo}" onerror="this.style.visibility='hidden'">
+    <div class="pc-team">${esc(d.name||d.team)}</div>
+    <div class="pc-qb">${d.team}${d.qb?' · '+esc(d.qb):''}</div>
     <div class="pc-wins">${d.proj_wins!=null?d.proj_wins.toFixed(1):'—'}<span> proj wins</span></div>
     <div class="pc-od">
       <div class="pr-odrow"><span class="pr-odlbl">OFF</span><div class="pr-bar"><i style="width:${ofw}%;background:#22c55e"></i></div><span class="pr-odn ${odClass(of)}">${of!=null?'#'+of:'—'}</span></div>
