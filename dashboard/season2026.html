@@ -859,16 +859,29 @@ function ppOver(m,line){
   return {over:1-ppPoisCdf(Math.floor(line),lam),push:0};
 }
 function ppFair(p){ p=Math.min(0.999,Math.max(0.001,p)); return p>=0.5?Math.round(-100*p/(1-p)):Math.round(100*(1-p)/p); }
+function ppAmProb(o){ return o<0 ? (-o)/((-o)+100) : 100/(o+100); }   // american odds → implied prob
+function ppOdds(o){ return (o>0?'+':'')+o; }
 function ppUpdate(i){
-  const m=PP_ROWS[i];
+  const m=PP_ROWS[i], b=m.book;
   let line=0.5;                                    // anytime-TD rows have no input; line is ignored
   if(m.dist!=='prob'){ const inp=document.querySelector(`.ppline[data-i="${i}"]`); if(!inp) return; line=parseFloat(inp.value); if(isNaN(line)) return; }
   const r=ppOver(m,line), push=r.push||0, un=Math.max(0,1-r.over-push);
   const cell=document.getElementById('pp-'+i);
-  if(m.dist==='prob'){ cell.innerHTML=`<span class="ppbadge lean-o">${Math.round(r.over*100)}% to score</span> <span class="ppodds">${ppFair(r.over)>0?'+':''}${ppFair(r.over)}</span>`; return; }
-  const op=Math.round(r.over*100), up=Math.round(un*100), overSide=op>=up, prob=overSide?r.over:un;
-  const neutral=op===up;
-  cell.innerHTML=`<span class="ppbadge lean-${neutral?'n':overSide?'o':'u'}">${neutral?'PICK':overSide?'OVER':'UNDER'} ${Math.round(prob*100)}%</span> <span class="ppodds">${ppFair(prob)>0?'+':''}${ppFair(prob)}</span>${push>0.02?` <span class="mk" style="font-size:10px">push ${Math.round(push*100)}%</span>`:''}`;
+  if(m.dist==='prob'){
+    const mp=r.over; let ev='';
+    if(b&&b.yes_odds!=null){ const edge=mp-ppAmProb(b.yes_odds);
+      ev=` <span class="mk">book ${ppOdds(b.yes_odds)}</span>${edge>0.03?` <span class="ppbadge lean-o">+EV ${(edge*100).toFixed(0)}%</span>`:''}`; }
+    cell.innerHTML=`<span class="ppbadge lean-o">${Math.round(mp*100)}% score</span> <span class="ppodds">${ppOdds(ppFair(mp))}</span>${ev}`; return;
+  }
+  const op=Math.round(r.over*100), up=Math.round(un*100), overSide=op>=up, prob=overSide?r.over:un, neutral=op===up;
+  let ev='';
+  if(b&&b.over_odds!=null&&b.under_odds!=null){     // real book prices → vig-free edge + +EV flag
+    const po=ppAmProb(b.over_odds), pu=ppAmProb(b.under_odds), novig=po/(po+pu);
+    const edgeO=r.over-novig, edgeU=un-(1-novig);
+    const s = edgeO>=edgeU ? {t:'OVER',e:edgeO,c:'o'} : {t:'UNDER',e:edgeU,c:'u'};
+    ev=` <span class="mk">book O ${ppOdds(b.over_odds)} / U ${ppOdds(b.under_odds)}</span>${s.e>0.03?` <span class="ppbadge lean-${s.c}">+EV ${s.t} ${(s.e*100).toFixed(0)}%</span>`:''}`;
+  }
+  cell.innerHTML=`<span class="ppbadge lean-${neutral?'n':overSide?'o':'u'}">${neutral?'PICK':overSide?'OVER':'UNDER'} ${Math.round(prob*100)}%</span> <span class="ppodds">${ppOdds(ppFair(prob))}</span>${push>0.02?` <span class="mk" style="font-size:10px">push ${Math.round(push*100)}%</span>`:''}${ev}`;
 }
 function ppRows(players){
   let html='';
@@ -876,7 +889,7 @@ function ppRows(players){
     pl.markets.forEach((m,mi)=>{
       const idx=PP_ROWS.length; PP_ROWS.push(m);
       const isProb=m.dist==='prob';
-      const defLine=isProb?0.5:Math.round(m.proj*2)/2;
+      const defLine=isProb?0.5:(m.book&&m.book.line!=null?m.book.line:Math.round(m.proj*2)/2);
       const first=mi===0;
       const lineCell=isProb?`<td class="c mk">TD ≥ 1</td>`
         :`<td class="c"><input class="ppline" data-i="${idx}" value="${defLine}" oninput="ppUpdate(${idx})"></td>`;
@@ -895,6 +908,7 @@ async function viewProps(params){
   const h=(params&&params.get('home'))||RANKINGS[0].team;
   const a=(params&&params.get('away'))||RANKINGS[RANKINGS.length-1].team;
   const neutral=(params&&params.get('neutral'))==='1';
+  const lines=(params&&params.get('lines'))==='1';
   app().innerHTML=`<div class="pad"><div class="card">
     <h2>Player Props <span>projected stat lines + over/under · pick a matchup</span></h2>
     <div class="selrow"><select id="ppAway">${teamOptions(a)}</select><span class="at">@</span><select id="ppHome">${teamOptions(h)}</select></div>
@@ -906,16 +920,29 @@ async function viewProps(params){
     if(H===A){ alert('Pick two different teams'); return; } go(`#/props?home=${H}&away=${A}&neutral=${N}`); };
   document.getElementById('ppGo').addEventListener('click',run);
   if(!params||!params.get('home')) return;
-  const res=document.getElementById('ppResult'); res.innerHTML='<div class="loading">Projecting stat lines…</div>';
-  const d=await j(`/api/props?home=${h}&away=${a}&neutral=${neutral?1:0}`);
+  const res=document.getElementById('ppResult'); res.innerHTML='<div class="loading">Projecting stat lines'+(lines?' + fetching live book lines':'')+'…</div>';
+  const d=await j(`/api/props?home=${h}&away=${a}&neutral=${neutral?1:0}${lines?'&lines=1':''}`);
   if(d.error){ res.innerHTML=`<div class="note warn">${esc(d.error)}</div>`; return; }
   PP_ROWS=[];
-  const head=`<tr><th>Player</th><th>Market</th><th class="r">Proj</th><th class="c">Line</th><th>Model lean · fair odds</th></tr>`;
+  const head=`<tr><th>Player</th><th>Market</th><th class="r">Proj</th><th class="c">${lines?'Book line':'Line'}</th><th>Model lean · fair odds${lines?' · book · +EV':''}</th></tr>`;
   const teamBlock=(t)=>`<div class="bxs" style="font-size:13px;margin:14px 0 4px">${esc(META[t]?META[t].name:t)}</div>
     <div style="overflow-x:auto"><table class="pptbl"><thead>${head}</thead><tbody>${ppRows(d.teams[t]||[])}</tbody></table></div>`;
   const p=d.pred;
-  res.innerHTML=`<div class="note" style="margin:14px 0 4px">Projected: <b>${a} ${p.pred_away_score.toFixed(0)} — ${p.pred_home_score.toFixed(0)} ${h}</b>. Enter a book line to see the model's over/under lean + fair (no-vig) odds. Our number is opponent-adjusted and game-script-shaped — but the book already prices most of this, so treat leans as a starting point, not a lock.</div>
+  // live-lines toolbar + status
+  const os=d.odds_status||{};
+  let bar;
+  if(!lines){
+    bar=`<button id="ppLines" style="width:auto;padding:8px 14px;font-size:13px;background:#12233f;border:1px solid #2f4a78">💰 Load live book lines <span style="opacity:.7;font-weight:400">(uses your odds-API credits)</span></button>`;
+  }else if(os.error){
+    bar=`<div class="note warn" style="margin:0">Live lines unavailable: ${esc(os.error)}. Showing model projections only. <a href="#/props?home=${h}&away=${a}&neutral=${neutral?1:0}">back to model-only</a></div>`;
+  }else{
+    bar=`<div class="note" style="margin:0">✅ Live book lines merged (${esc(''+(os.markets||0))} markets${os.remaining_credits!=null?' · '+esc(''+os.remaining_credits)+' credits left':''}). Book line prefilled; +EV = model beats the vig-free book price by >3%. <a href="#/props?home=${h}&away=${a}&neutral=${neutral?1:0}&lines=1">reload</a></div>`;
+  }
+  res.innerHTML=`<div style="margin:14px 0 10px">${bar}</div>
+    <div class="note" style="margin:0 0 4px">Projected: <b>${a} ${p.pred_away_score.toFixed(0)} — ${p.pred_home_score.toFixed(0)} ${h}</b>. ${lines?'Lines are consensus across US books.':'Enter a book line, or load live lines above.'} Our number is opponent-adjusted and game-script-shaped — the book already prices most of this, so treat leans as a starting point.</div>
     ${teamBlock(a)}${teamBlock(h)}`;
+  const lb=document.getElementById('ppLines');
+  if(lb) lb.addEventListener('click',()=>go(`#/props?home=${h}&away=${a}&neutral=${neutral?1:0}&lines=1`));
   PP_ROWS.forEach((_,i)=>{ if(document.getElementById('pp-'+i)) ppUpdate(i); });   // prime all rows
 }
 

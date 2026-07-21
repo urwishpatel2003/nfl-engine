@@ -865,7 +865,25 @@ def api_props():
     if not home or not away or home == away:
         return jsonify({"error": "pick two different teams"}), 400
     neutral = request.args.get('neutral') == '1'
-    return jsonify(_native(player_props(home, away, neutral=neutral)))
+    data = player_props(home, away, neutral=neutral)
+    if request.args.get('lines') == '1':                 # merge real book lines (spends odds credits)
+        from ml.odds import event_props, have_key, _namekey
+        if not have_key():
+            data["odds_status"] = {"error": "ODDS_API_KEY not set on the server"}
+        else:
+            meta = team_meta()
+            hn = meta.get(home, {}).get('team_name', home)
+            an = meta.get(away, {}).get('team_name', away)
+            props_map, status = event_props(hn, an)
+            data["odds_status"] = status
+            for team in (home, away):
+                for pl in data["teams"].get(team, []):
+                    pk = _namekey(pl["name"])
+                    for m in pl["markets"]:
+                        book = props_map.get((pk, m["market"]))
+                        if book:
+                            m["book"] = book
+    return jsonify(_native(data))
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -900,7 +918,7 @@ def clear_caches():
         ml.backtest_spreads._BLEND_W = None           # recompute optimal blend after refresh
     except Exception:
         pass
-    for modname in ("ml.matchup_context", "ml.coaching", "ml.fantasy"):
+    for modname in ("ml.matchup_context", "ml.coaching", "ml.fantasy", "ml.odds"):
         try:
             import importlib
             importlib.import_module(modname).clear()
