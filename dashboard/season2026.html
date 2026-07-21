@@ -1084,7 +1084,7 @@ function schCard(g){
     </div>
     <div class="gc-prob"><div style="width:${ap}%;background:${g.away_color}"></div><div style="width:${hp}%;background:${g.home_color}"></div></div>
     <div class="gc-row"><span>Model proj</span><b>${pred?`${fav} -${Math.abs(g.pred_margin).toFixed(1)}`:'—'}</b></div>
-    <div class="gc-row"><span>Vegas line</span><b>${veg}</b></div>
+    <div class="gc-row"><span>Vegas line${g.line_source==='live'?' <span style="color:var(--good);font-size:9px;font-weight:700">● LIVE</span>':''}</span><b>${veg}</b></div>
     ${blendRow}
     ${edgeRow}
     <div class="gc-row"><span>Total · model / Vegas</span><b>${pred?g.pred_total.toFixed(1):'—'} / ${g.vegas_total??'—'}</b></div>
@@ -1128,7 +1128,12 @@ async function viewSchedule(params){
         <span class="rk">${g.pick_rank}</span><b>${ps}</b>&nbsp;${g.away}@${g.home} · ${Math.round(g.cover_prob*100)}% cover · ${Math.abs(g.edge).toFixed(1)} pt edge</div>`;}).join('')}</div>
       <div style="color:var(--muted);font-size:11px;margin-top:8px">Two-stage: only games where the model disagrees with the line by ≥2.5 points qualify, then those are ranked by key-number-aware cover probability (so a real edge in a good key-number spot rises). Fewer than 5 may show if the slate is efficient — and these are not guaranteed winners (the model doesn't reliably beat NFL spreads out-of-sample; see the backtest).</div>
     </div>` : '';
-  body.innerHTML = strip + `<div id="schAcc"></div>`
+  const os=d.odds_status||{}, nLive=d.games.filter(g=>g.line_source==='live').length;
+  const oddsBar = nLive>0
+    ? `<div class="note" style="margin:0 0 12px"><span style="color:var(--good)">● LIVE</span> Vegas lines from The Odds API on ${nLive} game${nLive>1?'s':''} (consensus across US books${os.remaining_credits!=null?` · ${esc(''+os.remaining_credits)} credits left`:''}). Games without a live line fall back to the nflverse number.</div>`
+    : (os.error ? `<div class="note warn" style="margin:0 0 12px">Live lines unavailable: ${esc(os.error)}. Showing nflverse lines.</div>`
+       : `<div class="note" style="margin:0 0 12px">No live book lines posted for this week yet — showing nflverse lines (they fill in closer to game day).</div>`);
+  body.innerHTML = oddsBar + strip + `<div id="schAcc"></div>`
     + `<div class="note">Click any game for the full breakdown (schemes, form, injuries, box score). ${picks.length?'Qualifying edge plays highlighted below.':''}</div>`
     + `<div class="sched">${d.games.map(schCard).join('')}</div>`;
   // honest accuracy vs the market (background; cached server-side)

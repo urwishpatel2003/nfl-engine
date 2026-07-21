@@ -37,8 +37,10 @@ _MKT = {
 _REV = {v: k for k, v in _MKT.items()}
 
 _TTL = 600
+_GAME_TTL = 900     # game spreads/totals move slower pre-game; 15-min cache keeps credits sane
 _EVENTS = {"t": 0.0, "data": None}
 _PROPS = {}         # event_id -> {"t":, "data":, "meta":}
+_GAMES = {"t": 0.0, "data": None, "meta": None}
 
 
 def have_key() -> bool:
@@ -57,9 +59,58 @@ def _get(url):
 
 
 def clear():
-    global _EVENTS, _PROPS
+    global _EVENTS, _PROPS, _GAMES
     _EVENTS = {"t": 0.0, "data": None}
     _PROPS = {}
+    _GAMES = {"t": 0.0, "data": None, "meta": None}
+
+
+def game_lines():
+    """Consensus spread + total for every currently-posted NFL game, in ONE bulk request. Returns
+    ({(home_key, away_key): {spread, total}}, meta). Spread is converted to nflverse convention
+    (POSITIVE = home favored = negative of the home team's odds-API point). Cached _GAME_TTL."""
+    key = os.environ.get("ODDS_API_KEY")
+    if not key:
+        return {}, {"error": "ODDS_API_KEY not set on the server"}
+    if _GAMES["data"] is not None and time.time() - _GAMES["t"] < _GAME_TTL:
+        return _GAMES["data"], _GAMES["meta"]
+    url = (f"{_BASE}/sports/{_SPORT}/odds?apiKey={key}"
+           f"&regions=us&oddsFormat=american&markets=spreads,totals")
+    try:
+        data, remaining = _get(url)
+    except requests.HTTPError as e:
+        code = e.response.status_code if e.response is not None else "?"
+        return {}, {"error": f"odds fetch failed (HTTP {code})"}
+    except Exception as e:
+        return {}, {"error": f"odds fetch failed: {str(e)[:100]}"}
+
+    out = {}
+    for ev in data:
+        home, away = ev.get("home_team"), ev.get("away_team")
+        if not home or not away:
+            continue
+        hk = _namekey(home)
+        spreads, totals = [], []
+        for bk in ev.get("bookmakers", []):
+            for mk in bk.get("markets", []):
+                if mk.get("key") == "spreads":
+                    for oc in mk.get("outcomes", []):
+                        if _namekey(oc.get("name")) == hk and oc.get("point") is not None:
+                            spreads.append(-float(oc["point"]))     # -> nflverse home-favored sign
+                elif mk.get("key") == "totals":
+                    pt = next((o.get("point") for o in mk.get("outcomes", []) if o.get("point") is not None), None)
+                    if pt is not None:
+                        totals.append(float(pt))
+        rec = {}
+        if spreads:
+            rec["spread"] = round(st.median(spreads), 1)
+        if totals:
+            rec["total"] = round(st.median(totals), 1)
+        if rec:
+            out[(hk, _namekey(away))] = rec
+    meta = {"remaining_credits": remaining, "games": len(out)}
+    _GAMES.update(t=time.time(), data=out, meta=meta)
+    return out, meta
 
 
 def events():

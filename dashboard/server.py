@@ -710,76 +710,32 @@ def api_matchup_full():
 _SCHED_PRED = {}   # (season, week) -> games list; cleared on refresh
 
 
-@app.route('/api/schedule')
-def api_schedule():
-    """A week's slate: every game with the model's roster+injury-adjusted prediction
-    (and the Vegas line / final score when available). Auto-pairs home/away from the schedule."""
-    from ml.projections import unavailable_ids
-    s = schedules_df()
-    if s.empty:
-        return jsonify({"error": "no schedule data"}), 404
-    seasons = sorted(int(x) for x in s["season"].dropna().unique())
-    season = int(request.args.get('season', seasons[-1]))
-    d = s[s["season"] == season].copy()
-    if "game_type" in d.columns:                     # regular season for the weekly view
-        d = d[d["game_type"].fillna("REG").str.upper().eq("REG")]
-    weeks = sorted(int(x) for x in d["week"].dropna().unique())
-    if not weeks:
-        return jsonify(_native({"season": season, "week": None, "seasons": seasons, "weeks": [], "games": []}))
-    week = int(request.args.get('week', weeks[0]))
-    if (season, week) in _SCHED_PRED:
-        return jsonify(_native({"season": season, "week": week, "seasons": seasons,
-                                "weeks": weeks, "games": _SCHED_PRED[(season, week)]}))
-    dw = d[d["week"] == week]
-    sort_cols = [c for c in ["gameday", "gametime"] if c in dw.columns]
-    if sort_cols:
-        dw = dw.sort_values(sort_cols)
-
-    from ml.context import game_context
-    meta = team_meta()
-    unavail = unavailable_ids()
-    games = []
-    for _, g in dw.iterrows():
-        home, away = g.get("home_team"), g.get("away_team")
-        if not isinstance(home, str) or not isinstance(away, str):
-            continue
-        hm, am = meta.get(home, {}), meta.get(away, {})
-        played = pd.notna(g.get("home_score"))
-        ctx = game_context(home, away, g)
-        rec = {
-            "game_id": g.get("game_id"), "gameday": g.get("gameday"), "gametime": g.get("gametime"),
-            "home": home, "away": away,
-            "home_name": hm.get("team_name", home), "away_name": am.get("team_name", away),
-            "home_logo": hm.get("team_logo_espn", ""), "away_logo": am.get("team_logo_espn", ""),
-            "home_color": hm.get("team_color") or "#334155", "away_color": am.get("team_color") or "#334155",
-            "vegas_spread": safe_json(g.get("spread_line")), "vegas_total": safe_json(g.get("total_line")),
-            "home_score": safe_json(g.get("home_score")), "away_score": safe_json(g.get("away_score")),
-            "final": bool(played),
-            "neutral": ctx["neutral"], "stadium": ctx["stadium"], "context_notes": ctx["notes"],
-        }
-        # neutral site removes home field (via project_game); travel/weather nudge each score
-        pred = _adjusted_prediction(home, away, neutral=ctx["neutral"], unavail=unavail)
-        if "error" not in pred:
-            hs = round(pred["pred_home_score"] + ctx["home_delta"], 1)
-            as_ = round(pred["pred_away_score"] + ctx["away_delta"], 1)
-            margin = round(hs - as_, 1)
-            wp = float(1 / (1 + np.exp(-margin / 13.5 * np.pi / np.sqrt(3))))
-            rec.update({
-                "pred_home": hs, "pred_away": as_,
-                "pred_margin": margin, "pred_total": round(hs + as_, 1),
-                "home_win_prob": round(wp, 3),
-                "inj_home": pred["injury_impact"][home], "inj_away": pred["injury_impact"][away],
-                "context_delta": {"home": ctx["home_delta"], "away": ctx["away_delta"]},
-            })
-        games.append(rec)
-
-    # Turn each point estimate into a key-number-aware ATS pick + cover probability, and an
-    # over/under read. Two-stage top-5: FIRST require a genuine disagreement with the line
-    # (|edge| ≥ MIN_EDGE points — otherwise a near-coinflip dog getting a great key-number
-    # price can outrank a real edge), THEN rank the qualifiers by cover probability so key
-    # numbers still break ties among plays that actually have an edge.
+def _finalize_slate(base_games):
+    """Overlay live Vegas lines (The Odds API, cached) onto the cached model predictions, then
+    compute the key-number ATS picks + top-5. Runs every request (cheap) so lines/picks stay
+    current while the expensive predictions stay cached. Falls back to the nflverse line when the
+    book has nothing (offseason / later weeks)."""
     from ml.spreads import ats_pick as _ats_pick, total_prob as _total_prob
     from ml.backtest_spreads import blend_weight
+    games = [dict(g) for g in base_games]            # copy so the cached base stays clean
+    odds_status = None
+    try:
+        from ml.odds import game_lines, have_key, _namekey
+        if have_key():
+            lines, odds_status = game_lines()
+            for g in games:
+                lv = None if g.get("final") else lines.get(
+                    (_namekey(g.get("home_name", g["home"])), _namekey(g.get("away_name", g["away"]))))
+                if lv and lv.get("spread") is not None:
+                    g["nfl_spread"] = g.get("vegas_spread")
+                    g["vegas_spread"] = lv["spread"]
+                    g["line_source"] = "live"
+                    if lv.get("total") is not None:
+                        g["vegas_total"] = lv["total"]
+                elif g.get("vegas_spread") is not None:
+                    g["line_source"] = "nflverse"
+    except Exception:
+        odds_status = None
     w = blend_weight()                               # optimal market-anchored ensemble weight
     scored = [g for g in games if g.get("pred_margin") is not None and g.get("vegas_spread") is not None]
     for g in scored:
@@ -799,10 +755,74 @@ def api_schedule():
     qualified = [g for g in scored if abs(g.get("edge") or 0) >= MIN_EDGE]
     for i, g in enumerate(sorted(qualified, key=lambda x: -x["cover_prob"])[:5], 1):
         g["pick_rank"] = i
+    return games, odds_status
 
-    _SCHED_PRED[(season, week)] = games
-    return jsonify(_native({"season": season, "week": week, "seasons": seasons,
-                            "weeks": weeks, "games": games}))
+
+@app.route('/api/schedule')
+def api_schedule():
+    """A week's slate: every game with the model's roster+injury-adjusted prediction
+    (and the Vegas line / final score when available). Auto-pairs home/away from the schedule."""
+    from ml.projections import unavailable_ids
+    s = schedules_df()
+    if s.empty:
+        return jsonify({"error": "no schedule data"}), 404
+    seasons = sorted(int(x) for x in s["season"].dropna().unique())
+    season = int(request.args.get('season', seasons[-1]))
+    d = s[s["season"] == season].copy()
+    if "game_type" in d.columns:                     # regular season for the weekly view
+        d = d[d["game_type"].fillna("REG").str.upper().eq("REG")]
+    weeks = sorted(int(x) for x in d["week"].dropna().unique())
+    if not weeks:
+        return jsonify(_native({"season": season, "week": None, "seasons": seasons, "weeks": [], "games": []}))
+    week = int(request.args.get('week', weeks[0]))
+    if (season, week) not in _SCHED_PRED:            # cache only the EXPENSIVE predictions (no lines/picks)
+        dw = d[d["week"] == week]
+        sort_cols = [c for c in ["gameday", "gametime"] if c in dw.columns]
+        if sort_cols:
+            dw = dw.sort_values(sort_cols)
+        from ml.context import game_context
+        meta = team_meta()
+        unavail = unavailable_ids()
+        base = []
+        for _, g in dw.iterrows():
+            home, away = g.get("home_team"), g.get("away_team")
+            if not isinstance(home, str) or not isinstance(away, str):
+                continue
+            hm, am = meta.get(home, {}), meta.get(away, {})
+            played = pd.notna(g.get("home_score"))
+            ctx = game_context(home, away, g)
+            rec = {
+                "game_id": g.get("game_id"), "gameday": g.get("gameday"), "gametime": g.get("gametime"),
+                "home": home, "away": away,
+                "home_name": hm.get("team_name", home), "away_name": am.get("team_name", away),
+                "home_logo": hm.get("team_logo_espn", ""), "away_logo": am.get("team_logo_espn", ""),
+                "home_color": hm.get("team_color") or "#334155", "away_color": am.get("team_color") or "#334155",
+                "vegas_spread": safe_json(g.get("spread_line")), "vegas_total": safe_json(g.get("total_line")),
+                "home_score": safe_json(g.get("home_score")), "away_score": safe_json(g.get("away_score")),
+                "final": bool(played),
+                "neutral": ctx["neutral"], "stadium": ctx["stadium"], "context_notes": ctx["notes"],
+            }
+            # neutral site removes home field (via project_game); travel/weather nudge each score
+            pred = _adjusted_prediction(home, away, neutral=ctx["neutral"], unavail=unavail)
+            if "error" not in pred:
+                hs = round(pred["pred_home_score"] + ctx["home_delta"], 1)
+                as_ = round(pred["pred_away_score"] + ctx["away_delta"], 1)
+                margin = round(hs - as_, 1)
+                wp = float(1 / (1 + np.exp(-margin / 13.5 * np.pi / np.sqrt(3))))
+                rec.update({
+                    "pred_home": hs, "pred_away": as_,
+                    "pred_margin": margin, "pred_total": round(hs + as_, 1),
+                    "home_win_prob": round(wp, 3),
+                    "inj_home": pred["injury_impact"][home], "inj_away": pred["injury_impact"][away],
+                    "context_delta": {"home": ctx["home_delta"], "away": ctx["away_delta"]},
+                })
+            base.append(rec)
+        _SCHED_PRED[(season, week)] = base
+
+    # live Vegas lines + picks are applied fresh each request (cheap; predictions stay cached)
+    games, odds_status = _finalize_slate(_SCHED_PRED[(season, week)])
+    return jsonify(_native({"season": season, "week": week, "seasons": seasons, "weeks": weeks,
+                            "games": games, "odds_status": odds_status}))
 
 
 @app.route('/api/backtest')
