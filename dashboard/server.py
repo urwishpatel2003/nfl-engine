@@ -119,19 +119,37 @@ def api_power_rankings():
     meta = team_meta()
     if mode == 'preseason':
         if _SQUAD is None:
-            from ml.squad import squad_ratings
-            _SQUAD = squad_ratings()[0]
+            from ml.squad import squad_ratings, WEIGHTS
+            bd = squad_ratings(breakdown=True)[0].copy()
+            # split the rating into an offense (qb+skill+ol) and defense (def_team+rush+cover)
+            # composite, then rank teams on each — far more intuitive than the raw z-score.
+            bd["off"] = WEIGHTS["qb"] * bd["qb"] + WEIGHTS["skill"] * bd["skill"] + WEIGHTS["ol"] * bd["ol"]
+            bd["def"] = (WEIGHTS["def_team"] * bd["def_team"] + WEIGHTS["rush"] * bd["rush"]
+                         + WEIGHTS["cover"] * bd["cover"])
+            bd["off_rank"] = bd["off"].rank(ascending=False, method="min").astype(int)
+            bd["def_rank"] = bd["def"].rank(ascending=False, method="min").astype(int)
+            try:                                          # anchor the abstract rating to projected wins
+                from ml.season import team_win_totals
+                pw = team_win_totals().set_index("team")["proj_wins"]
+                bd["proj_wins"] = bd["team"].map(pw)
+            except Exception:
+                bd["proj_wins"] = None
+            _SQUAD = bd
         r = _SQUAD
     else:
         from ml.rank import power_ratings
         r = power_ratings(season)
     qbs = qb1_2026() if mode == 'preseason' else {}
+    has = lambda c: c in r.columns
     recs = []
     for _, row in r.iterrows():
         m = meta.get(row["team"], {})
         recs.append({
             "rank": int(row["rank"]), "team": row["team"], "rating": float(row["rating"]),
-            "prev": float(row["rating_prev"]) if "rating_prev" in r.columns else None,
+            "prev": float(row["rating_prev"]) if has("rating_prev") else None,
+            "off_rank": int(row["off_rank"]) if has("off_rank") else None,
+            "def_rank": int(row["def_rank"]) if has("def_rank") else None,
+            "proj_wins": (float(row["proj_wins"]) if has("proj_wins") and pd.notna(row["proj_wins"]) else None),
             "name": m.get("team_name", row["team"]),
             "color": m.get("team_color") or "#334155",
             "logo": m.get("team_logo_espn", ""),
