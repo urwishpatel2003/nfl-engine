@@ -854,6 +854,20 @@ def api_fantasy():
                             "market_label": label, "count": len(b), "players": b.to_dict('records')}))
 
 
+@app.route('/api/props')
+def api_props():
+    """Per-player prop markets for a matchup: projected number + distribution params so the
+    frontend can price any book line as over/under + fair odds. Built on the same opponent-
+    adjusted, game-script-shaped projections as the matchup box score."""
+    from ml.props import player_props
+    home = request.args.get('home')
+    away = request.args.get('away')
+    if not home or not away or home == away:
+        return jsonify({"error": "pick two different teams"}), 400
+    neutral = request.args.get('neutral') == '1'
+    return jsonify(_native(player_props(home, away, neutral=neutral)))
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  DATA REFRESH — download latest nflverse data + rebuild light tables
 #  Runs in a background thread (POST /api/refresh) or on an in-process
