@@ -905,8 +905,26 @@ def api_season():
         d = d.head(int(request.args.get('limit', 200)))
         return jsonify(_native({"view": "players", "scoring": fmt, "status": st,
                                 "players": d.to_dict('records')}))
+    from ml.season import win_total_lines, p_over_line
     w = team_win_totals()
-    return jsonify(_native({"view": "wins", "status": st, "teams": w.to_dict('records')}))
+    teams = w.to_dict('records')
+    lines = win_total_lines()
+    if lines:
+        def _amprob(o):
+            return (-o) / ((-o) + 100) if o < 0 else 100 / (o + 100)
+        for t in teams:
+            bk = lines.get(t['team'])
+            if not bk:
+                continue
+            po = p_over_line(t['dist'], bk['line'])
+            oo, uo = bk.get('over_odds') or -110, bk.get('under_odds') or -110
+            novig = _amprob(oo) / (_amprob(oo) + _amprob(uo))
+            t['book'] = {"line": bk['line'], "over_odds": oo, "under_odds": uo,
+                         "priced": bk.get('over_odds') is not None,
+                         "our_over": round(po, 3), "novig_over": round(novig, 3),
+                         "edge": round(po - novig, 3)}
+    return jsonify(_native({"view": "wins", "status": st,
+                            "has_book": bool(lines), "teams": teams}))
 
 
 # ═══════════════════════════════════════════════════════════════════

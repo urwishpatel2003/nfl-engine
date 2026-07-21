@@ -965,17 +965,35 @@ function svStamp(d){
   return ` <span style="color:var(--muted);font-weight:400">· as of ${esc(dt)}${s.games_played?` (${s.games_played} games played)`:' (preseason)'}</span>`;
 }
 function svWins(d){
+  const hb=d.has_book;
   const rows=(d.teams||[]).map(t=>{
     const logo=META[t.team]?META[t.team].logo:'';
+    let cmp;
+    if(hb){
+      const b=t.book;
+      if(b){
+        const ov=Math.round(b.our_over*100), edge=b.edge;
+        const lean=edge>0.05?{t:'OVER',c:'o'}:edge<-0.05?{t:'UNDER',c:'u'}:null;
+        cmp=`<td class="c">${b.line}</td><td class="r ${b.our_over>=0.5?'val-pos':'val-neg'}">${ov}%</td>
+          <td>${lean?`<span class="ppbadge lean-${lean.c}">+EV ${lean.t} ${Math.abs(edge*100).toFixed(0)}%</span>`:'<span class="mk">no edge</span>'}${b.priced?'':' <span class="mk" style="font-size:10px">@−110</span>'}</td>`;
+      }else{ cmp=`<td class="c mk">—</td><td class="r mk">—</td><td class="mk">add line</td>`; }
+    }else{
+      cmp=`<td class="c">${t.win_line}</td><td class="r ${t.p_over>=0.5?'val-pos':'val-neg'}">${Math.round(t.p_over*100)}%</td>`;
+    }
     return `<tr><td class="r pr">${t.rank}</td>
       <td class="wt"><img src="${logo}" onerror="this.style.visibility='hidden'"> <b>${t.team}</b></td>
       <td class="r"><span class="wbig">${t.proj_wins}</span></td>
-      <td class="c">${t.record}</td><td class="c">${t.win_line}</td>
-      <td class="r ${t.p_over>=0.5?'val-pos':'val-neg'}">${Math.round(t.p_over*100)}%</td>
+      <td class="c">${t.record}</td>${cmp}
       <td>${svWinDist(t.dist,t.mode_wins)}</td></tr>`;
   }).join('');
-  return `<div class="note" style="margin:0 0 12px">Expected regular-season wins over each team's <b>actual 2026 schedule</b> — priced game-by-game, then the exact win distribution. <b>O/U</b> = fair line (median), <b>Over</b> = P(more wins than the line). Precomputed &amp; stored, refreshed weekly${svStamp(d)}.</div>
-    <div style="overflow-x:auto"><table class="ftbl"><thead><tr><th class="r">#</th><th>Team</th><th class="r">Proj Wins</th><th class="c">Record</th><th class="c">O/U</th><th class="r">Over</th><th>Win distribution 0–17</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  const head=hb
+    ? `<tr><th class="r">#</th><th>Team</th><th class="r">Proj Wins</th><th class="c">Record</th><th class="c">Book O/U</th><th class="r">Our Over</th><th>Edge</th><th>Dist</th></tr>`
+    : `<tr><th class="r">#</th><th>Team</th><th class="r">Proj Wins</th><th class="c">Record</th><th class="c">O/U</th><th class="r">Over</th><th>Win distribution 0–17</th></tr>`;
+  const note=hb
+    ? `Expected wins vs your <b>book win totals</b> (<code>data/raw/win_totals_2026.csv</code>). <b>Our Over</b> = exact P(wins &gt; the book line) from the win distribution; <b>+EV</b> = we beat the vig-free book by &gt;5% (odds default to −110 if you leave them blank). Precomputed &amp; stored${svStamp(d)}.`
+    : `Expected regular-season wins over each team's <b>actual 2026 schedule</b>, then the exact win distribution. <b>O/U</b> = our fair line, <b>Over</b> = P(more wins). Drop <code>data/raw/win_totals_2026.csv</code> (team, line, over_odds, under_odds) to grade vs the book${svStamp(d)}.`;
+  return `<div class="note" style="margin:0 0 12px">${note}</div>
+    <div style="overflow-x:auto"><table class="ftbl"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
 }
 function svPlayersControls(sc,pos){
   const fmts=[['half','Half PPR'],['full','Full PPR']], posf=['ALL','QB','RB','WR','TE'];

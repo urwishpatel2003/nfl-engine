@@ -229,6 +229,35 @@ def team_win_totals() -> pd.DataFrame:
     return pd.DataFrame(_board()["wins"])
 
 
+def p_over_line(dist, line: float) -> float:
+    """Our exact P(season wins > line) from the stored win distribution. Win-total lines are X.5,
+    so 'over 11.5' = P(wins ≥ 12) = sum(dist[12:])."""
+    import math
+    k = int(math.floor(line)) + 1
+    return float(sum(dist[k:])) if k < len(dist) else 0.0
+
+
+def win_total_lines() -> dict:
+    """Book win totals from data/raw/win_totals_2026.csv (team, line, [over_odds, under_odds]).
+    A drop-in — The Odds API doesn't carry team win totals, so these come from a CSV you paste."""
+    path = RAW / "win_totals_2026.csv"
+    if not path.exists():
+        return {}
+    df = pd.read_csv(path)
+    df.columns = [c.strip().lower() for c in df.columns]
+    out = {}
+    for _, r in df.iterrows():
+        team = str(r.get("team", "")).strip().upper()
+        if not team or pd.isna(r.get("line")):
+            continue
+        def _odd(c):
+            v = r.get(c)
+            return int(v) if pd.notna(v) and str(v).strip() not in ("", "nan") else None
+        out[team] = {"line": float(r["line"]), "over_odds": _odd("over_odds"),
+                     "under_odds": _odd("under_odds")}
+    return out
+
+
 def player_season_totals(fmt: str = "half") -> pd.DataFrame:
     """Read stored stat totals, add fantasy points for the requested scoring, rank."""
     from ml.fantasy import FORMATS
