@@ -296,45 +296,74 @@ def _offense_group(roster, comp, positions, topn):
             .groupby("team")["adjusted_score"].mean()
 
 
+def _pfr_to_gsis():
+    """Crosswalk PFR's pfr_player_id → gsis id via the 2026 roster's pfr_id column. Lets us match
+    PFR stats to depth-chart players by ID instead of name, so nickname/spelling differences (e.g.
+    depth 'Dru Phillips' vs PFR 'Andru Phillips') no longer drop a real starter to a depth default."""
+    global _PFR2GSIS
+    if _PFR2GSIS is not None:
+        return _PFR2GSIS
+    try:
+        r = pd.read_parquet(RAW / "rosters_2026.parquet").dropna(subset=["pfr_id", "player_id"]).drop_duplicates("pfr_id")
+        _PFR2GSIS = dict(zip(r["pfr_id"], r["player_id"]))
+    except Exception:
+        _PFR2GSIS = {}
+    return _PFR2GSIS
+
+
 def _pass_rush_players():
-    """Per-player pass-rush production keyed by _key(name): MULTI-YEAR pressures+½·sacks PER GAME
-    (recency-weighted, 2023-25). Per-game + game-weighting means a star's injured season contributes
-    little, so his healthy-year disruption carries — e.g. Bosa (2 games in 2025) keeps his 2023-24
-    form. SHARED by the team metric and the per-player card ratings so both tell the same story."""
+    """Per-player pass-rush table: MULTI-YEAR pressures+½·sacks PER GAME (recency-weighted, 2023-25).
+    Per-game + game-weighting means a star's injured season contributes little, so his healthy-year
+    disruption carries — e.g. Bosa (2 games in 2025) keeps his 2023-24 form. Grouped by pfr_player_id
+    (no name collisions) and carries both a gsis id and a name-key so callers can match by ID first,
+    name second. SHARED by the team metric and the per-player card ratings so both tell one story."""
     pf = pd.read_parquet(RAW / "pfr_defense.parquet")
     frames = []
     for yr, w in _DEF_W.items():
         d = pf[pf["season"] == yr]
         if d.empty:
             continue
-        s = d.groupby("pfr_player_name").agg(pr=("def_pressures", "sum"),
-                                             sk=("def_sacks", "sum"), gm=("def_pressures", "size"))
+        s = d.groupby("pfr_player_id").agg(pr=("def_pressures", "sum"), sk=("def_sacks", "sum"),
+                                           gm=("def_pressures", "size"), nm=("pfr_player_name", "first"))
         s["num"], s["den"] = (s["pr"] + 0.5 * s["sk"]) * w, s["gm"] * w
-        frames.append(s[["num", "den"]])
+        frames.append(s[["num", "den", "nm"]])
     if not frames:
-        return pd.Series(dtype=float)
-    a = pd.concat(frames).groupby(level=0).sum()
+        return pd.DataFrame(columns=["ppg", "gsis", "k"])
+    a = pd.concat(frames).groupby(level=0).agg(num=("num", "sum"), den=("den", "sum"), nm=("nm", "first"))
     a["ppg"] = a["num"] / a["den"].clip(lower=1)
-    a["k"] = a.index.to_series().map(_key)
-    return a.groupby("k")["ppg"].max()
+    a["gsis"] = a.index.to_series().map(_pfr_to_gsis())
+    a["k"] = a["nm"].map(_key)
+    return a[["ppg", "gsis", "k"]]
+
+
+def _id_name_lookup(df, valcol):
+    """From a per-player table with columns [valcol, 'gsis', 'k'], return (by_gsis, by_name) Series
+    so a caller can resolve a player by ID first (robust) then by name-key (fallback)."""
+    if df.empty:
+        return pd.Series(dtype=float), pd.Series(dtype=float)
+    by_gsis = df.dropna(subset=["gsis"]).groupby("gsis")[valcol].max()
+    by_name = df.groupby("k")[valcol].max()
+    return by_gsis, by_name
 
 
 def _pass_rush(roster):
-    """Team pass rush = top-5 mean of the current roster's per-player rush production, name-matched
-    to the 2026 roster (edge rushers often listed as LB)."""
-    bykey = _pass_rush_players()
+    """Team pass rush = top-5 mean of the current roster's per-player rush production, matched by
+    gsis id first then name (edge rushers often listed as LB)."""
+    g, n = _id_name_lookup(_pass_rush_players(), "ppg")
     sub = roster[roster.position.isin(["DL", "LB"])].copy()
-    sub["k"] = sub["nm_full"].map(_key)
-    sub["prod"] = sub["k"].map(bykey).fillna(0.0)
+    sub["prod"] = sub["player_id"].map(g)
+    miss = sub["prod"].isna()
+    sub.loc[miss, "prod"] = sub.loc[miss, "nm_full"].map(_key).map(n)
+    sub["prod"] = sub["prod"].fillna(0.0)
     return sub.sort_values("prod", ascending=False).groupby("team").head(5).groupby("team")["prod"].mean()
 
 
 def _coverage_players():
-    """Per-player coverage keyed by _key(name): MULTI-YEAR, TARGET-WEIGHTED passer rating allowed
-    (recency-weighted), negated so higher = better. Target-weighting stops a 4-target blowup game
-    (rating 150+) from sinking an elite low-target corner; multi-year keeps an injured/limited 2025
-    (Sauce) from erasing his healthy 2023-24 body of work; then shrink low-target players toward the
-    league rate. SHARED by the team metric and the per-player card ratings."""
+    """Per-player coverage table: MULTI-YEAR, TARGET-WEIGHTED passer rating allowed (recency-weighted),
+    negated so higher = better. Target-weighting stops a 4-target blowup game (rating 150+) from
+    sinking an elite low-target corner; multi-year keeps an injured/limited 2025 (Sauce) from erasing
+    his healthy 2023-24 body of work; then shrink low-target players toward the league rate. Grouped
+    by pfr_player_id with gsis + name-key so cards/team metric can match by ID first. SHARED."""
     pf = pd.read_parquet(RAW / "pfr_defense.parquet")
     frames = []
     for yr, w in _DEF_W.items():
@@ -342,26 +371,30 @@ def _coverage_players():
         if d.empty:
             continue
         d = d.copy(); d["wr"] = d["def_passer_rating_allowed"] * d["def_targets"]
-        s = d.groupby("pfr_player_name").agg(tgt=("def_targets", "sum"), wr=("wr", "sum"))
+        s = d.groupby("pfr_player_id").agg(tgt=("def_targets", "sum"), wr=("wr", "sum"),
+                                           nm=("pfr_player_name", "first"))
         s["wtgt"], s["wwr"] = s["tgt"] * w, s["wr"] * w
-        frames.append(s[["wtgt", "wwr"]])
+        frames.append(s[["wtgt", "wwr", "nm"]])
     if not frames:
-        return pd.Series(dtype=float)
-    agg = pd.concat(frames).groupby(level=0).sum()
+        return pd.DataFrame(columns=["cov", "gsis", "k"])
+    agg = pd.concat(frames).groupby(level=0).agg(wtgt=("wtgt", "sum"), wwr=("wwr", "sum"), nm=("nm", "first"))
     agg = agg[agg["wtgt"] >= 12]
     lg = float(agg["wwr"].sum() / max(1.0, agg["wtgt"].sum())); K = _COV_SHRINK
     agg["rate"] = agg["wwr"] / agg["wtgt"].clip(lower=1)
     agg["rate"] = (agg["wtgt"] / (agg["wtgt"] + K)) * agg["rate"] + (K / (agg["wtgt"] + K)) * lg
     agg["cov"] = -agg["rate"]                      # lower passer rating allowed = better
-    agg["k"] = agg.index.to_series().map(_key)
-    return agg.groupby("k")["cov"].mean()
+    agg["gsis"] = agg.index.to_series().map(_pfr_to_gsis())
+    agg["k"] = agg["nm"].map(_key)
+    return agg[["cov", "gsis", "k"]]
 
 
 def _coverage(roster):
-    """Team coverage = top-5 mean of the current roster's per-player coverage grade."""
-    bykey = _coverage_players()
+    """Team coverage = top-5 mean of the current roster's per-player coverage grade (id-first match)."""
+    g, n = _id_name_lookup(_coverage_players(), "cov")
     sub = roster[roster.position.isin(["DB", "LB"])].copy()
-    sub["cov"] = sub["nm_full"].map(_key).map(bykey)
+    sub["cov"] = sub["player_id"].map(g)
+    miss = sub["cov"].isna()
+    sub.loc[miss, "cov"] = sub.loc[miss, "nm_full"].map(_key).map(n)
     good = sub.dropna(subset=["cov"])
     return good.sort_values("cov", ascending=False).groupby("team").head(5).groupby("team")["cov"].mean()
 
@@ -525,6 +558,7 @@ POS_LABEL = {"QB": "Quarterback", "RB": "Running Back", "WR": "Wide Receiver",
 
 _PCT_CACHE = None
 _META_CACHE = None
+_PFR2GSIS = None
 
 
 def _player_pct():
@@ -548,9 +582,13 @@ def _player_pct():
     # DL and DB/LB cards read the SAME multi-year, injury-robust per-player signals that feed the team
     # pass-rush / coverage grades — so a card can't disagree with how the team rating treats that
     # player. Single-year 2025 CSVs (which buried Bosa/Sauce's injured seasons) are no longer used here.
-    dl_pct = _pass_rush_players().rank(pct=True) * 100               # DL by MULTI-YEAR pass-rush
-    cov_pct = _coverage_players().rank(pct=True) * 100               # DB/LB by MULTI-YEAR coverage
-    _PCT_CACHE = (skill, skill_nm, prod, prod_nm, qb_pct, dl_pct, cov_pct)
+    # Rank each per-player table into a within-metric percentile ONCE, then expose id- and name-keyed
+    # lookups (match by gsis first, name second) so nickname mismatches can't bury a real starter.
+    prdf = _pass_rush_players().copy(); prdf["pct"] = prdf["ppg"].rank(pct=True) * 100
+    dl_id, dl_nm = _id_name_lookup(prdf, "pct")                      # DL by MULTI-YEAR pass-rush
+    covdf = _coverage_players().copy(); covdf["pct"] = covdf["cov"].rank(pct=True) * 100
+    cov_id, cov_nm = _id_name_lookup(covdf, "pct")                   # DB/LB by MULTI-YEAR coverage
+    _PCT_CACHE = (skill, skill_nm, prod, prod_nm, qb_pct, dl_id, dl_nm, cov_id, cov_nm)
     return _PCT_CACHE
 
 
@@ -602,7 +640,7 @@ def team_depth_chart(team: str) -> list:
     dc["pos_rank"] = pd.to_numeric(dc["pos_rank"], errors="coerce")
     dc = dc[(dc.team == team) & dc.player_name.notna()].copy()
     dc["grp"] = dc["pos_abb"].map(GROUP_MAP)
-    skill, skill_nm, prod, prod_nm, qb_pct, dl_pct, cov_pct = _player_pct()
+    skill, skill_nm, prod, prod_nm, qb_pct, dl_id, dl_nm, cov_id, cov_nm = _player_pct()
     draft, exp, ol_pct, k_pct = _roster_meta()
     team_ol = float(ol_pct.get(team, 50.0)) if len(ol_pct) else 50.0
 
@@ -630,15 +668,16 @@ def team_depth_chart(team: str) -> list:
         if grp == "QB":
             v = _first(qb_pct.get(gid), skill.get(gid), skill_nm.get(nm))
         elif grp == "DL":
-            v = _first(dl_pct.get(k), skill.get(gid), skill_nm.get(nm))
+            v = _first(dl_id.get(gid), dl_nm.get(k), skill.get(gid), skill_nm.get(nm))
         elif grp == "LB":
             # LB spans edge rushers (listed as LB) and off-ball coverage LBs — rate on whichever
             # skill the player actually shows, so an edge like Bosa gets his pass-rush grade instead
-            # of falling through to a depth default for lacking coverage targets.
-            best = max([x for x in (dl_pct.get(k), cov_pct.get(k)) if x is not None], default=None)
+            # of falling through to a depth default for lacking coverage targets. Match by id first.
+            cands = [dl_id.get(gid), dl_nm.get(k), cov_id.get(gid), cov_nm.get(k)]
+            best = max([x for x in cands if x is not None and not pd.isna(x)], default=None)
             v = _first(best, skill.get(gid), skill_nm.get(nm))
         elif grp == "DB":
-            v = _first(cov_pct.get(k), skill.get(gid), skill_nm.get(nm))
+            v = _first(cov_id.get(gid), cov_nm.get(k), skill.get(gid), skill_nm.get(nm))
         elif grp == "K":
             v = _first(k_pct.get(gid), skill.get(gid), skill_nm.get(nm))
         elif grp in ("WR", "RB", "TE"):                  # real PBP production first, composite as backup
