@@ -226,8 +226,32 @@ def _qb_value_table():
     g = g[g["att"] >= 300]                                  # qualified starters
     g["epa_play"] = g["wepa"] / g["wpl"].clip(lower=1)
     mean = float(g["epa_play"].mean())
-    a, k = g["att"], _QB_SHRINK
-    g["value"] = (a / (a + k)) * g["epa_play"] + (k / (a + k)) * mean   # attempts-shrinkage
+    # Regress toward a DRAFT-CAPITAL prior instead of the flat league mean, and shrink young QBs
+    # harder: a promising high pick's small or rough early sample (e.g. a #1 overall rookie's bad
+    # year) shouldn't be graded as a finished product. High picks get a slightly-above-mean prior,
+    # late/undrafted a below-mean one; rookies/2nd-years carry extra regression so one year moves
+    # them less. Veterans (large samples) are barely affected — their EPA still rules.
+    try:
+        rm = pd.read_parquet(RAW / "rosters_2026.parquet").drop_duplicates("player_id").set_index("player_id")
+        dn, yx = rm.get("draft_number"), rm.get("years_exp")
+    except Exception:
+        dn = yx = None
+
+    def _prior(pid):
+        d = None if dn is None else dn.get(pid)
+        if d is None or pd.isna(d):
+            return mean - 0.02                                  # undrafted → a touch below average
+        return float(np.clip(0.025 - 0.0007 * float(d), -0.04, 0.025))
+
+    def _kadj(pid):
+        e = None if yx is None else yx.get(pid)
+        e = 9.0 if e is None or pd.isna(e) else float(e)
+        return _QB_SHRINK * (1.35 if e <= 1 else 1.1 if e == 2 else 1.0)
+
+    prior = g.index.to_series().map(_prior)
+    kadj = g.index.to_series().map(_kadj)
+    a = g["att"]
+    g["value"] = (a / (a + kadj)) * g["epa_play"] + (kadj / (a + kadj)) * prior
     return g["value"]
 
 
