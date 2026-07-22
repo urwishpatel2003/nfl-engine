@@ -192,7 +192,14 @@ def _skill_value():
 # a developing QB (e.g. a rookie disaster over-weighting a since-improved starter). The current
 # year now carries ~2.6x an early-window season, up from ~2.3x.
 _QB_W = {2025: 0.40, 2024: 0.26, 2023: 0.16, 2022: 0.11, 2021: 0.07}
-_QB_SHRINK = 650.0        # attempts of regression toward league mean (tames small samples)
+_QB_SHRINK = 650.0        # attempts of regression toward the draft-capital prior (tames small samples)
+# Draft-pedigree prior + youth regression: young high picks are graded partly on outlook, not just
+# their limited/rough early production. Prior (EPA-equiv shrink target) is high for early picks; the
+# youth multiplier adds extra regression so a #1-pick's first few years lean on pedigree.
+_QB_PRIOR_CAP = 0.055     # prior for a #1 overall pick
+_QB_PRIOR_SLOPE = 0.0011  # decay per draft slot
+_QB_PRIOR_FLOOR = -0.04   # late/undrafted prior floor
+_QB_YOUTH_K = {0: 2.2, 1: 2.2, 2: 1.7, 3: 1.3}   # years_exp -> shrinkage multiplier (else 1.0)
 
 
 def _qb_value_table():
@@ -241,12 +248,12 @@ def _qb_value_table():
         d = None if dn is None else dn.get(pid)
         if d is None or pd.isna(d):
             return mean - 0.02                                  # undrafted → a touch below average
-        return float(np.clip(0.025 - 0.0007 * float(d), -0.04, 0.025))
+        return float(np.clip(_QB_PRIOR_CAP - _QB_PRIOR_SLOPE * float(d), _QB_PRIOR_FLOOR, _QB_PRIOR_CAP))
 
     def _kadj(pid):
         e = None if yx is None else yx.get(pid)
         e = 9.0 if e is None or pd.isna(e) else float(e)
-        return _QB_SHRINK * (1.35 if e <= 1 else 1.1 if e == 2 else 1.0)
+        return _QB_SHRINK * _QB_YOUTH_K.get(int(e), 1.0)
 
     prior = g.index.to_series().map(_prior)
     kadj = g.index.to_series().map(_kadj)
