@@ -1061,6 +1061,23 @@ function svWins(d){
   return `<div class="note" style="margin:0 0 12px">${note}</div>
     <div style="overflow-x:auto"><table class="ftbl"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
 }
+function svImplied(d){
+  const rows=(d.teams||[]).map(t=>{
+    const logo=META[t.team]?META[t.team].logo:'';
+    const w=Math.max(4,Math.min(100,Math.round((t.implied_ppg-15)/(28-15)*100)));
+    const sh=t.shift;
+    const shc=sh==null?'':(sh>0.3?'var(--good)':sh<-0.3?'var(--bad)':'var(--muted)');
+    const shb=sh==null?'—':`${sh>0.3?'▲':sh<-0.3?'▼':'▬'} ${Math.abs(sh).toFixed(1)}`;
+    return `<tr><td class="r pr">${t.rank}</td>
+      <td class="wt"><img src="${logo}" onerror="this.style.visibility='hidden'"> <b>${t.team}</b></td>
+      <td class="r"><span class="wbig">${Number(t.implied_ppg).toFixed(1)}</span></td>
+      <td><div class="pr-bar" style="min-width:110px"><i style="width:${w}%;background:linear-gradient(90deg,#3b82f6,#22c55e)"></i></div></td>
+      <td class="r" style="color:${shc};font-weight:700">${shb}</td>
+      <td class="r pr">${t.games_lined}</td></tr>`;
+  }).join('');
+  return `<div class="note" style="margin:0 0 12px"><b>Vegas implied points per game</b> for each offense — the scoring environment the market prices in (a best-ball / fantasy opportunity signal). From each lined game: implied = total/2 ± spread/2. <b>YoY</b> = shift vs 2025 (▲ rising offense, ▼ regressing). Built from the <b>${(d.teams||[])[0]?.games_lined||0}-ish games per team</b> that have lines so far — fills in toward all 17 as books post &amp; the refresh pulls them.</div>
+    <div style="overflow-x:auto"><table class="ftbl"><thead><tr><th class="r">#</th><th>Team</th><th class="r">Impl PPG</th><th>Scoring environment</th><th class="r">YoY</th><th class="r">Games</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
 function svPlayersControls(sc,pos){
   const fmts=[['half','Half PPR'],['full','Full PPR']], posf=['ALL','QB','RB','WR','TE'];
   return `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
@@ -1092,6 +1109,7 @@ async function viewSeason(params){
       <div class="ttl">Season Projections <span>2026 · our model</span></div>
       <div class="segbar">
         <button class="${mode==='wins'?'on':''}" onclick="go('#/season?mode=wins')">Team Wins</button>
+        <button class="${mode==='implied'?'on':''}" onclick="go('#/season?mode=implied')">Implied Totals</button>
         <button class="${mode==='players'?'on':''}" onclick="go('#/season?mode=players&scoring=${sc}')">Player Totals</button>
       </div>
     </div>
@@ -1102,6 +1120,9 @@ async function viewSeason(params){
     if(mode==='players'){
       const d=await j(`/api/season?view=players&scoring=${sc}${pos!=='ALL'?'&pos='+pos:''}&limit=250`);
       body.innerHTML=svPlayersControls(sc,pos)+svPlayers(d);
+    }else if(mode==='implied'){
+      const d=await j('/api/season?view=implied');
+      body.innerHTML=svImplied(d);
     }else{
       const d=await j('/api/season?view=wins');
       body.innerHTML=svWins(d);

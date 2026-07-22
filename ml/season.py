@@ -237,6 +237,39 @@ def p_over_line(dist, line: float) -> float:
     return float(sum(dist[k:])) if k < len(dist) else 0.0
 
 
+def implied_totals() -> pd.DataFrame:
+    """Vegas implied points per game for each team's OFFENSE — a proxy for scoring environment
+    (best-ball / fantasy opportunity). From each lined game: home implied = total/2 + spread/2,
+    away = total/2 − spread/2 (spread = home-favored margin). Averaged over the games that have
+    lines (partial in the offseason; fills in as books post). YoY shift vs full 2025 flags
+    improving/declining offenses."""
+    s = pd.read_parquet(RAW / "schedules.parquet")
+
+    def team_ppg(season):
+        d = s[(s["season"] == season) & s["spread_line"].notna() & s["total_line"].notna()]
+        rows = []
+        for _, g in d.iterrows():
+            t, sp = float(g["total_line"]), float(g["spread_line"])
+            if isinstance(g.get("home_team"), str):
+                rows.append((g["home_team"], t / 2 + sp / 2))
+            if isinstance(g.get("away_team"), str):
+                rows.append((g["away_team"], t / 2 - sp / 2))
+        if not rows:
+            return pd.DataFrame(columns=["ppg", "n"]).set_index(pd.Index([], name="team"))
+        imp = pd.DataFrame(rows, columns=["team", "pts"])
+        return imp.groupby("team").agg(ppg=("pts", "mean"), n=("pts", "size"))
+
+    cur, prev = team_ppg(SEASON), team_ppg(SEASON - 1)
+    out = cur.reset_index()
+    out["implied_ppg"] = out["ppg"].round(2)
+    out["games_lined"] = out["n"].astype(int)
+    out["prev_ppg"] = out["team"].map(prev["ppg"]).round(2)
+    out["shift"] = (out["ppg"] - out["team"].map(prev["ppg"])).round(2)
+    out = out.sort_values("ppg", ascending=False).reset_index(drop=True)
+    out["rank"] = range(1, len(out) + 1)
+    return out[["rank", "team", "implied_ppg", "games_lined", "prev_ppg", "shift"]]
+
+
 def win_total_lines() -> dict:
     """Book win totals from data/raw/win_totals_2026.csv (team, line, [over_odds, under_odds]).
     A drop-in — The Odds API doesn't carry team win totals, so these come from a CSV you paste."""

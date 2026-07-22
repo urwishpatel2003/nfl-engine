@@ -932,6 +932,10 @@ def api_season():
     from ml.season import team_win_totals, player_season_totals, status
     view = request.args.get('view', 'wins')
     st = status()
+    if view == 'implied':
+        from ml.season import implied_totals
+        return jsonify(_native({"view": "implied", "status": st,
+                                "teams": implied_totals().to_dict('records')}))
     if view == 'players':
         from ml.fantasy import FORMATS
         fmt = request.args.get('scoring', 'half')
