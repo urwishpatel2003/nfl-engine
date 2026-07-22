@@ -325,8 +325,35 @@ def _coverage(roster):
 
 
 def _ol():
-    ol = pd.read_csv(PROC / "ol_rankings_2025.csv").set_index("team")
-    return -_z(ol["sack_rate_allowed"]) + _z(ol.get("ypc", pd.Series(0, index=ol.index)))
+    """Team O-line grade, computed from raw data (the old CSV used sack rate + all-carry stuff/ypc,
+    which mis-graded lines behind scrambling QBs and tush-push offenses — e.g. PHI). Pass protection
+    dominates via PFR PRESSURE RATE allowed (far less QB-dependent than raw sacks) plus sack rate;
+    a smaller RB-ONLY run-block signal excludes QB sneaks/kneels/scrambles. Higher = better."""
+    try:
+        pf = pd.read_parquet(RAW / "pfr_passing.parquet")
+        pf = pf[pf["season"] == 2025]
+        agg = pf.groupby("team").agg(press=("times_pressured", "sum"), sk=("times_sacked", "sum"))
+        pbp = pd.read_parquet(RAW / "pbp_2025.parquet")
+        db = pbp[pbp["pass_attempt"] == 1].groupby("posteam").size()
+        agg["db"] = db.reindex(agg.index)
+        agg["press_rate"] = agg["press"] / agg["db"].clip(lower=1)
+        agg["sack_rate"] = agg["sk"] / agg["db"].clip(lower=1)
+        ros = pd.read_parquet(RAW / "rosters_seasonal.parquet")
+        pos = ros[ros["season"] == 2025].drop_duplicates("player_id").set_index("player_id")["position"]
+        runs = pbp[pbp["rush_attempt"] == 1].copy()
+        runs["rp"] = runs["rusher_player_id"].map(pos)
+        rb = runs[runs["rp"].isin(["RB", "FB"])]                    # exclude QB runs so sneaks/kneels don't count
+        rbm = rb.groupby("posteam").agg(car=("play_id", "count"), yds=("yards_gained", "sum"),
+                                        stuff=("yards_gained", lambda x: (x <= 0).sum()))
+        rbm["ypc"] = rbm["yds"] / rbm["car"].clip(lower=1)
+        rbm["stuff_rate"] = rbm["stuff"] / rbm["car"].clip(lower=1)
+        df = agg.join(rbm)
+        passpro = -(0.7 * _z(df["press_rate"]) + 0.3 * _z(df["sack_rate"]))   # lower pressure = better
+        runblk = _z(df["ypc"]) - 0.25 * _z(df["stuff_rate"])
+        return (0.7 * passpro + 0.3 * runblk).dropna()
+    except Exception:                                              # fallback: old composite CSV
+        ol = pd.read_csv(PROC / "ol_rankings_2025.csv").set_index("team")
+        return -_z(ol["sack_rate_allowed"]) + _z(ol.get("ypc", pd.Series(0, index=ol.index)))
 
 
 def _def_team():
