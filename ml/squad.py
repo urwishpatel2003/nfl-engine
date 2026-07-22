@@ -297,23 +297,31 @@ def _offense_group(roster, comp, positions, topn):
 
 
 def _pass_rush(roster):
+    """Team pass rush from the CURRENT roster's top rushers, graded by PRESSURE RATE (quality),
+    not raw sack/pressure SUMS. The old sum rewarded volume/opportunity (a defense facing more
+    dropbacks racks up more) and was distorted by name-matching; a rate + top-5 mean is cleaner.
+    (A star who missed 2025 still deflates his team — that's real 2025 production, not a metric bug.)"""
     dl = pd.read_csv(PROC / "dl_rankings_2025.csv")
     dl["k"] = dl["name"].map(_key)
-    dl["prod"] = dl.get("def_sacks", 0).fillna(0) + 0.5 * dl.get("def_pressures", 0).fillna(0)
-    bykey = dl.groupby("k")["prod"].max()
+    col = "pressure_rate" if "pressure_rate" in dl.columns else "def_pressures"
+    bykey = dl.groupby("k")[col].max()
     sub = roster[roster.position.isin(["DL", "LB"])].copy()   # edge rushers often listed as LB
     sub["k"] = sub["nm_full"].map(_key)
     sub["prod"] = sub["k"].map(bykey).fillna(0.0)
-    return sub.sort_values("prod", ascending=False).groupby("team").head(5).groupby("team")["prod"].sum()
+    return sub.sort_values("prod", ascending=False).groupby("team").head(5).groupby("team")["prod"].mean()
 
 
 def _coverage(roster):
     pf = pd.read_parquet(RAW / "pfr_defense.parquet")
-    pf = pf[pf.season == 2025]
-    agg = pf.groupby("pfr_player_name").agg(tgt=("def_targets", "sum"),
-                                            rate=("def_passer_rating_allowed", "mean")).reset_index()
+    pf = pf[pf.season == 2025].copy()
+    # TARGET-WEIGHT the passer rating (pfr rows are per-game): a simple mean lets a 4-target blowup
+    # game (rating 150+) sink an elite low-target corner. Weight by targets so the season body of
+    # work rules, then shrink low-target players toward the league rate.
+    pf["wr"] = pf["def_passer_rating_allowed"] * pf["def_targets"]
+    agg = pf.groupby("pfr_player_name").agg(tgt=("def_targets", "sum"), wr=("wr", "sum")).reset_index()
     agg = agg[agg.tgt >= 15]
-    lg = float(agg["rate"].mean()); K = _COV_SHRINK        # shrink low-target rates toward league mean
+    lg = float(agg["wr"].sum() / max(1.0, agg["tgt"].sum())); K = _COV_SHRINK
+    agg["rate"] = agg["wr"] / agg["tgt"].clip(lower=1)
     agg["rate"] = (agg.tgt / (agg.tgt + K)) * agg["rate"] + (K / (agg.tgt + K)) * lg
     agg["k"] = agg["pfr_player_name"].map(_key)
     agg["cov"] = -agg["rate"]                      # lower passer rating allowed = better
