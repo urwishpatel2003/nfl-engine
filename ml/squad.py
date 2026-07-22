@@ -556,6 +556,58 @@ POS_LABEL = {"QB": "Quarterback", "RB": "Running Back", "WR": "Wide Receiver",
              "P": "Punter", "LS": "Long Snapper"}
 
 
+def _ol_players():
+    """Per-player individual O-line quality (0-100), keyed by gsis and name. There is no clean
+    per-lineman performance grade in free data, so blend two honest signals: a PROVEN-STARTER score
+    (recency-weighted recent offensive snaps, 2023-25 — teams don't keep starting bad linemen) and
+    DRAFT PEDIGREE, trusting snaps more as a player accrues them and the draft prior more for young/
+    unproven linemen. Lets OL cards show studs above replacement teammates instead of one flat number."""
+    try:
+        sc = pd.read_parquet(RAW / "snap_counts.parquet")
+    except Exception:
+        return pd.DataFrame(columns=["q", "gsis", "k"])
+    sc = sc[sc["position"].isin(["T", "G", "C"])]
+    frames = []
+    for yr, w in _DEF_W.items():
+        d = sc[sc["season"] == yr]
+        if d.empty:
+            continue
+        s = d.groupby("pfr_player_id").agg(mp=("offense_pct", "mean"), g=("offense_pct", "size"),
+                                           nm=("player", "first"))
+        s["wnum"], s["wden"] = s["mp"] * s["g"] * w, s["g"] * w        # games- & recency-weighted share
+        frames.append(s[["wnum", "wden", "nm"]])
+    if not frames:
+        return pd.DataFrame(columns=["q", "gsis", "k"])
+    a = pd.concat(frames).groupby(level=0).agg(wnum=("wnum", "sum"), wden=("wden", "sum"), nm=("nm", "first"))
+    # SNAP SHARE (per game), not total snaps — a proven full-time starter stays high even if injury cost
+    # him games (Slater), so the OL individual grade is injury-robust like the defensive metrics.
+    a["share"] = a["wnum"] / a["wden"].clip(lower=0.1)
+    a["gsis"] = a.index.to_series().map(_pfr_to_gsis())
+    a["k"] = a["nm"].map(_key)
+    a["snap_score"] = a["share"].rank(pct=True) * 100                 # proven-starter percentile
+    try:
+        rm = pd.read_parquet(RAW / "rosters_2026.parquet").drop_duplicates("player_id").set_index("player_id")
+        dn = pd.to_numeric(rm.get("draft_number"), errors="coerce")
+    except Exception:
+        dn = None
+    a["draft_score"] = a["gsis"].map(dn).apply(lambda p: _draft_rating(p) if pd.notna(p) else 42.0) if dn is not None else 42.0
+    a["q"] = 0.6 * a["snap_score"] + 0.4 * a["draft_score"]           # proven starter + draft pedigree
+    return a[["q", "gsis", "k"]]
+
+
+def _kicker_players():
+    """Kicker rating (0-100) keyed by gsis from the season kicker composite (FG% / long-FG% / XP%).
+    True multi-year FG data isn't in the offline dataset — the raw PBP is trimmed to engine columns and
+    only the latest-season kicker rankings CSV exists — so this is that season's grade. A team's
+    established KICKER1 who has no line that season is given a neutral veteran rating at the card layer
+    (see the K branch) rather than a replacement default, so a hurt/limited season doesn't read as bad."""
+    kp = PROC / "kicker_rankings_2025.csv"
+    if not kp.exists():
+        return pd.Series(dtype=float)
+    d = pd.read_csv(kp).dropna(subset=["player_id"]).drop_duplicates("player_id")
+    return d.set_index("player_id")["composite"].rank(pct=True) * 100
+
+
 _PCT_CACHE = None
 _META_CACHE = None
 _PFR2GSIS = None
@@ -588,7 +640,9 @@ def _player_pct():
     dl_id, dl_nm = _id_name_lookup(prdf, "pct")                      # DL by MULTI-YEAR pass-rush
     covdf = _coverage_players().copy(); covdf["pct"] = covdf["cov"].rank(pct=True) * 100
     cov_id, cov_nm = _id_name_lookup(covdf, "pct")                   # DB/LB by MULTI-YEAR coverage
-    _PCT_CACHE = (skill, skill_nm, prod, prod_nm, qb_pct, dl_id, dl_nm, cov_id, cov_nm)
+    ol_id, ol_nm = _id_name_lookup(_ol_players(), "q")              # OL individual quality (snaps+draft)
+    k_id = _kicker_players()                                         # K by MULTI-YEAR FG/long/XP (gsis)
+    _PCT_CACHE = (skill, skill_nm, prod, prod_nm, qb_pct, dl_id, dl_nm, cov_id, cov_nm, ol_id, ol_nm, k_id)
     return _PCT_CACHE
 
 
@@ -640,8 +694,8 @@ def team_depth_chart(team: str) -> list:
     dc["pos_rank"] = pd.to_numeric(dc["pos_rank"], errors="coerce")
     dc = dc[(dc.team == team) & dc.player_name.notna()].copy()
     dc["grp"] = dc["pos_abb"].map(GROUP_MAP)
-    skill, skill_nm, prod, prod_nm, qb_pct, dl_id, dl_nm, cov_id, cov_nm = _player_pct()
-    draft, exp, ol_pct, k_pct = _roster_meta()
+    skill, skill_nm, prod, prod_nm, qb_pct, dl_id, dl_nm, cov_id, cov_nm, ol_id, ol_nm, k_id = _player_pct()
+    draft, exp, ol_pct, _ = _roster_meta()
     team_ol = float(ol_pct.get(team, 50.0)) if len(ol_pct) else 50.0
 
     def _first(*vals):
@@ -660,10 +714,16 @@ def team_depth_chart(team: str) -> list:
     def rate(grp, gid, name, pos_rank):
         k, nm = _key(name), _norm(name)
         pr = int(pos_rank) if pos_rank and not pd.isna(pos_rank) else 3
-        # O-line: no reliable per-player metric → team O-line grade, adjusted for depth
-        # (starter = full grade, backups discounted) so the group isn't all one number.
+        # O-line: blend the team unit grade with the player's INDIVIDUAL quality (snaps+draft), then
+        # depth-adjust — so a stud (Sewell) or an injured team's proven starter (Slater) reads above a
+        # replacement teammate instead of every lineman showing one flat team number.
         if grp == "OL":
-            return int(round(max(20.0, team_ol + {1: 0, 2: -8, 3: -14}.get(pr, -18)))), "team"
+            iq = _first(ol_id.get(gid), ol_nm.get(k))
+            src = "measured" if iq is not None else "team"
+            if iq is None:
+                iq = team_ol                                  # no snap/draft history → fall to team level
+            base = 0.4 * team_ol + 0.6 * iq                   # individual leads; team unit is light context
+            return int(round(max(20.0, base + {1: 0, 2: -6, 3: -12}.get(pr, -16)))), src
         # 1. best measured signal for the group, then the universal composite (id or name)
         if grp == "QB":
             v = _first(qb_pct.get(gid), skill.get(gid), skill_nm.get(nm))
@@ -679,7 +739,9 @@ def team_depth_chart(team: str) -> list:
         elif grp == "DB":
             v = _first(cov_id.get(gid), cov_nm.get(k), skill.get(gid), skill_nm.get(nm))
         elif grp == "K":
-            v = _first(k_pct.get(gid), skill.get(gid), skill_nm.get(nm))
+            v = _first(k_id.get(gid), skill.get(gid), skill_nm.get(nm))
+            if v is None and pr == 1:
+                return 52, "team"    # established starting kicker, no recent line → neutral (data-limited)
         elif grp in ("WR", "RB", "TE"):                  # real PBP production first, composite as backup
             v = _first(prod.get(gid), prod_nm.get(nm), skill.get(gid), skill_nm.get(nm))
         else:                                            # P/LS — composite covers punters
