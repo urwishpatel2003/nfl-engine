@@ -297,14 +297,26 @@ def _offense_group(roster, comp, positions, topn):
 
 
 def _pass_rush(roster):
-    """Team pass rush from the CURRENT roster's top rushers, graded by PRESSURE RATE (quality),
-    not raw sack/pressure SUMS. The old sum rewarded volume/opportunity (a defense facing more
-    dropbacks racks up more) and was distorted by name-matching; a rate + top-5 mean is cleaner.
-    (A star who missed 2025 still deflates his team — that's real 2025 production, not a metric bug.)"""
-    dl = pd.read_csv(PROC / "dl_rankings_2025.csv")
-    dl["k"] = dl["name"].map(_key)
-    col = "pressure_rate" if "pressure_rate" in dl.columns else "def_pressures"
-    bykey = dl.groupby("k")[col].max()
+    """Team pass rush from the current roster's top rushers, MULTI-YEAR pressures+½·sacks PER GAME
+    (recency-weighted, 2023-25). Per-game + game-weighting means a star's injured season contributes
+    little, so his healthy-year disruption carries — e.g. Bosa (2 games in 2025) keeps his 2023-24
+    form. Top-5 mean per team; name-matched to the 2026 roster."""
+    pf = pd.read_parquet(RAW / "pfr_defense.parquet")
+    frames = []
+    for yr, w in _DEF_W.items():
+        d = pf[pf["season"] == yr]
+        if d.empty:
+            continue
+        s = d.groupby("pfr_player_name").agg(pr=("def_pressures", "sum"),
+                                             sk=("def_sacks", "sum"), gm=("def_pressures", "size"))
+        s["num"], s["den"] = (s["pr"] + 0.5 * s["sk"]) * w, s["gm"] * w
+        frames.append(s[["num", "den"]])
+    if not frames:
+        return pd.Series(dtype=float)
+    a = pd.concat(frames).groupby(level=0).sum()
+    a["ppg"] = a["num"] / a["den"].clip(lower=1)
+    a["k"] = a.index.to_series().map(_key)
+    bykey = a.groupby("k")["ppg"].max()
     sub = roster[roster.position.isin(["DL", "LB"])].copy()   # edge rushers often listed as LB
     sub["k"] = sub["nm_full"].map(_key)
     sub["prod"] = sub["k"].map(bykey).fillna(0.0)
@@ -313,18 +325,26 @@ def _pass_rush(roster):
 
 def _coverage(roster):
     pf = pd.read_parquet(RAW / "pfr_defense.parquet")
-    pf = pf[pf.season == 2025].copy()
-    # TARGET-WEIGHT the passer rating (pfr rows are per-game): a simple mean lets a 4-target blowup
-    # game (rating 150+) sink an elite low-target corner. Weight by targets so the season body of
-    # work rules, then shrink low-target players toward the league rate.
-    pf["wr"] = pf["def_passer_rating_allowed"] * pf["def_targets"]
-    agg = pf.groupby("pfr_player_name").agg(tgt=("def_targets", "sum"), wr=("wr", "sum")).reset_index()
-    agg = agg[agg.tgt >= 15]
-    lg = float(agg["wr"].sum() / max(1.0, agg["tgt"].sum())); K = _COV_SHRINK
-    agg["rate"] = agg["wr"] / agg["tgt"].clip(lower=1)
-    agg["rate"] = (agg.tgt / (agg.tgt + K)) * agg["rate"] + (K / (agg.tgt + K)) * lg
-    agg["k"] = agg["pfr_player_name"].map(_key)
+    # MULTI-YEAR, TARGET-WEIGHTED passer rating allowed (recency-weighted). Target-weighting stops a
+    # 4-target blowup game (rating 150+) from sinking an elite low-target corner; multi-year keeps an
+    # injured/limited 2025 (Sauce) from erasing his healthy 2023-24 body of work. Then shrink low-
+    # target players toward the league rate.
+    frames = []
+    for yr, w in _DEF_W.items():
+        d = pf[pf["season"] == yr]
+        if d.empty:
+            continue
+        d = d.copy(); d["wr"] = d["def_passer_rating_allowed"] * d["def_targets"]
+        s = d.groupby("pfr_player_name").agg(tgt=("def_targets", "sum"), wr=("wr", "sum"))
+        s["wtgt"], s["wwr"] = s["tgt"] * w, s["wr"] * w
+        frames.append(s[["wtgt", "wwr"]])
+    agg = pd.concat(frames).groupby(level=0).sum()
+    agg = agg[agg["wtgt"] >= 12]
+    lg = float(agg["wwr"].sum() / max(1.0, agg["wtgt"].sum())); K = _COV_SHRINK
+    agg["rate"] = agg["wwr"] / agg["wtgt"].clip(lower=1)
+    agg["rate"] = (agg["wtgt"] / (agg["wtgt"] + K)) * agg["rate"] + (K / (agg["wtgt"] + K)) * lg
     agg["cov"] = -agg["rate"]                      # lower passer rating allowed = better
+    agg["k"] = agg.index.to_series().map(_key)
     bykey = agg.groupby("k")["cov"].mean()
     sub = roster[roster.position.isin(["DB", "LB"])].copy()
     sub["cov"] = sub["nm_full"].map(_key).map(bykey)
@@ -332,31 +352,45 @@ def _coverage(roster):
     return good.sort_values("cov", ascending=False).groupby("team").head(5).groupby("team")["cov"].mean()
 
 
+# Recency weights for the MULTI-YEAR defensive/OL metrics. Multi-year (weighted by playing time)
+# makes them injury-robust: a star who missed 2025 (Bosa/Sauce/Warner) or a line whose tackles were
+# hurt (LAC) keep credit from healthy 2023-24 instead of being judged on a lost season.
+_DEF_W = {2025: 0.5, 2024: 0.3, 2023: 0.2}
+
+
 def _ol():
-    """Team O-line grade, computed from raw data (the old CSV used sack rate + all-carry stuff/ypc,
-    which mis-graded lines behind scrambling QBs and tush-push offenses — e.g. PHI). Pass protection
-    dominates via PFR PRESSURE RATE allowed (far less QB-dependent than raw sacks) plus sack rate;
-    a smaller RB-ONLY run-block signal excludes QB sneaks/kneels/scrambles. Higher = better."""
+    """Team O-line grade from raw data, MULTI-YEAR (recency-weighted, weighted by dropbacks/carries
+    so a degraded/injured season counts less). Pass protection dominates via PFR PRESSURE RATE
+    allowed (less QB-dependent than raw sacks); a smaller RB-ONLY run-block signal excludes QB
+    sneaks/kneels. Higher = better. (LAC's 2025 was wrecked by hurt tackles — 2023-24 lifts it back.)"""
     try:
         pf = pd.read_parquet(RAW / "pfr_passing.parquet")
-        pf = pf[pf["season"] == 2025]
-        agg = pf.groupby("team").agg(press=("times_pressured", "sum"), sk=("times_sacked", "sum"))
-        pbp = pd.read_parquet(RAW / "pbp_2025.parquet")
-        db = pbp[pbp["pass_attempt"] == 1].groupby("posteam").size()
-        agg["db"] = db.reindex(agg.index)
-        agg["press_rate"] = agg["press"] / agg["db"].clip(lower=1)
-        agg["sack_rate"] = agg["sk"] / agg["db"].clip(lower=1)
-        ros = pd.read_parquet(RAW / "rosters_seasonal.parquet")
-        pos = ros[ros["season"] == 2025].drop_duplicates("player_id").set_index("player_id")["position"]
-        runs = pbp[pbp["rush_attempt"] == 1].copy()
-        runs["rp"] = runs["rusher_player_id"].map(pos)
-        rb = runs[runs["rp"].isin(["RB", "FB"])]                    # exclude QB runs so sneaks/kneels don't count
-        rbm = rb.groupby("posteam").agg(car=("play_id", "count"), yds=("yards_gained", "sum"),
-                                        stuff=("yards_gained", lambda x: (x <= 0).sum()))
-        rbm["ypc"] = rbm["yds"] / rbm["car"].clip(lower=1)
-        rbm["stuff_rate"] = rbm["stuff"] / rbm["car"].clip(lower=1)
-        df = agg.join(rbm)
-        passpro = -(0.7 * _z(df["press_rate"]) + 0.3 * _z(df["sack_rate"]))   # lower pressure = better
+        ros_all = pd.read_parquet(RAW / "rosters_seasonal.parquet")
+        pfr, run = [], []
+        for yr, w in _DEF_W.items():
+            d = pf[pf["season"] == yr]
+            pbpf = RAW / f"pbp_{yr}.parquet"
+            if d.empty or not pbpf.exists():
+                continue
+            pbp = pd.read_parquet(pbpf)
+            db = pbp[pbp["pass_attempt"] == 1].groupby("posteam").size()
+            g = d.groupby("team").agg(press=("times_pressured", "sum"), sk=("times_sacked", "sum"))
+            g["wpr"], g["wsk"], g["wdb"] = g["press"] * w, g["sk"] * w, db.reindex(g.index) * w
+            pfr.append(g[["wpr", "wsk", "wdb"]])
+            pos = ros_all[ros_all["season"] == yr].drop_duplicates("player_id").set_index("player_id")["position"]
+            runs = pbp[pbp["rush_attempt"] == 1].copy()
+            runs["rp"] = runs["rusher_player_id"].map(pos)
+            rb = runs[runs["rp"].isin(["RB", "FB"])]                # exclude QB sneaks/kneels/scrambles
+            r = rb.groupby("posteam").agg(car=("play_id", "count"), yds=("yards_gained", "sum"),
+                                          stuff=("yards_gained", lambda x: (x <= 0).sum()))
+            r["wc"], r["wy"], r["ws"] = r["car"] * w, r["yds"] * w, r["stuff"] * w
+            run.append(r[["wc", "wy", "ws"]])
+        A = pd.concat(pfr).groupby(level=0).sum()
+        A["press_rate"], A["sack_rate"] = A["wpr"] / A["wdb"].clip(lower=1), A["wsk"] / A["wdb"].clip(lower=1)
+        R = pd.concat(run).groupby(level=0).sum()
+        R["ypc"], R["stuff_rate"] = R["wy"] / R["wc"].clip(lower=1), R["ws"] / R["wc"].clip(lower=1)
+        df = A.join(R)
+        passpro = -(0.7 * _z(df["press_rate"]) + 0.3 * _z(df["sack_rate"]))
         runblk = _z(df["ypc"]) - 0.25 * _z(df["stuff_rate"])
         return (0.7 * passpro + 0.3 * runblk).dropna()
     except Exception:                                              # fallback: old composite CSV
