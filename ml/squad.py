@@ -296,11 +296,11 @@ def _offense_group(roster, comp, positions, topn):
             .groupby("team")["adjusted_score"].mean()
 
 
-def _pass_rush(roster):
-    """Team pass rush from the current roster's top rushers, MULTI-YEAR pressures+½·sacks PER GAME
+def _pass_rush_players():
+    """Per-player pass-rush production keyed by _key(name): MULTI-YEAR pressures+½·sacks PER GAME
     (recency-weighted, 2023-25). Per-game + game-weighting means a star's injured season contributes
     little, so his healthy-year disruption carries — e.g. Bosa (2 games in 2025) keeps his 2023-24
-    form. Top-5 mean per team; name-matched to the 2026 roster."""
+    form. SHARED by the team metric and the per-player card ratings so both tell the same story."""
     pf = pd.read_parquet(RAW / "pfr_defense.parquet")
     frames = []
     for yr, w in _DEF_W.items():
@@ -316,19 +316,26 @@ def _pass_rush(roster):
     a = pd.concat(frames).groupby(level=0).sum()
     a["ppg"] = a["num"] / a["den"].clip(lower=1)
     a["k"] = a.index.to_series().map(_key)
-    bykey = a.groupby("k")["ppg"].max()
-    sub = roster[roster.position.isin(["DL", "LB"])].copy()   # edge rushers often listed as LB
+    return a.groupby("k")["ppg"].max()
+
+
+def _pass_rush(roster):
+    """Team pass rush = top-5 mean of the current roster's per-player rush production, name-matched
+    to the 2026 roster (edge rushers often listed as LB)."""
+    bykey = _pass_rush_players()
+    sub = roster[roster.position.isin(["DL", "LB"])].copy()
     sub["k"] = sub["nm_full"].map(_key)
     sub["prod"] = sub["k"].map(bykey).fillna(0.0)
     return sub.sort_values("prod", ascending=False).groupby("team").head(5).groupby("team")["prod"].mean()
 
 
-def _coverage(roster):
+def _coverage_players():
+    """Per-player coverage keyed by _key(name): MULTI-YEAR, TARGET-WEIGHTED passer rating allowed
+    (recency-weighted), negated so higher = better. Target-weighting stops a 4-target blowup game
+    (rating 150+) from sinking an elite low-target corner; multi-year keeps an injured/limited 2025
+    (Sauce) from erasing his healthy 2023-24 body of work; then shrink low-target players toward the
+    league rate. SHARED by the team metric and the per-player card ratings."""
     pf = pd.read_parquet(RAW / "pfr_defense.parquet")
-    # MULTI-YEAR, TARGET-WEIGHTED passer rating allowed (recency-weighted). Target-weighting stops a
-    # 4-target blowup game (rating 150+) from sinking an elite low-target corner; multi-year keeps an
-    # injured/limited 2025 (Sauce) from erasing his healthy 2023-24 body of work. Then shrink low-
-    # target players toward the league rate.
     frames = []
     for yr, w in _DEF_W.items():
         d = pf[pf["season"] == yr]
@@ -338,6 +345,8 @@ def _coverage(roster):
         s = d.groupby("pfr_player_name").agg(tgt=("def_targets", "sum"), wr=("wr", "sum"))
         s["wtgt"], s["wwr"] = s["tgt"] * w, s["wr"] * w
         frames.append(s[["wtgt", "wwr"]])
+    if not frames:
+        return pd.Series(dtype=float)
     agg = pd.concat(frames).groupby(level=0).sum()
     agg = agg[agg["wtgt"] >= 12]
     lg = float(agg["wwr"].sum() / max(1.0, agg["wtgt"].sum())); K = _COV_SHRINK
@@ -345,7 +354,12 @@ def _coverage(roster):
     agg["rate"] = (agg["wtgt"] / (agg["wtgt"] + K)) * agg["rate"] + (K / (agg["wtgt"] + K)) * lg
     agg["cov"] = -agg["rate"]                      # lower passer rating allowed = better
     agg["k"] = agg.index.to_series().map(_key)
-    bykey = agg.groupby("k")["cov"].mean()
+    return agg.groupby("k")["cov"].mean()
+
+
+def _coverage(roster):
+    """Team coverage = top-5 mean of the current roster's per-player coverage grade."""
+    bykey = _coverage_players()
     sub = roster[roster.position.isin(["DB", "LB"])].copy()
     sub["cov"] = sub["nm_full"].map(_key).map(bykey)
     good = sub.dropna(subset=["cov"])
@@ -530,18 +544,12 @@ def _player_pct():
     sv["pct"] = sv.groupby("position")["adjusted_score"].rank(pct=True) * 100
     prod = sv.set_index("player_id")["pct"]
     prod_nm = sv.dropna(subset=["nm"]).drop_duplicates("nm").set_index("nm")["pct"]
-    qb = _qb_value_table(); qb_pct = qb.rank(pct=True) * 100         # QB by multi-year EPA
-    dl = pd.read_csv(PROC / "dl_rankings_2025.csv"); dl["k"] = dl["name"].map(_key)
-    dl["prod"] = dl.get("def_sacks", 0).fillna(0) + 0.5 * dl.get("def_pressures", 0).fillna(0)
-    dl_pct = dl.groupby("k")["prod"].max().rank(pct=True) * 100      # DL by pass-rush
-    pf = pd.read_parquet(RAW / "pfr_defense.parquet"); pf = pf[pf.season == 2025]
-    cov = pf.groupby("pfr_player_name").agg(tgt=("def_targets", "sum"),
-                                            rate=("def_passer_rating_allowed", "mean")).reset_index()
-    cov = cov[cov.tgt >= 15]
-    _lg = float(cov["rate"].mean()); _K = _COV_SHRINK      # small-target regression toward mean
-    cov["rate"] = (cov.tgt / (cov.tgt + _K)) * cov["rate"] + (_K / (cov.tgt + _K)) * _lg
-    cov["k"] = cov["pfr_player_name"].map(_key)
-    cov_pct = (-cov.groupby("k")["rate"].mean()).rank(pct=True) * 100  # DB/LB by coverage
+    qb = _qb_value_table(); qb_pct = qb.rank(pct=True) * 100         # QB by multi-year EPA + draft prior
+    # DL and DB/LB cards read the SAME multi-year, injury-robust per-player signals that feed the team
+    # pass-rush / coverage grades — so a card can't disagree with how the team rating treats that
+    # player. Single-year 2025 CSVs (which buried Bosa/Sauce's injured seasons) are no longer used here.
+    dl_pct = _pass_rush_players().rank(pct=True) * 100               # DL by MULTI-YEAR pass-rush
+    cov_pct = _coverage_players().rank(pct=True) * 100               # DB/LB by MULTI-YEAR coverage
     _PCT_CACHE = (skill, skill_nm, prod, prod_nm, qb_pct, dl_pct, cov_pct)
     return _PCT_CACHE
 
@@ -559,8 +567,11 @@ def _roster_meta():
     by_id, by_nm = r.drop_duplicates("player_id").set_index("player_id"), r.drop_duplicates("nm").set_index("nm")
     draft = {"id": by_id["dn"], "nm": by_nm["dn"]}
     exp = {"id": by_id["yx"], "nm": by_nm["yx"]}
-    olp = PROC / "ol_rankings_2025.csv"
-    ol_pct = (pd.read_csv(olp).set_index("team")["composite"].rank(pct=True) * 100) if olp.exists() else pd.Series(dtype=float)
+    # OL cards show the team grade adjusted for depth. Use the SAME multi-year, injury-dampened team
+    # grade (_ol) that the power ranking uses — not the single-year 2025 CSV that buried injured lines
+    # like LAC — so a lineman's card matches how his unit is rated everywhere else.
+    ol_grade = _ol()
+    ol_pct = (ol_grade.rank(pct=True) * 100) if len(ol_grade) else pd.Series(dtype=float)
     kp = PROC / "kicker_rankings_2025.csv"
     # drop_duplicates so a player who appears twice (traded mid-season → two team rows) doesn't
     # give a non-unique index; k_pct.get(id) must return a scalar, not a Series (see _first).
@@ -615,12 +626,18 @@ def team_depth_chart(team: str) -> list:
         # (starter = full grade, backups discounted) so the group isn't all one number.
         if grp == "OL":
             return int(round(max(20.0, team_ol + {1: 0, 2: -8, 3: -14}.get(pr, -18)))), "team"
-        # 1. best measured 2025 signal for the group, then the universal composite (id or name)
+        # 1. best measured signal for the group, then the universal composite (id or name)
         if grp == "QB":
             v = _first(qb_pct.get(gid), skill.get(gid), skill_nm.get(nm))
         elif grp == "DL":
             v = _first(dl_pct.get(k), skill.get(gid), skill_nm.get(nm))
-        elif grp in ("DB", "LB"):
+        elif grp == "LB":
+            # LB spans edge rushers (listed as LB) and off-ball coverage LBs — rate on whichever
+            # skill the player actually shows, so an edge like Bosa gets his pass-rush grade instead
+            # of falling through to a depth default for lacking coverage targets.
+            best = max([x for x in (dl_pct.get(k), cov_pct.get(k)) if x is not None], default=None)
+            v = _first(best, skill.get(gid), skill_nm.get(nm))
+        elif grp == "DB":
             v = _first(cov_pct.get(k), skill.get(gid), skill_nm.get(nm))
         elif grp == "K":
             v = _first(k_pct.get(gid), skill.get(gid), skill_nm.get(nm))
