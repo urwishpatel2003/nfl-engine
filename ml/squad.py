@@ -358,6 +358,29 @@ def _coverage(roster):
 _DEF_W = {2025: 0.5, 2024: 0.3, 2023: 0.2}
 
 
+def _recency_damp(by_year, damp=0.4, thresh=0.03):
+    """Recency-weighted average across years, but DAMPEN a current-year value that's anomalously
+    WORSE (higher) than the prior-year baseline — a one-year pressure-rate spike is usually an
+    injury-wrecked line (LAC/ARI/CLE/MIA/JAX in 2025), not a true collapse. Only the excess beyond
+    `thresh` past baseline is dampened; genuine year-over-year change within threshold passes through."""
+    cur = max(by_year)
+    prior = [y for y in by_year if y < cur]
+    yb = dict(by_year)
+    if prior and cur in by_year:
+        base = pd.concat([by_year[y] for y in prior], axis=1).mean(axis=1)
+        common = by_year[cur].index.union(base.index)
+        cv, bs = by_year[cur].reindex(common), base.reindex(common)
+        excess = cv - bs
+        damped = bs + np.where(excess > thresh, thresh + damp * (excess - thresh), excess)
+        out = pd.Series(damped, index=common)
+        out[bs.isna()] = cv[bs.isna()]                         # no baseline → keep current value
+        yb[cur] = out
+    df = pd.DataFrame(yb)
+    wts = np.array([_DEF_W.get(c, 0.0) for c in df.columns])
+    wmat = df.notna().to_numpy() * wts
+    return pd.Series((df.fillna(0).to_numpy() * wts).sum(1) / wmat.sum(1), index=df.index)
+
+
 def _ol():
     """Team O-line grade from raw data, MULTI-YEAR (recency-weighted, weighted by dropbacks/carries
     so a degraded/injured season counts less). Pass protection dominates via PFR PRESSURE RATE
@@ -366,7 +389,7 @@ def _ol():
     try:
         pf = pd.read_parquet(RAW / "pfr_passing.parquet")
         ros_all = pd.read_parquet(RAW / "rosters_seasonal.parquet")
-        pfr, run = [], []
+        pr_by, sk_by, run = {}, {}, []
         for yr, w in _DEF_W.items():
             d = pf[pf["season"] == yr]
             pbpf = RAW / f"pbp_{yr}.parquet"
@@ -375,8 +398,9 @@ def _ol():
             pbp = pd.read_parquet(pbpf)
             db = pbp[pbp["pass_attempt"] == 1].groupby("posteam").size()
             g = d.groupby("team").agg(press=("times_pressured", "sum"), sk=("times_sacked", "sum"))
-            g["wpr"], g["wsk"], g["wdb"] = g["press"] * w, g["sk"] * w, db.reindex(g.index) * w
-            pfr.append(g[["wpr", "wsk", "wdb"]])
+            dbg = db.reindex(g.index).clip(lower=1)
+            pr_by[yr] = g["press"] / dbg                          # per-year team pressure rate
+            sk_by[yr] = g["sk"] / dbg
             pos = ros_all[ros_all["season"] == yr].drop_duplicates("player_id").set_index("player_id")["position"]
             runs = pbp[pbp["rush_attempt"] == 1].copy()
             runs["rp"] = runs["rusher_player_id"].map(pos)
@@ -385,11 +409,11 @@ def _ol():
                                           stuff=("yards_gained", lambda x: (x <= 0).sum()))
             r["wc"], r["wy"], r["ws"] = r["car"] * w, r["yds"] * w, r["stuff"] * w
             run.append(r[["wc", "wy", "ws"]])
-        A = pd.concat(pfr).groupby(level=0).sum()
-        A["press_rate"], A["sack_rate"] = A["wpr"] / A["wdb"].clip(lower=1), A["wsk"] / A["wdb"].clip(lower=1)
+        # pass-pro: dampen an anomalously-bad 2025 (likely injured line) toward the healthy baseline
+        press_rate, sack_rate = _recency_damp(pr_by), _recency_damp(sk_by)
         R = pd.concat(run).groupby(level=0).sum()
         R["ypc"], R["stuff_rate"] = R["wy"] / R["wc"].clip(lower=1), R["ws"] / R["wc"].clip(lower=1)
-        df = A.join(R)
+        df = pd.DataFrame({"press_rate": press_rate, "sack_rate": sack_rate}).join(R[["ypc", "stuff_rate"]])
         passpro = -(0.7 * _z(df["press_rate"]) + 0.3 * _z(df["sack_rate"]))
         runblk = _z(df["ypc"]) - 0.25 * _z(df["stuff_rate"])
         return (0.7 * passpro + 0.3 * runblk).dropna()
