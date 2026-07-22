@@ -188,7 +188,10 @@ def _skill_value():
 
 
 # QB rating is recency-weighted over five seasons and regressed toward the mean by volume.
-_QB_W = {2025: 0.30, 2024: 0.24, 2023: 0.18, 2022: 0.15, 2021: 0.13}
+# Steepened toward recent play: QB efficiency is volatile and a 3-year-old season shouldn't anchor
+# a developing QB (e.g. a rookie disaster over-weighting a since-improved starter). The current
+# year now carries ~2.6x an early-window season, up from ~2.3x.
+_QB_W = {2025: 0.40, 2024: 0.26, 2023: 0.16, 2022: 0.11, 2021: 0.07}
 _QB_SHRINK = 650.0        # attempts of regression toward league mean (tames small samples)
 
 
