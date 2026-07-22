@@ -36,12 +36,14 @@ PROC = Path(__file__).parent.parent / "data" / "processed"
 
 # QB is the dominant position in the NFL, so it carries the most weight. Coaching is
 # down-weighted: it's noisy, partly results-derived, and blind to 2026 staff changes.
-# Team-quality weights, CALIBRATED against ESPN FPI (offense ~59% / defense ~33% / coaching 8%).
-# A constrained fit to FPI wanted a QB-heavy, skill=0 solution (just re-copying FPI); this is the
-# non-degenerate elbow — every component stays meaningful, defense is well above the old broken
-# 25%, and it lifts rank correlation with FPI from 0.87 to 0.90.
-WEIGHTS = {"qb": 0.37, "skill": 0.13, "ol": 0.09,
-           "def_team": 0.15, "rush": 0.08, "cover": 0.10, "coach": 0.08}
+# Team-quality weights. Offense (0.59) = QB + skill + OL, with OL weighted heavily (0.14) because a
+# QB/RB only produce behind protection. Defense (0.34) is a deliberate ROSTER + PERFORMANCE blend:
+# team-EPA performance (def_team, 0.14 — includes run defense, which isn't cleanly measurable per
+# player) PLUS current-roster individual defenders (pass rush 0.09 + coverage 0.11 = 0.20, given the
+# larger share). Coaching 0.07. (Base was calibrated to ESPN FPI; this rebalances OL up + defense
+# toward roster per design intent, so the FPI correlation loosens slightly by choice.)
+WEIGHTS = {"qb": 0.33, "skill": 0.12, "ol": 0.14,
+           "def_team": 0.14, "rush": 0.09, "cover": 0.11, "coach": 0.07}
 RATING_SCALE = 9.0   # maps the blended z-score to ~points; sets the spread of the ranking
 
 
