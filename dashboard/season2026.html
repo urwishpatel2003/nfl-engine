@@ -108,6 +108,25 @@
   .pc-wins span{font-size:10px;font-weight:400;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
   .pc-od{display:flex;flex-direction:column;gap:5px;text-align:left}
 
+  /* EPA quadrant scatter */
+  .seg{display:inline-flex;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:3px;gap:3px}
+  .seg button{background:transparent;color:var(--muted);border:0;border-radius:6px;padding:6px 15px;font-size:12.5px;
+              font-weight:700;cursor:pointer;box-shadow:none}
+  .seg button.on{background:var(--accent);color:#fff}
+  .epa-wrap{position:relative}
+  .epa-svg{width:100%;height:auto;display:block;touch-action:none}
+  .epadot{cursor:pointer;transition:transform .08s ease}
+  .epadot:hover{transform:scale(1.18)}
+  .epa-tip{position:absolute;pointer-events:none;background:#0e1728;border:1px solid var(--line);border-radius:9px;
+           padding:8px 11px;font-size:12px;color:var(--txt);box-shadow:0 6px 20px rgba(0,0,0,.5);opacity:0;
+           transition:opacity .1s;z-index:5;min-width:132px}
+  .epa-tip .tt-t{font-weight:800;margin-bottom:4px}
+  .epa-tip .tt-r{display:flex;justify-content:space-between;gap:14px;color:var(--muted)}
+  .epa-tip .tt-r b{color:var(--txt);font-variant-numeric:tabular-nums}
+  .epa-leg{display:flex;flex-wrap:wrap;gap:14px;margin-top:8px;font-size:11.5px;color:var(--muted)}
+  .epa-leg span{display:inline-flex;align-items:center;gap:5px}
+  .epa-leg i{width:11px;height:11px;border-radius:3px;display:inline-block}
+
   /* chips + tiles */
   .chips{display:flex;flex-wrap:wrap;gap:6px}
   .chip{background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:4px 11px;font-size:11.5px;color:var(--txt)}
@@ -459,6 +478,72 @@ function rankCard(d){
     </div>
   </div>`;
 }
+// ── EPA quadrant scatter (Rankings page) ────────────────────────────
+let UNITEPA=null, EPA_MODE='off';
+const fEpa=v=>(v>=0?'+':'')+Number(v).toFixed(2);
+function epaScatter(){
+  const teams=((UNITEPA&&UNITEPA.teams)||[]).filter(t=>t.off_pass!=null);
+  if(!teams.length) return '<div class="loading">No EPA data for this season yet.</div>';
+  const off=EPA_MODE==='off';
+  const cfg = off
+    ? {xk:'off_pass',yk:'off_rush',neg:1, better:'hi',
+       xlab:'Passing offense  —  EPA / play  →', ylab:'Rushing offense  —  EPA / play  ↑',
+       lx:'Pass off', ly:'Rush off',
+       cGood:'Explosive · both phases', cBad:'Struggling · both phases', cTL:'Run-first', cBR:'Pass-first'}
+    : {xk:'def_pass',yk:'def_rush',neg:-1, better:'lo',
+       xlab:'Pass defense  —  EPA / play saved  →', ylab:'Run defense  —  EPA / play saved  ↑',
+       lx:'Pass D', ly:'Run D',
+       cGood:'Stout · both phases', cBad:'Leaky · both phases', cTL:'Stops the run', cBR:'Stops the pass'};
+  // oriented values: higher = better for BOTH offense & defense (defense negated)
+  const P=teams.map(t=>({t, x:cfg.neg*t[cfg.xk], y:cfg.neg*t[cfg.yk]}));
+  const xm=Math.max(...P.map(p=>Math.abs(p.x)))*1.15||0.1;
+  const ym=Math.max(...P.map(p=>Math.abs(p.y)))*1.15||0.1;
+  const rank=(key)=>{const s=[...teams].sort((a,b)=>cfg.better==='hi'?b[key]-a[key]:a[key]-b[key]);const r={};s.forEach((t,i)=>r[t.team]=i+1);return r;};
+  const rkx=rank(cfg.xk), rky=rank(cfg.yk);
+  const W=720,H=520,m={l:62,r:26,t:26,b:60}, pw=W-m.l-m.r, ph=H-m.t-m.b;
+  const X=v=>m.l+(v+xm)/(2*xm)*pw, Y=v=>m.t+(1-(v+ym)/(2*ym))*ph;
+  const cx=X(0), cy=Y(0), R=13;
+  const dots=P.map(p=>{
+    const px=X(p.x), py=Y(p.y);
+    const tip=encodeURIComponent(JSON.stringify({n:p.t.name, rows:[
+      [cfg.lx+' EPA', `${fEpa(p.x)}  ·  #${rkx[p.t.team]}`],
+      [cfg.ly+' EPA', `${fEpa(p.y)}  ·  #${rky[p.t.team]}`]]}));
+    return `<g class="epadot" data-tip="${tip}" onclick="go('#/team/${p.t.team}')">
+      <circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${R+2}" fill="var(--panel)" stroke="var(--line)" stroke-width="1.5"/>
+      <image href="${p.t.logo}" x="${(px-R).toFixed(1)}" y="${(py-R).toFixed(1)}" width="${2*R}" height="${2*R}"/></g>`;
+  }).join('');
+  const lab=(x,y,t,anchor)=>`<text x="${x}" y="${y}" text-anchor="${anchor}" fill="var(--muted)" font-size="10.5" opacity=".85" font-weight="600">${t}</text>`;
+  return `<svg class="epa-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    <rect x="${cx}" y="${m.t}" width="${(m.l+pw-cx).toFixed(1)}" height="${(cy-m.t).toFixed(1)}" fill="var(--good)" opacity="0.05"/>
+    <rect x="${m.l}" y="${cy}" width="${(cx-m.l).toFixed(1)}" height="${(m.t+ph-cy).toFixed(1)}" fill="var(--bad)" opacity="0.05"/>
+    <rect x="${m.l}" y="${m.t}" width="${pw}" height="${ph}" fill="none" stroke="var(--line)"/>
+    <line x1="${cx.toFixed(1)}" y1="${m.t}" x2="${cx.toFixed(1)}" y2="${m.t+ph}" stroke="var(--line)" stroke-dasharray="4 4"/>
+    <line x1="${m.l}" y1="${cy.toFixed(1)}" x2="${m.l+pw}" y2="${cy.toFixed(1)}" stroke="var(--line)" stroke-dasharray="4 4"/>
+    ${lab(m.l+pw-6,m.t+15,cfg.cGood,'end')}${lab(m.l+6,m.t+ph-8,cfg.cBad,'start')}
+    ${lab(m.l+6,m.t+15,cfg.cTL,'start')}${lab(m.l+pw-6,m.t+ph-8,cfg.cBR,'end')}
+    ${lab(cx,m.t+ph+34,cfg.xlab,'middle')}
+    <text transform="translate(18,${m.t+ph/2}) rotate(-90)" text-anchor="middle" fill="var(--muted)" font-size="10.5" font-weight="600">${cfg.ylab}</text>
+    <text x="${cx+4}" y="${m.t+ph+15}" fill="var(--muted)" font-size="9" opacity=".7">league avg</text>
+    ${dots}</svg>`;
+}
+function wireEpaTips(){
+  const wrap=document.querySelector('.epa-wrap'); if(!wrap) return;
+  const tip=wrap.querySelector('.epa-tip');
+  wrap.querySelectorAll('.epadot').forEach(g=>{
+    g.addEventListener('mousemove',e=>{
+      const d=JSON.parse(decodeURIComponent(g.dataset.tip));
+      tip.innerHTML=`<div class="tt-t">${d.n}</div>`+d.rows.map(r=>`<div class="tt-r"><span>${r[0]}</span><b>${r[1]}</b></div>`).join('');
+      const r=wrap.getBoundingClientRect(); let x=e.clientX-r.left+16, y=e.clientY-r.top+12;
+      if(x+150>r.width) x=e.clientX-r.left-150; tip.style.left=x+'px'; tip.style.top=y+'px'; tip.style.opacity=1;
+    });
+    g.addEventListener('mouseleave',()=>{tip.style.opacity=0;});
+  });
+}
+function setEpaMode(mode){
+  EPA_MODE=mode;
+  document.querySelectorAll('.seg button').forEach(b=>b.classList.toggle('on',b.dataset.m===mode));
+  const host=document.getElementById('epa-chart'); if(host){host.innerHTML=epaScatter(); wireEpaTips();}
+}
 async function viewRankings(){
   const data = RANKINGS;
   let body='';
@@ -467,14 +552,28 @@ async function viewRankings(){
     if(!teams.length) return;
     body += `<div class="tierhdr">${label} <span>#${lo}–${hi}</span></div><div class="pr-grid">${teams.map(rankCard).join('')}</div>`;
   });
+  if(!UNITEPA){ try{ UNITEPA=await j('/api/unit_epa?season=2025'); }catch(e){ UNITEPA={teams:[]}; } }
   app().innerHTML = `
     <div class="note"><b>2026 roster-talent ranking</b> — each team rated by the players on its current roster
       (QB by multi-year EPA, skill / OL / pass-rush / coverage) + coaching, <b>not</b> last year's results.
       <b>Proj wins</b> = expected 2026 wins; <b>OFF / DEF</b> = where the roster ranks on each side of the ball.
       Click a team for the full profile.</div>
+    <div class="pad"><div class="card">
+      <h2 style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <span>Unit EPA Map <span style="color:var(--muted);font-weight:400;font-size:12px">2025 · opponent-adjusted · pass vs rush</span></span>
+        <span class="seg"><button class="on" data-m="off" onclick="setEpaMode('off')">Offense</button><button data-m="def" onclick="setEpaMode('def')">Defense</button></span>
+      </h2>
+      <div class="epa-wrap"><div id="epa-chart">${epaScatter()}</div><div class="epa-tip"></div></div>
+      <div class="epa-leg">
+        <span><i style="background:var(--good);opacity:.5"></i>Top-right = strong in both phases</span>
+        <span><i style="background:var(--bad);opacity:.5"></i>Bottom-left = weak in both</span>
+        <span>Dashed lines = league average · hover a logo for values · click for the team</span>
+      </div>
+    </div></div>
     <div class="pad"><div class="card"><h2>Power Rankings <span>2026 · roster talent, grouped by tier</span></h2>
       ${body}
     </div></div>`;
+  wireEpaTips();
 }
 
 // ── VIEW: team profile ──────────────────────────────────────────────

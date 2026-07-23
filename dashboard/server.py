@@ -158,6 +158,35 @@ def api_power_rankings():
     return jsonify(recs)
 
 
+_UNIT_EPA_CACHE = {}
+
+
+@app.route('/api/unit_epa')
+def api_unit_epa():
+    """Per-team opponent-adjusted EPA/play split into pass vs rush, for both offense and defense —
+    powers the quadrant scatter on the Rankings page. Latest completed season (2025 by default), since
+    EPA needs games played. Convention: off_* higher = better offense; def_* is EPA ALLOWED so lower =
+    better defense (the frontend negates it so 'up-right = elite in both phases' reads the same way)."""
+    season = int(request.args.get('season', 2025))
+    if season in _UNIT_EPA_CACHE:
+        return jsonify(_UNIT_EPA_CACHE[season])
+    from ml.adjust import adjusted_unit_epa
+    adj = adjusted_unit_epa(season)
+    meta = team_meta()
+    recs = []
+    for team, u in adj.items():
+        m = meta.get(team, {})
+        recs.append({
+            "team": team, "name": m.get("team_name", team),
+            "color": m.get("team_color") or "#334155", "logo": m.get("team_logo_espn", ""),
+            "off_pass": u.get("off_pass"), "off_rush": u.get("off_rush"),
+            "def_pass": u.get("def_pass"), "def_rush": u.get("def_rush"),
+        })
+    payload = {"season": season, "teams": recs}
+    _UNIT_EPA_CACHE[season] = payload
+    return jsonify(payload)
+
+
 _DEPTH_CACHE = {}
 
 
