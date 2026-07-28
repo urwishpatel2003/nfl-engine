@@ -202,12 +202,17 @@ _OFF_COLS = [
     {"key": "rztd",    "label": "RZ TD%",     "src": "rz_td_rate",       "better": "hi", "dec": 1, "pct": True},
     {"key": "sk_all",  "label": "Sack% all'd","src": "sack_rate_allowed","better": "lo", "dec": 1, "pct": True},
 ]
+# NOTE on defense EPA sign: team_styles stores def_epa_per_* already NEGATED
+# (def_epa_per_play = -mean(EPA), so HIGHER = better defense) and def_success_rate as a
+# STOP rate (1 - success allowed, higher = better). We `neg` the EPA columns back to raw
+# "EPA allowed" for display (negative = elite, matching the Unit EPA map + how fans read it)
+# and rank them lo=best; points-allowed is the only raw "lower is better" metric.
 _DEF_COLS = [
-    {"key": "epa",     "label": "EPA/play",   "src": "def_epa_per_play", "better": "lo", "dec": 2, "pct": False},
+    {"key": "epa",     "label": "EPA/play",   "src": "def_epa_per_play", "better": "lo", "dec": 2, "pct": False, "neg": True},
     {"key": "pts",     "label": "Pts/G",      "src": "def_points_allowed_avg", "better": "lo", "dec": 1, "pct": False},
-    {"key": "success", "label": "Success%",   "src": "def_success_rate", "better": "lo", "dec": 1, "pct": True},
-    {"key": "pass",    "label": "Pass EPA",   "src": "def_epa_per_pass", "better": "lo", "dec": 2, "pct": False},
-    {"key": "rush",    "label": "Rush EPA",   "src": "def_epa_per_rush", "better": "lo", "dec": 2, "pct": False},
+    {"key": "success", "label": "Stop%",      "src": "def_success_rate", "better": "hi", "dec": 1, "pct": True},
+    {"key": "pass",    "label": "Pass EPA",   "src": "def_epa_per_pass", "better": "lo", "dec": 2, "pct": False, "neg": True},
+    {"key": "rush",    "label": "Rush EPA",   "src": "def_epa_per_rush", "better": "lo", "dec": 2, "pct": False, "neg": True},
     {"key": "sack",    "label": "Sack%",      "src": "sack_rate_gen",    "better": "hi", "dec": 1, "pct": True},
     {"key": "stop3",   "label": "3rd stop%",  "src": "third_down_stop_rate", "better": "hi", "dec": 1, "pct": True},
 ]
@@ -240,6 +245,8 @@ def _stat_side(df: pd.DataFrame, cols: list, meta: dict, scoring: dict, is_def: 
                 v = scoring.get(team, (None, None))[1 if is_def else 0]
             else:
                 v = safe_json(r[src]) if src in r.index else None
+                if v is not None and c.get("neg"):     # flip stored "-EPA allowed" back to raw EPA allowed
+                    v = -v
             vals[c["key"]] = v
         m = meta.get(team, {})
         rows.append({"team": team, "name": m.get("team_name", team),
