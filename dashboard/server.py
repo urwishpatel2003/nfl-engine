@@ -187,6 +187,106 @@ def api_unit_epa():
     return jsonify(payload)
 
 
+_LEAGUE_STATS_CACHE = {}
+
+# Per-side stat leaderboards for the Rankings page. Each column pulls a raw team_styles
+# metric (or a schedule-derived scoring average) and declares its direction so the frontend
+# can rank + color it. `pct` columns are stored 0-1 and rendered ×100; `better` fixes which
+# end of the distribution is #1 (defense EPA/points are "lower = better").
+_OFF_COLS = [
+    {"key": "epa",     "label": "EPA/play",   "src": "off_epa_per_play", "better": "hi", "dec": 2, "pct": False},
+    {"key": "pts",     "label": "Pts/G",      "src": "_pf",              "better": "hi", "dec": 1, "pct": False},
+    {"key": "success", "label": "Success%",   "src": "off_success_rate", "better": "hi", "dec": 1, "pct": True},
+    {"key": "pass",    "label": "Pass EPA",   "src": "off_epa_per_pass", "better": "hi", "dec": 2, "pct": False},
+    {"key": "rush",    "label": "Rush EPA",   "src": "off_epa_per_rush", "better": "hi", "dec": 2, "pct": False},
+    {"key": "rztd",    "label": "RZ TD%",     "src": "rz_td_rate",       "better": "hi", "dec": 1, "pct": True},
+    {"key": "sk_all",  "label": "Sack% all'd","src": "sack_rate_allowed","better": "lo", "dec": 1, "pct": True},
+]
+_DEF_COLS = [
+    {"key": "epa",     "label": "EPA/play",   "src": "def_epa_per_play", "better": "lo", "dec": 2, "pct": False},
+    {"key": "pts",     "label": "Pts/G",      "src": "def_points_allowed_avg", "better": "lo", "dec": 1, "pct": False},
+    {"key": "success", "label": "Success%",   "src": "def_success_rate", "better": "lo", "dec": 1, "pct": True},
+    {"key": "pass",    "label": "Pass EPA",   "src": "def_epa_per_pass", "better": "lo", "dec": 2, "pct": False},
+    {"key": "rush",    "label": "Rush EPA",   "src": "def_epa_per_rush", "better": "lo", "dec": 2, "pct": False},
+    {"key": "sack",    "label": "Sack%",      "src": "sack_rate_gen",    "better": "hi", "dec": 1, "pct": True},
+    {"key": "stop3",   "label": "3rd stop%",  "src": "third_down_stop_rate", "better": "hi", "dec": 1, "pct": True},
+]
+
+
+def _scoring_avgs(season: int) -> dict:
+    """{team: (points_for_avg, points_against_avg)} from final scores in schedules."""
+    s = schedules_df()
+    if not len(s):
+        return {}
+    sc = s[(s["season"] == season) & s["home_score"].notna() & (s["week"] <= 18)]
+    pf, pa = {}, {}
+    for _, g in sc.iterrows():
+        for team, scored, allowed in ((g["home_team"], g["home_score"], g["away_score"]),
+                                      (g["away_team"], g["away_score"], g["home_score"])):
+            pf.setdefault(team, []).append(scored)
+            pa.setdefault(team, []).append(allowed)
+    return {t: (float(np.mean(pf[t])), float(np.mean(pa.get(t, [0])))) for t in pf}
+
+
+def _stat_side(df: pd.DataFrame, cols: list, meta: dict, scoring: dict, is_def: bool) -> dict:
+    """Build one side (offense/defense) leaderboard: value + league rank per cell."""
+    rows = []
+    for _, r in df.iterrows():
+        team = r["team"]
+        vals = {}
+        for c in cols:
+            src = c["src"]
+            if src == "_pf":
+                v = scoring.get(team, (None, None))[1 if is_def else 0]
+            else:
+                v = safe_json(r[src]) if src in r.index else None
+            vals[c["key"]] = v
+        m = meta.get(team, {})
+        rows.append({"team": team, "name": m.get("team_name", team),
+                     "color": m.get("team_color") or "#334155",
+                     "logo": m.get("team_logo_espn", ""), "vals": vals})
+    # rank each column (1 = best), respecting direction; ties share the min rank
+    for c in cols:
+        present = [x for x in rows if x["vals"][c["key"]] is not None]
+        present.sort(key=lambda x: x["vals"][c["key"]], reverse=(c["better"] == "hi"))
+        prev, rk = None, 0
+        for i, x in enumerate(present):
+            val = x["vals"][c["key"]]
+            if val != prev:
+                rk = i + 1
+                prev = val
+            x.setdefault("ranks", {})[c["key"]] = rk
+    out = []
+    for x in rows:
+        out.append({"team": x["team"], "name": x["name"], "color": x["color"], "logo": x["logo"],
+                    "cells": {k: {"v": x["vals"][k], "r": x.get("ranks", {}).get(k)} for k in x["vals"]}})
+    out.sort(key=lambda x: (x["cells"]["epa"]["r"] or 99))
+    return {"columns": cols, "rows": out}
+
+
+@app.route('/api/league_stats')
+def api_league_stats():
+    """Per-team offense & defense stat leaderboards (value + league rank per metric) for the
+    Rankings page. Latest completed season by default — these are actual on-field results, so
+    they need games played (unlike the roster-talent power ranking)."""
+    season = int(request.args.get('season', latest_style_season()))
+    if season in _LEAGUE_STATS_CACHE:
+        return jsonify(_LEAGUE_STATS_CACHE[season])
+    s = styles_df()
+    sub = s[s["season"] == season]
+    if sub.empty:
+        return jsonify({"error": f"no stats for {season}"}), 404
+    meta = team_meta()
+    scoring = _scoring_avgs(season)
+    payload = {
+        "season": season,
+        "offense": _stat_side(sub, _OFF_COLS, meta, scoring, is_def=False),
+        "defense": _stat_side(sub, _DEF_COLS, meta, scoring, is_def=True),
+    }
+    _LEAGUE_STATS_CACHE[season] = payload
+    return jsonify(payload)
+
+
 _DEPTH_CACHE = {}
 
 
@@ -570,6 +670,7 @@ def api_team_profile():
         "units": _units_display(team),
         "coaching": team_coaching(team),
         "groups": _DEPTH_CACHE[team],
+        "injuries": team_injury_map(team),
     }))
 
 
@@ -671,6 +772,32 @@ def latest_injuries(team: str) -> dict:
         })
     players.sort(key=lambda x: _STATUS_RANK.get(x["status"], 3))
     return {"season": season, "week": week, "players": players}
+
+
+def team_injury_map(team: str) -> dict:
+    """Latest injury report for a team keyed by gsis_id — for the profile depth chart.
+    Id-keyed (not name) to stay coherent with the id-first depth-chart join. Empty in
+    the offseason before that season's game reports publish (nflverse has no file yet)."""
+    inj = injuries_df()
+    if inj.empty or "team" not in inj.columns or "gsis_id" not in inj.columns:
+        return {"season": None, "week": None, "by_id": {}}
+    t = inj[inj["team"] == team]
+    if t.empty:
+        return {"season": None, "week": None, "by_id": {}}
+    season = int(t["season"].max())
+    t = t[t["season"] == season]
+    week = int(t["week"].max())
+    t = t[t["week"] == week]
+    by_id = {}
+    for _, r in t.iterrows():
+        gid, st = r.get("gsis_id"), r.get("report_status")
+        if not gid or (isinstance(gid, float) and pd.isna(gid)):
+            continue
+        if not st or (isinstance(st, float) and pd.isna(st)):
+            continue                                   # no designation → healthy, skip
+        by_id[str(gid)] = {"status": str(st),
+                           "injury": r.get("report_primary_injury") or ""}
+    return {"season": season, "week": week, "by_id": by_id}
 
 
 def _adjusted_prediction(home: str, away: str, neutral: bool = False, unavail=None) -> dict:

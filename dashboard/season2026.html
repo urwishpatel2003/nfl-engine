@@ -115,7 +115,7 @@
   .seg button.on{background:var(--accent);color:#fff}
   .epa-wrap{position:relative}
   .epa-svg{width:100%;height:auto;display:block;touch-action:none}
-  .epadot{cursor:pointer;transition:transform .08s ease}
+  .epadot{cursor:pointer;transition:transform .08s ease;transform-box:fill-box;transform-origin:center}
   .epadot:hover{transform:scale(1.18)}
   .epa-tip{position:absolute;pointer-events:none;background:#0e1728;border:1px solid var(--line);border-radius:9px;
            padding:8px 11px;font-size:12px;color:var(--txt);box-shadow:0 6px 20px rgba(0,0,0,.5);opacity:0;
@@ -126,6 +126,24 @@
   .epa-leg{display:flex;flex-wrap:wrap;gap:14px;margin-top:8px;font-size:11.5px;color:var(--muted)}
   .epa-leg span{display:inline-flex;align-items:center;gap:5px}
   .epa-leg i{width:11px;height:11px;border-radius:3px;display:inline-block}
+
+  /* league stat leaderboard (Rankings page) */
+  .lstat-wrap{overflow-x:auto}
+  .lstat{border-collapse:separate;border-spacing:0;width:100%;min-width:640px;font-variant-numeric:tabular-nums}
+  .lstat th{position:sticky;top:0;background:var(--panel);font-size:10px;font-weight:700;color:var(--muted);
+            text-transform:uppercase;letter-spacing:.4px;text-align:center;padding:8px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+  .lstat th.tmh{text-align:left;padding-left:8px}
+  .lstat td{padding:6px 6px;text-align:center;border-bottom:1px solid #1a2334}
+  .lstat tr:last-child td{border-bottom:0}
+  .lstat tr:hover td{background:#161f33}
+  .lstat .tmc{display:flex;align-items:center;gap:8px;cursor:pointer;text-align:left}
+  .lstat .tmc img{width:24px;height:24px;object-fit:contain;flex:0 0 auto}
+  .lstat .tmc .ab{font-weight:700;font-size:13px}
+  .lstat .tmc .pos{width:22px;text-align:right;color:var(--muted);font-weight:700;font-size:12px}
+  .lstat .cell{display:inline-flex;flex-direction:column;line-height:1.1;min-width:42px;
+               border-radius:6px;padding:3px 6px}
+  .lstat .cell .cv{font-size:13px;font-weight:700}
+  .lstat .cell .cr{font-size:9px;color:var(--muted);font-weight:600}
 
   /* chips + tiles */
   .chips{display:flex;flex-wrap:wrap;gap:6px}
@@ -171,6 +189,9 @@
   .pl .rt{width:30px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;font-size:12px}
   .pl .rb{width:44px;height:6px;border-radius:3px;background:#0e1626;overflow:hidden}
   .pl .rb i{display:block;height:100%;border-radius:3px}
+  .pl .pn.inj-out{color:#f87171}          /* Out — red */
+  .pl .pn.inj-doubt{color:#fbbf24}        /* Doubtful — amber/yellow */
+  .pl .st.mini{padding:0 5px;font-size:9px;line-height:15px;flex:0 0 auto}
 
   /* matchup */
   .selrow{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;margin-bottom:14px}
@@ -541,8 +562,44 @@ function wireEpaTips(){
 }
 function setEpaMode(mode){
   EPA_MODE=mode;
-  document.querySelectorAll('.seg button').forEach(b=>b.classList.toggle('on',b.dataset.m===mode));
+  document.querySelectorAll('#epa-seg button').forEach(b=>b.classList.toggle('on',b.dataset.m===mode));
   const host=document.getElementById('epa-chart'); if(host){host.innerHTML=epaScatter(); wireEpaTips();}
+}
+// ── League stat leaderboard (Rankings page) ─────────────────────────
+let LEAGUESTATS=null, STAT_SIDE='off';
+const rankHue=r=>Math.round((33-r)/32*100*1.2);                      // #1 → green hue, #32 → red hue
+function rankCol(r,a){                                                // solid text color, or tint/border with alpha
+  if(r==null) return a==null?'var(--muted)':'transparent';
+  const h=rankHue(r);
+  return a==null?`hsl(${h},62%,52%)`:`hsla(${h},62%,50%,${a})`;
+}
+function fmtStat(v,c){
+  if(v==null) return '—';
+  return c.pct ? (v*100).toFixed(c.dec)+'%' : v.toFixed(c.dec);
+}
+function leagueStatsTable(){
+  if(!LEAGUESTATS) return '<div class="loading">Loading stats…</div>';
+  const side=STAT_SIDE==='off'?LEAGUESTATS.offense:LEAGUESTATS.defense;
+  const cols=side.columns;
+  const head=`<tr><th class="tmh">Team</th>${cols.map(c=>`<th>${c.label}</th>`).join('')}</tr>`;
+  const body=side.rows.map((row,i)=>{
+    const cells=cols.map(c=>{
+      const cell=row.cells[c.key]||{}, r=cell.r;
+      return `<td><span class="cell" style="background:${rankCol(r,0.13)};box-shadow:inset 0 0 0 1px ${rankCol(r,0.34)}">
+        <span class="cv" style="color:${rankCol(r)}">${fmtStat(cell.v,c)}</span>
+        <span class="cr">${r!=null?'#'+r:'—'}</span></span></td>`;
+    }).join('');
+    return `<tr><td><div class="tmc" onclick="go('#/team/${row.team}')">
+        <span class="pos">${i+1}</span>
+        <img src="${row.logo}" onerror="this.style.visibility='hidden'">
+        <span class="ab">${esc(row.team)}</span></div></td>${cells}</tr>`;
+  }).join('');
+  return `<div class="lstat-wrap"><table class="lstat"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+}
+function setStatSide(side){
+  STAT_SIDE=side;
+  document.querySelectorAll('#stat-seg button').forEach(b=>b.classList.toggle('on',b.dataset.m===side));
+  const host=document.getElementById('lstat-host'); if(host) host.innerHTML=leagueStatsTable();
 }
 async function viewRankings(){
   const data = RANKINGS;
@@ -553,6 +610,8 @@ async function viewRankings(){
     body += `<div class="tierhdr">${label} <span>#${lo}–${hi}</span></div><div class="pr-grid">${teams.map(rankCard).join('')}</div>`;
   });
   if(!UNITEPA){ try{ UNITEPA=await j('/api/unit_epa?season=2025'); }catch(e){ UNITEPA={teams:[]}; } }
+  if(!LEAGUESTATS){ try{ LEAGUESTATS=await j('/api/league_stats?season=2025'); }catch(e){ LEAGUESTATS=null; } }
+  const statSeason=(LEAGUESTATS&&LEAGUESTATS.season)||2025;
   app().innerHTML = `
     <div class="note"><b>2026 roster-talent ranking</b> — each team rated by the players on its current roster
       (QB by multi-year EPA, skill / OL / pass-rush / coverage) + coaching, <b>not</b> last year's results.
@@ -561,7 +620,7 @@ async function viewRankings(){
     <div class="pad"><div class="card">
       <h2 style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
         <span>Unit EPA Map <span style="color:var(--muted);font-weight:400;font-size:12px">2025 · opponent-adjusted · pass vs rush</span></span>
-        <span class="seg"><button class="on" data-m="off" onclick="setEpaMode('off')">Offense</button><button data-m="def" onclick="setEpaMode('def')">Defense</button></span>
+        <span class="seg" id="epa-seg"><button class="on" data-m="off" onclick="setEpaMode('off')">Offense</button><button data-m="def" onclick="setEpaMode('def')">Defense</button></span>
       </h2>
       <div class="epa-wrap"><div id="epa-chart">${epaScatter()}</div><div class="epa-tip"></div></div>
       <div class="epa-leg">
@@ -569,6 +628,16 @@ async function viewRankings(){
         <span><i style="background:var(--bad);opacity:.5"></i>Bottom-left = weak in both</span>
         <span>Dashed lines = league average · hover a logo for values · click for the team</span>
       </div>
+    </div></div>
+    <div class="pad"><div class="card">
+      <h2 style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <span>League Stat Leaderboard <span style="color:var(--muted);font-weight:400;font-size:12px">${statSeason} · per-team results, ranked #1–32</span></span>
+        <span class="seg" id="stat-seg"><button class="${STAT_SIDE==='off'?'on':''}" data-m="off" onclick="setStatSide('off')">Offense</button><button class="${STAT_SIDE==='def'?'on':''}" data-m="def" onclick="setStatSide('def')">Defense</button></span>
+      </h2>
+      <div id="lstat-host">${leagueStatsTable()}</div>
+      <div class="epa-leg"><span>Rows sorted by EPA/play · each cell shows the value + its league rank ·
+        <i style="background:var(--good);opacity:.6"></i>green = top of the league ·
+        <i style="background:var(--bad);opacity:.6"></i>red = bottom · click a team for its profile</span></div>
     </div></div>
     <div class="pad"><div class="card"><h2>Power Rankings <span>2026 · roster talent, grouped by tier</span></h2>
       ${body}
@@ -601,6 +670,9 @@ async function viewTeam(team){
     <div class="bw"><i style="width:${Math.max(3,x.pctl)}%;background:${pctlColor(x.pctl)}"></i></div>
     <div class="pv" style="color:${pctlColor(x.pctl)}">${x.pctl}</div></div>`;
   const U=d.units||{};
+  const INJ=(d.injuries&&d.injuries.by_id)||{};
+  const _in=d.injuries||{}, _nInj=Object.keys(INJ).length;
+  const INJ_NOTE=_nInj?` <span class="st mini st-Out">O</span> Out · <span class="st mini st-Doubtful">D</span> Doubtful · <span class="st mini st-Questionable">Q</span> Questionable — latest report ${_in.season} wk${_in.week}.`:'';
   app().innerHTML = `<div class="pad">
     <div class="viewhead">
       <div class="ttl">Team Profile <span>pick a team, or click one in Rankings</span></div>
@@ -669,12 +741,15 @@ async function viewTeam(team){
             const tag=(p.slot&&p.slot!==g.pos)?p.slot:(p.rank??'');
             const st=est?`opacity:.6;font-style:italic`:'';
             const ttl=est?`title="projected — ${p.source==='rookie'?'rookie draft slot':p.source==='team'?'team O-line grade':'roster depth'}, not 2025 stats"`:'';
-            return `<div class="pl ${p.rank===1?'starter':''}" ${ttl}><div class="dr">${tag}</div><div class="pn">${p.name}</div>${bar}<div class="rt" style="color:${ratingColor(r)};${st}">${r==null?'—':r}</div></div>`;
+            // injury marker: Out → red name, Doubtful → yellow name; small status pill from the latest report
+            const iv=INJ[p.gsis]; const ic=iv?(iv.status==='Out'?'inj-out':iv.status==='Doubtful'?'inj-doubt':''):'';
+            const pill=iv?`<span class="st mini st-${esc(iv.status)}" title="${esc(iv.status)}${iv.injury?' — '+esc(iv.injury):''}">${esc((iv.status||'')[0])}</span>`:'';
+            return `<div class="pl ${p.rank===1?'starter':''}" ${ttl}><div class="dr">${tag}</div><div class="pn ${ic}">${p.name}</div>${pill}${bar}<div class="rt" style="color:${ratingColor(r)};${st}">${r==null?'—':r}</div></div>`;
           }).join('')}
         </div>`).join('')}</div>
       <div style="color:var(--muted);font-size:11px;margin-top:12px">Ratings are 0–100 (position percentile).
         <span style="opacity:.6;font-style:italic">Faded/italic</span> = projected from rookie draft slot,
-        roster depth, or team O-line grade rather than 2025 on-field production.</div>
+        roster depth, or team O-line grade rather than 2025 on-field production.${INJ_NOTE}</div>
     </div>
   </div>`;
   document.getElementById('teamPick').addEventListener('change', e=>go('#/team/'+e.target.value));
