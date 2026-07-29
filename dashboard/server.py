@@ -194,13 +194,20 @@ _LEAGUE_STATS_CACHE = {}
 # can rank + color it. `pct` columns are stored 0-1 and rendered ×100; `better` fixes which
 # end of the distribution is #1 (defense EPA/points are "lower = better").
 _OFF_COLS = [
-    {"key": "epa",     "label": "EPA/play",   "src": "off_epa_per_play", "better": "hi", "dec": 2, "pct": False},
-    {"key": "pts",     "label": "Pts/G",      "src": "_pf",              "better": "hi", "dec": 1, "pct": False},
-    {"key": "success", "label": "Success%",   "src": "off_success_rate", "better": "hi", "dec": 1, "pct": True},
-    {"key": "pass",    "label": "Pass EPA",   "src": "off_epa_per_pass", "better": "hi", "dec": 2, "pct": False},
-    {"key": "rush",    "label": "Rush EPA",   "src": "off_epa_per_rush", "better": "hi", "dec": 2, "pct": False},
-    {"key": "rztd",    "label": "RZ TD%",     "src": "rz_td_rate",       "better": "hi", "dec": 1, "pct": True},
-    {"key": "sk_all",  "label": "Sack% all'd","src": "sack_rate_allowed","better": "lo", "dec": 1, "pct": True},
+    {"key": "epa",     "label": "EPA/play",   "src": "off_epa_per_play", "better": "hi", "dec": 2, "pct": False,
+     "tip": "Expected Points Added per offensive play — how many points the average snap gains vs a league-average play from the same spot. The best single number for offense quality."},
+    {"key": "pts",     "label": "Pts/G",      "src": "_pf",              "better": "hi", "dec": 1, "pct": False,
+     "tip": "Points scored per game (regular season, from final scores)."},
+    {"key": "success", "label": "Success%",   "src": "off_success_rate", "better": "hi", "dec": 1, "pct": True,
+     "tip": "Share of plays that gain positive expected points (stay 'on schedule'). Measures consistency, where EPA can be skewed by a few big plays."},
+    {"key": "pass",    "label": "Pass EPA",   "src": "off_epa_per_pass", "better": "hi", "dec": 2, "pct": False,
+     "tip": "EPA per dropback — passing-game efficiency including sacks and scrambles."},
+    {"key": "rush",    "label": "Rush EPA",   "src": "off_epa_per_rush", "better": "hi", "dec": 2, "pct": False,
+     "tip": "EPA per designed rush — running-game efficiency. League average is slightly negative (passing is more efficient)."},
+    {"key": "rztd",    "label": "RZ TD%",     "src": "rz_td_rate",       "better": "hi", "dec": 1, "pct": True,
+     "tip": "Share of red-zone plays that end in a touchdown — finishing drives with 7 instead of 3."},
+    {"key": "sk_all",  "label": "Sack% all'd","src": "sack_rate_allowed","better": "lo", "dec": 1, "pct": True,
+     "tip": "Share of dropbacks where the QB is sacked — pass protection (lower is better)."},
 ]
 # NOTE on defense EPA sign: team_styles stores def_epa_per_* already NEGATED
 # (def_epa_per_play = -mean(EPA), so HIGHER = better defense) and def_success_rate as a
@@ -208,13 +215,20 @@ _OFF_COLS = [
 # "EPA allowed" for display (negative = elite, matching the Unit EPA map + how fans read it)
 # and rank them lo=best; points-allowed is the only raw "lower is better" metric.
 _DEF_COLS = [
-    {"key": "epa",     "label": "EPA/play",   "src": "def_epa_per_play", "better": "lo", "dec": 2, "pct": False, "neg": True},
-    {"key": "pts",     "label": "Pts/G",      "src": "def_points_allowed_avg", "better": "lo", "dec": 1, "pct": False},
-    {"key": "success", "label": "Stop%",      "src": "def_success_rate", "better": "hi", "dec": 1, "pct": True},
-    {"key": "pass",    "label": "Pass EPA",   "src": "def_epa_per_pass", "better": "lo", "dec": 2, "pct": False, "neg": True},
-    {"key": "rush",    "label": "Rush EPA",   "src": "def_epa_per_rush", "better": "lo", "dec": 2, "pct": False, "neg": True},
-    {"key": "sack",    "label": "Sack%",      "src": "sack_rate_gen",    "better": "hi", "dec": 1, "pct": True},
-    {"key": "stop3",   "label": "3rd stop%",  "src": "third_down_stop_rate", "better": "hi", "dec": 1, "pct": True},
+    {"key": "epa",     "label": "EPA/play",   "src": "def_epa_per_play", "better": "lo", "dec": 2, "pct": False, "neg": True,
+     "tip": "Expected Points Added allowed per play — how many points the average opposing snap gains against this defense. Negative = the defense takes points off the board; the best single number for defense quality."},
+    {"key": "pts",     "label": "Pts/G",      "src": "_pf",              "better": "lo", "dec": 1, "pct": False,
+     "tip": "Points allowed per game (regular season, from final scores). Includes points given up by turnovers/special teams, so it can diverge from per-play EPA."},
+    {"key": "success", "label": "Stop%",      "src": "def_success_rate", "better": "hi", "dec": 1, "pct": True,
+     "tip": "Share of opponent plays stopped for negative expected points — down-to-down consistency of the defense."},
+    {"key": "pass",    "label": "Pass EPA",   "src": "def_epa_per_pass", "better": "lo", "dec": 2, "pct": False, "neg": True,
+     "tip": "EPA allowed per opponent dropback — pass defense (coverage + pass rush). Negative = elite."},
+    {"key": "rush",    "label": "Rush EPA",   "src": "def_epa_per_rush", "better": "lo", "dec": 2, "pct": False, "neg": True,
+     "tip": "EPA allowed per opponent rush — run defense. Negative = elite."},
+    {"key": "sack",    "label": "Sack%",      "src": "sack_rate_gen",    "better": "hi", "dec": 1, "pct": True,
+     "tip": "Share of opponent dropbacks ending in a sack — pass-rush production."},
+    {"key": "stop3",   "label": "3rd stop%",  "src": "third_down_stop_rate", "better": "hi", "dec": 1, "pct": True,
+     "tip": "Share of opponent third downs that fail to convert — getting off the field."},
 ]
 
 
@@ -650,7 +664,7 @@ def api_team_profile():
                   "play_action_rate", "motion_rate", "screen_pass_rate", "no_huddle_rate",
                   "blitz_rate", "avg_blitzers", "scramble_rate", "qb_rush_rate"]
     sit_keys = ["pressure_rate_gen", "sack_rate_gen", "pressure_rate_allowed", "sack_rate_allowed",
-                "rz_td_rate", "rz_td_rate_allowed_x", "two_min_epa", "fourth_go_rate",
+                "rz_td_rate", "rz_td_rate_allowed_y", "two_min_epa", "fourth_go_rate",  # _x is a broken all-1.0 merge artifact
                 "def_points_allowed_avg", "turnover_rate", "third_down_stop_rate"]
     style = {k: safe_json(row[k]) for k in style_keys if k in row.index}
     situational = {k: safe_json(row[k]) for k in sit_keys if k in row.index}

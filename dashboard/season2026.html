@@ -644,7 +644,7 @@ function leagueStatsTable(){
   };
   const head=`<tr><th class="tmh">Team</th>${cols.map(c=>{
     const on=STAT_SORT.some(s=>s.key===c.key)?' sorted':'';
-    return `<th class="sortable${on}" onclick="statSortClick('${c.key}',event.shiftKey)">${c.label}${sortMark(c.key)}</th>`;
+    return `<th class="sortable${on}" ${c.tip?`title="${esc(c.tip)}"`:''} onclick="statSortClick('${c.key}',event.shiftKey)">${c.label}${sortMark(c.key)}</th>`;
   }).join('')}</tr>`;
   const rank=(row,key)=>{const r=row.cells[key]&&row.cells[key].r; return r==null?999:r;};
   const rows=[...side.rows].sort((a,b)=>{
@@ -745,7 +745,7 @@ async function viewTeam(team){
   const sitTiles = [
     ['Pass-rush pressure', pc(Q.pressure_rate_gen)], ['Sack rate', pc(Q.sack_rate_gen)],
     ['3rd-down stop', pc(Q.third_down_stop_rate)], ['RZ TD rate', pc(Q.rz_td_rate)],
-    ['RZ TD allowed', pc(Q.rz_td_rate_allowed_x)], ['Pts allowed/g', Q.def_points_allowed_avg!=null?Number(Q.def_points_allowed_avg).toFixed(1):'—'],
+    ['RZ TD allowed', pc(Q.rz_td_rate_allowed_y)], ['Pts allowed/g', Q.def_points_allowed_avg!=null?Number(Q.def_points_allowed_avg).toFixed(1):'—'],
     ['2-min EPA', f2(Q.two_min_epa)], ['4th-down go', pc(Q.fourth_go_rate)],
   ];
   const swBar = (x,good)=>`<div class="swrow"><div class="lb">${x.label}</div>

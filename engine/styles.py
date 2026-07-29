@@ -162,8 +162,10 @@ def build_team_styles(seasons: list = None, n_games: int = None) -> pd.DataFrame
         "third_down_stop_rate":  1 - safe_mean(g.loc[g["third_down"] == 1, "success"]) if "success" in g.columns else np.nan,
         "rz_td_rate_allowed":    safe_mean(g.loc[(g["red_zone"] == 1) & (g["touchdown"] == 1), "touchdown"]) if "red_zone" in g.columns else np.nan,
 
-        # Points allowed proxy
-        "def_points_allowed_avg": g.groupby("game_id")["defteam_score_post"].max().mean() if "defteam_score_post" in g.columns else np.nan,
+        # Points allowed proxy. g is grouped by DEFTEAM, so the points scored against this
+        # defense live in posteam_score_post (the offense's score). defteam_score_post is the
+        # defense's OWN score — using it here silently produced "points scored" for years.
+        "def_points_allowed_avg": g.groupby("game_id")["posteam_score_post"].max().mean() if "posteam_score_post" in g.columns else np.nan,
 
         # How often offenses pass against this defense
         "def_pass_rate_faced":   safe_mean(g["is_pass"]),
