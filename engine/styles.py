@@ -360,8 +360,11 @@ def assign_defense_label(df: pd.DataFrame) -> pd.DataFrame:
     which are zero or absent in team_styles — so every team fell through to 'Bend Don't Break'."""
     zsk = _season_z(df, "sack_rate")
     zbl = _season_z(df, "avg_blitzers")
-    zpd = -_season_z(df, "def_epa_per_pass")     # lower EPA allowed = better → higher z
-    zrd = -_season_z(df, "def_epa_per_rush")
+    # def_epa_per_* are stored NEGATED (higher = better defense, see the metric definitions
+    # above) — do NOT negate the z again. The old double-negation handed the coverage/run-stop
+    # archetypes to the leakiest defenses.
+    zpd = _season_z(df, "def_epa_per_pass")
+    zrd = _season_z(df, "def_epa_per_rush")
     z3  = _season_z(df, "third_down_stop_rate")
     aff = pd.DataFrame({
         "Aggressive Blitz": 0.7 * zsk + 0.6 * zbl,          # brings pressure, with volume

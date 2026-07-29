@@ -551,10 +551,12 @@ _PROFILE_METRICS = [
     ("off_success_rate",     "Offensive efficiency", True),
     ("rz_td_rate",           "Red-zone TD rate",     True),
     ("two_min_epa",          "Two-minute offense",   True),
-    ("def_epa_per_play",     "Defense EPA/play",     False),
-    ("def_epa_per_pass",     "Pass defense",         False),
-    ("def_epa_per_rush",     "Run defense",          False),
-    ("def_success_rate",     "Defensive efficiency", False),
+    # team_styles stores def_epa_per_* NEGATED (higher = better) and def_success_rate as a
+    # STOP rate — so higher IS better for all four, despite the "allowed" mental model.
+    ("def_epa_per_play",     "Defense EPA/play",     True),
+    ("def_epa_per_pass",     "Pass defense",         True),
+    ("def_epa_per_rush",     "Run defense",          True),
+    ("def_success_rate",     "Defensive efficiency", True),
     ("pressure_rate_gen",    "Pass-rush pressure",   True),
     ("sack_rate_gen",        "Sack rate",            True),
     ("third_down_stop_rate", "Third-down defense",   True),
@@ -578,7 +580,7 @@ _TENDENCY_SPEC = [
     ("two_min_epa",          "Strong two-minute offense", None,                  0.15),
     ("third_down_stop_rate", "Strong third-down defense", None,                  0.16),
     ("sack_rate_gen",        "Heavy pass rush",           None,                  0.16),
-    ("def_epa_per_play",     None,                        "Stingy defense",      0.15),
+    ("def_epa_per_play",     "Stingy defense",            None,                  0.15),  # stored higher=better
 ]
 
 
