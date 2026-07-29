@@ -152,6 +152,23 @@
   .lstat .cell .cv{font-size:13px;font-weight:700}
   .lstat .cell .cr{font-size:9px;color:var(--muted);font-weight:600}
 
+  /* situational matchup grid */
+  .smgrid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:680px){.smgrid{grid-template-columns:1fr}}
+  .smblock{min-width:0}
+  .smhdr{font-size:12.5px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  .smrow{display:grid;grid-template-columns:70px 1fr 70px;align-items:center;gap:8px;padding:4px 0}
+  .smcell{display:flex;align-items:center;gap:5px}
+  .smcell.def{justify-content:flex-end}
+  .smrank{font-weight:700;font-size:10.5px;border-radius:5px;padding:1px 5px;font-variant-numeric:tabular-nums}
+  .smval{color:var(--muted);font-variant-numeric:tabular-nums;font-size:10.5px}
+  .smmid{text-align:center;min-width:0}
+  .smlbl{font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .smbar{position:relative;height:7px;background:#0e1626;border-radius:4px}
+  .smbar .c{position:absolute;left:50%;top:-1px;bottom:-1px;width:1px;background:#3a4a68;z-index:1}
+  .smfill{position:absolute;top:1px;bottom:1px;border-radius:4px}
+  .smfill.l{right:50%}.smfill.r{left:50%}
+
   /* chips + tiles */
   .chips{display:flex;flex-wrap:wrap;gap:6px}
   .chip{background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:4px 11px;font-size:11.5px;color:var(--txt)}
@@ -925,6 +942,91 @@ function injImpactNote(r){
   if(!parts.length) return `<div class="note">No ruled-out players affect this matchup.</div>`;
   return `<div class="note warn">Spread adjusted for absences — ${parts.join(' · ')}</div>`;
 }
+// ── Detailed matchup panels ─────────────────────────────────────────
+const fmtSituVal=(v,row)=> v==null?'—':(row.pct?(v*100).toFixed(row.dec)+'%':(v>=0?'+':'')+v.toFixed(row.dec));
+function situRow(row, offColor, defColor){
+  const e=row.edge, offWin=e!=null&&e>0;
+  const mag=e==null?0:Math.min(1,Math.abs(e)/24), barW=Math.round(mag*100);
+  const badge=(rk)=>`<span class="smrank" style="background:${rankCol(rk,0.18)};color:${rankCol(rk)}">${rk!=null?'#'+rk:'—'}</span>`;
+  return `<div class="smrow">
+    <div class="smcell">${badge(row.off_rank)}<span class="smval">${fmtSituVal(row.off_val,row)}</span></div>
+    <div class="smmid"><div class="smlbl">${row.label}</div>
+      <div class="smbar"><span class="c"></span>${e!=null?`<span class="smfill ${offWin?'l':'r'}" style="width:${barW/2}%;background:${offWin?offColor:defColor}"></span>`:''}</div></div>
+    <div class="smcell def"><span class="smval">${fmtSituVal(row.def_val,row)}</span>${badge(row.def_rank)}</div>
+  </div>`;
+}
+function situationalPanel(r){
+  const s=r.situational; if(!s) return '';
+  const tc=t=> t===r.home? r.home_color : r.away_color;
+  const block=(dir)=>{ const offC=tc(dir.off), defC=tc(dir.def);
+    return `<div class="smblock"><div class="smhdr"><b style="color:${offC}">${dir.off}</b> offense
+      <span style="color:var(--muted)">vs</span> <b style="color:${defC}">${dir.def}</b> defense</div>
+      ${dir.rows.map(row=>situRow(row,offC,defC)).join('')}</div>`; };
+  return `<div class="card"><h2>Situational matchup <span>each unit vs the opponent · value &amp; league rank · bar points to the edge</span></h2>
+    <div class="smgrid">${block(s.away_off)}${block(s.home_off)}</div></div>`;
+}
+function gameScriptStrip(r){
+  const g=r.game_script; if(!g) return '';
+  const tags=[];
+  if(g.shootout) tags.push('🔥 Shootout potential'); if(g.grind) tags.push('🛡️ Low-scoring grind');
+  const sentence=`Model sees a <b>${g.tightness}</b> — <b>${g.favorite}</b> favored by ${Math.abs(g.margin).toFixed(1)} in a projected <b>${g.total.toFixed(1)}</b>-point game${g.tempo?`, <b>${g.tempo}</b>`:''}.`;
+  return `<div class="card"><h2>Game script <span>expected flow</span></h2>
+    <div style="font-size:13.5px;margin-bottom:${tags.length||g.pace!=null?'10px':'0'}">${sentence}</div>
+    <div class="chips">${tags.map(t=>`<span class="chip tag">${esc(t)}</span>`).join('')}
+      ${g.pace!=null?`<span class="chip">${g.pace} plays/g pace</span>`:''}</div></div>`;
+}
+function bettingPanel(r){
+  const b=r.betting; if(!b) return '';
+  const favLine=m=> (m>=0?r.home:r.away)+' −'+Math.abs(m).toFixed(1);
+  if(!b.has_line){
+    return `<div class="card"><h2>Betting edge <span>model line only</span></h2>
+      <div class="tiles"><div class="tile"><div class="k">Model line</div><div class="v">${favLine(b.model_margin)}</div></div>
+        <div class="tile"><div class="k">Model total</div><div class="v">${b.model_total.toFixed(1)}</div></div></div>
+      <div class="note" style="margin-top:10px">No market line for this pairing — pick two teams that meet on the schedule to see the Vegas line, ATS lean and cover probability.</div></div>`;
+  }
+  const real=Math.abs(b.edge)>=2.5, atsColor=real?'var(--good)':'var(--muted)';
+  return `<div class="card"><h2>Betting edge <span>model vs market</span></h2>
+    <div class="tiles">
+      <div class="tile"><div class="k">Model line</div><div class="v">${favLine(b.model_margin)}</div></div>
+      <div class="tile"><div class="k">Vegas line</div><div class="v">${favLine(b.vegas_spread)}</div></div>
+      <div class="tile"><div class="k">ATS lean</div><div class="v" style="color:${atsColor}">${b.ats_side} <span style="font-size:12px;color:var(--muted)">${Math.round(b.cover_prob*100)}%</span></div></div>
+      <div class="tile"><div class="k">Spread edge</div><div class="v" style="color:${atsColor}">${b.edge>0?'+':''}${b.edge}</div></div>
+      <div class="tile"><div class="k">Model total</div><div class="v">${b.model_total.toFixed(1)}</div></div>
+      ${b.vegas_total!=null?`<div class="tile"><div class="k">Vegas total</div><div class="v">${b.vegas_total}</div></div>`:''}
+      ${b.total_side?`<div class="tile"><div class="k">Total lean</div><div class="v">${b.total_side} <span style="font-size:12px;color:var(--muted)">${Math.round(b.total_prob*100)}%</span></div></div>`:''}
+    </div>
+    <div class="epa-leg" style="margin-top:8px"><span>ATS lean = model's side + cover probability · spread edge = model margin − market (±2.5 pts is a real play) · lines shown from the favorite's side</span></div></div>`;
+}
+function h2hPanel(r){
+  const h=r.h2h; if(!h) return '';
+  if(!h.n) return `<div class="card"><h2>Head-to-head <span>recent meetings</span></h2><div class="loading">No prior meetings on record.</div></div>`;
+  const rec=h.record||{};
+  const rows=h.games.map(g=>{
+    const winA=g.winner===r.away, winH=g.winner===r.home;
+    return `<div class="bxr"><span class="bn">${g.season} wk${g.week||''}</span>
+      <span class="bs"><b style="opacity:${winA?1:.55}">${g.away} ${g.away_score}</b> @ <b style="opacity:${winH?1:.55}">${g.home} ${g.home_score}</b>
+      <span style="color:var(--muted)">· ${g.total_pts}${g.ou?' '+g.ou:''}</span></span></div>`;
+  }).join('');
+  return `<div class="card"><h2>Head-to-head <span>last ${h.games.length} of ${h.n} meetings</span></h2>
+    <div class="tiles" style="margin-bottom:8px">
+      <div class="tile"><div class="k">Series</div><div class="v" style="font-size:16px">${r.away} ${rec[r.away]??0}–${rec[r.home]??0} ${r.home}</div></div>
+      <div class="tile"><div class="k">Avg total</div><div class="v">${h.avg_total}</div></div>
+      ${h.ou_n?`<div class="tile"><div class="k">Over / Under</div><div class="v" style="font-size:16px">${h.over}–${h.under}</div></div>`:''}
+    </div>${rows}</div>`;
+}
+function conditionsPanel(r){
+  const c=r.conditions; if(!c) return '';
+  const tiles=[];
+  if(c.roof) tiles.push(['Roof',c.roof]);
+  if(c.surface) tiles.push(['Surface',c.surface]);
+  if(c.temp!=null) tiles.push(['Temp',c.temp+'°']);
+  if(c.wind!=null) tiles.push(['Wind',c.wind+' mph']);
+  if(c.div_game!=null) tiles.push(['Division',c.div_game?'Yes':'No']);
+  if(!tiles.length && !c.stadium) return '';
+  return `<div class="card"><h2>Conditions <span>${c.season} wk${c.week||''}${c.played?' · final':' · scheduled'}</span></h2>
+    ${c.stadium?`<div style="font-size:12px;color:var(--muted);margin-bottom:8px">${esc(c.stadium)}${c.gameday?' · '+esc(c.gameday):''}</div>`:''}
+    <div class="tiles">${tiles.map(([k,v])=>`<div class="tile"><div class="k">${k}</div><div class="v" style="font-size:15px;text-transform:capitalize">${esc(''+v)}</div></div>`).join('')}</div></div>`;
+}
 function boxTeam(tm, t){
   if(!t) return '';
   const m=META[tm]||{}; const rbs=(t.rush||[]); const wrs=(t.rec||[]).filter(x=>x.pos!=='RB'); const q=t.qb;
@@ -976,10 +1078,15 @@ async function viewMatchup(home, away, neutral){
     </div>
     ${(()=>{const u=renderUnits(r);return u?`<div class="card">${u}</div>`:'';})()}
   </div>
+  ${gameScriptStrip(r)}
+  ${bettingPanel(r)}
+  ${situationalPanel(r)}
   ${simPanel(r)}
   ${matchupEdges(r)}
   <div class="card" style="margin-top:20px"><h2>Schemes</h2><div class="box">${schemePanel(r.away, r.schemes[r.away])}${schemePanel(r.home, r.schemes[r.home])}</div></div>
   <div class="card"><h2>Recent form <span>${r.form[r.home]&&r.form[r.home].season||''}</span></h2><div class="box">${formPanel(r.away, r.form[r.away])}${formPanel(r.home, r.form[r.home])}</div></div>
+  ${h2hPanel(r)}
+  ${conditionsPanel(r)}
   <div class="card"><h2>Latest injuries <span>Out/Doubtful players are removed from the projection &amp; spread</span></h2>
     ${injImpactNote(r)}
     <div class="box">${injPanel(r.away, r.injuries[r.away])}${injPanel(r.home, r.injuries[r.home])}</div></div>

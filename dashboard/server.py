@@ -835,6 +835,190 @@ def _adjusted_prediction(home: str, away: str, neutral: bool = False, unavail=No
     return res
 
 
+# ── Detailed matchup analysis helpers ───────────────────────────────
+# Each dimension pits an offensive metric against the defensive metric it attacks.
+# `obet`/`dbet` = which end of the STORED value ranks #1 (team_styles def_* are pre-flipped
+# higher=better, see the leaderboard note). `dneg` displays defensive EPA as raw "EPA allowed".
+_MDIMS = [  # key, label, off_col, obet, def_col, dbet, pct, dec, dneg
+    ("epa",     "EPA / play",      "off_epa_per_play", "hi", "def_epa_per_play", "hi", False, 2, True),
+    ("pass",    "Passing",         "off_epa_per_pass", "hi", "def_epa_per_pass", "hi", False, 2, True),
+    ("rush",    "Rushing",         "off_epa_per_rush", "hi", "def_epa_per_rush", "hi", False, 2, True),
+    ("succ",    "Success rate",    "off_success_rate", "hi", "def_success_rate", "hi", True,  1, False),
+    ("rz",      "Red-zone TD%",    "rz_td_rate",       "hi", "rz_td_rate_allowed_y", "lo", True, 1, False),  # _x is a broken all-1.0 merge artifact
+    ("protect", "Pass pro vs rush","sack_rate_allowed","lo", "sack_rate_gen",    "hi", True,  1, False),
+]
+
+
+def _col_rank(sub: pd.DataFrame, col: str, better: str) -> dict:
+    """{team: league rank} for one styles column; 1 = best, ties share the min rank."""
+    if col not in sub.columns:
+        return {}
+    s = sub[["team", col]].dropna(subset=[col]).sort_values(col, ascending=(better == "lo"))
+    ranks, prev, rk = {}, None, 0
+    for i, (_, row) in enumerate(s.iterrows()):
+        v = row[col]
+        if v != prev:
+            rk, prev = i + 1, v
+        ranks[row["team"]] = rk
+    return ranks
+
+
+def _matchup_situational(home: str, away: str, season: int) -> dict:
+    """For each phase, pit each team's offense against the opponent's defense with league ranks.
+    Returns two directions (away offense vs home defense, and vice-versa)."""
+    sub = styles_df()
+    sub = sub[sub["season"] == season]
+    if sub.empty:
+        return None
+    ranks = {}
+    for _, lbl, ocol, obet, dcol, dbet, *_r in _MDIMS:
+        ranks.setdefault(ocol, _col_rank(sub, ocol, obet))
+        ranks.setdefault(dcol, _col_rank(sub, dcol, dbet))
+
+    def val(team, col):
+        v = sub.loc[sub["team"] == team, col]
+        return float(v.iloc[0]) if len(v) and pd.notna(v.iloc[0]) else None
+
+    def direction(off_t, def_t):
+        rows = []
+        for key, lbl, ocol, obet, dcol, dbet, pct, dec, dneg in _MDIMS:
+            ov, dv = val(off_t, ocol), val(def_t, dcol)
+            if dv is not None and dneg:
+                dv = -dv                              # show defensive EPA as allowed (neg = elite)
+            orank, drank = ranks[ocol].get(off_t), ranks[dcol].get(def_t)
+            edge = (drank - orank) if (orank and drank) else None   # >0 = offense is the stronger unit
+            rows.append({"key": key, "label": lbl, "pct": pct, "dec": dec,
+                         "off_val": ov, "off_rank": orank, "def_val": dv, "def_rank": drank, "edge": edge})
+        return rows
+
+    return {"season": season,
+            "away_off": {"off": away, "def": home, "rows": direction(away, home)},
+            "home_off": {"off": home, "def": away, "rows": direction(home, away)}}
+
+
+def _head_to_head(home: str, away: str, limit: int = 6) -> dict:
+    """Past meetings between the two teams (either venue) + series record & ATS/O-U trends."""
+    s = schedules_df()
+    if not len(s):
+        return None
+    d = s[(((s["home_team"] == home) & (s["away_team"] == away)) |
+           ((s["home_team"] == away) & (s["away_team"] == home))) & s["home_score"].notna()]
+    if d.empty:
+        return {"games": [], "n": 0}
+    d = d.sort_values(["season", "week"])
+    games, hw, aw, ov, un, h_cov = [], 0, 0, 0, 0, 0
+    for _, g in d.iterrows():
+        hs, as_ = float(g["home_score"]), float(g["away_score"])
+        winner = g["home_team"] if hs > as_ else (g["away_team"] if as_ > hs else "TIE")
+        if winner == home:
+            hw += 1
+        elif winner == away:
+            aw += 1
+        sp, tot = g.get("spread_line"), g.get("total_line")
+        total_pts = hs + as_
+        ou = None
+        if pd.notna(tot):
+            ou = "O" if total_pts > tot else ("U" if total_pts < tot else "P")
+            if ou == "O": ov += 1
+            elif ou == "U": un += 1
+        covered = None                                # did the (query) home team cover vs the line?
+        if pd.notna(sp):                              # spread_line home-perspective, >0 = home favored
+            margin = hs - as_
+            home_covered = margin > sp
+            covered = g["home_team"] if home_covered else g["away_team"]
+            if covered == home: h_cov += 1
+        games.append({
+            "season": int(g["season"]), "week": int(g["week"]) if pd.notna(g["week"]) else None,
+            "home": g["home_team"], "away": g["away_team"],
+            "home_score": int(hs), "away_score": int(as_), "winner": winner,
+            "spread_line": safe_json(sp), "total_line": safe_json(tot), "total_pts": int(total_pts), "ou": ou,
+        })
+    recent = games[-limit:][::-1]
+    n_ats = sum(1 for x in [g for g in games if g["spread_line"] is not None])
+    return {"n": len(games), "games": recent,
+            "record": {home: hw, away: aw, "ties": len(games) - hw - aw},
+            "avg_total": round(sum(g["total_pts"] for g in games) / len(games), 1),
+            "over": ov, "under": un, "ou_n": ov + un,
+            f"{home}_covers": h_cov, "ats_n": n_ats}
+
+
+def _scheduled_game(home: str, away: str) -> dict:
+    """The upcoming (or most recent) scheduled game for this exact home/away pairing, with
+    its Vegas line and venue conditions. None if these teams aren't paired in the schedule."""
+    s = schedules_df()
+    if not len(s):
+        return None
+    d = s[(s["home_team"] == home) & (s["away_team"] == away)]
+    if d.empty:
+        return None
+    fut = d[d["home_score"].isna()]
+    row = fut.sort_values(["season", "week"]).iloc[0] if len(fut) else d.sort_values(["season", "week"]).iloc[-1]
+    return {
+        "season": int(row["season"]), "week": int(row["week"]) if pd.notna(row["week"]) else None,
+        "played": bool(pd.notna(row.get("home_score"))),
+        "spread_line": safe_json(row.get("spread_line")), "total_line": safe_json(row.get("total_line")),
+        "roof": safe_json(row.get("roof")), "surface": safe_json(row.get("surface")),
+        "temp": safe_json(row.get("temp")), "wind": safe_json(row.get("wind")),
+        "div_game": bool(row.get("div_game")) if pd.notna(row.get("div_game")) else None,
+        "stadium": safe_json(row.get("stadium")),
+        "gameday": str(row.get("gameday")) if pd.notna(row.get("gameday")) else None,
+    }
+
+
+def _matchup_betting(res: dict, sched: dict) -> dict:
+    """Model line vs Vegas line, with the ATS lean + cover prob and total lean + O/U prob.
+    Uses the scheduled nflverse line; falls back to model-only when no line exists."""
+    from ml.spreads import ats_pick, total_prob
+    out = {"model_margin": res["pred_margin"], "model_total": res["pred_total"], "has_line": False}
+    sp = sched.get("spread_line") if sched else None
+    if sp is None:
+        return out
+    out["has_line"] = True
+    out["vegas_spread"] = sp                          # home-perspective, >0 = home favored
+    a = ats_pick(res["pred_margin"], sp)
+    out["edge"] = a["edge"]
+    out["ats_side"] = res["home"] if a["side"] == "home" else res["away"]
+    out["cover_prob"] = a["cover_prob"]
+    out["push_prob"] = a["push"]
+    tot = sched.get("total_line")
+    if tot is not None and res.get("pred_total") is not None:
+        out["vegas_total"] = tot
+        tp = total_prob(res["pred_total"], tot)
+        over = tp["over"] >= tp["under"]
+        out["total_side"] = "Over" if over else "Under"
+        out["total_prob"] = tp["over"] if over else tp["under"]
+    return out
+
+
+def _game_script(res: dict, pace: float = None) -> dict:
+    """A plain-language read of the expected game flow from the prediction + combined pace."""
+    margin = res.get("pred_margin") or 0
+    total = res.get("pred_total") or 0
+    fav = res["home"] if margin >= 0 else res["away"]
+    dog = res["away"] if margin >= 0 else res["home"]
+    am = abs(margin)
+    if am < 3:      tightness = "coin-flip"
+    elif am < 7:    tightness = "one-score game"
+    elif am < 10.5: tightness = "clear edge"
+    else:           tightness = "potential blowout"
+    tempo = None
+    if pace is not None:
+        pace = round(pace, 1)
+        tempo = "up-tempo" if pace >= 64 else ("methodical" if pace <= 61 else "average-paced")
+    return {"favorite": fav, "underdog": dog, "margin": round(margin, 1), "total": round(total, 1),
+            "tightness": tightness, "pace": pace, "tempo": tempo,
+            "shootout": total >= 48, "grind": total <= 41}
+
+
+def _combined_pace(home: str, away: str, season: int) -> float:
+    """Average offensive pace (plays/game) of the two teams, for the game-script read."""
+    sub = styles_df()
+    sub = sub[sub["season"] == season]
+    vals = [float(sub.loc[sub["team"] == t, "pace"].iloc[0])
+            for t in (home, away) if len(sub.loc[sub["team"] == t, "pace"].dropna())]
+    return sum(vals) / len(vals) if vals else None
+
+
 @app.route('/api/matchup_full')
 def api_matchup_full():
     """Matchup prediction + schemes + recent form + latest injuries for both teams."""
@@ -885,6 +1069,13 @@ def api_matchup_full():
     res["injuries"] = {home: latest_injuries(home), away: latest_injuries(away)}
     from ml.spreads import simulate
     res["simulation"] = simulate(res["pred_margin"], res["pred_total"])
+    # detailed analysis blocks
+    sched = _scheduled_game(home, away)
+    res["situational"] = _matchup_situational(home, away, season)
+    res["h2h"] = _head_to_head(home, away)
+    res["betting"] = _matchup_betting(res, sched)
+    res["conditions"] = sched
+    res["game_script"] = _game_script(res, _combined_pace(home, away, season))
     return jsonify(_native(res))
 
 
