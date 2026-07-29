@@ -252,6 +252,23 @@
   .bxr{display:flex;justify-content:space-between;font-size:11.5px;padding:2px 0;gap:6px}
   .bxr .bn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .bxr .bs{color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+  /* readable box-score tables */
+  .bxtbl{width:100%;border-collapse:collapse;margin-bottom:12px;font-variant-numeric:tabular-nums}
+  .bxtbl th{font-size:9.5px;text-transform:uppercase;letter-spacing:.3px;color:var(--muted);text-align:right;
+            padding:4px 6px;border-bottom:1px solid var(--line);font-weight:700}
+  .bxtbl th:first-child{text-align:left}
+  .bxtbl td{font-size:12.5px;padding:4px 6px;text-align:right;border-bottom:1px solid #1a2334}
+  .bxtbl tbody tr:last-child td{border-bottom:0}
+  .bxtbl td.pl{text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:132px;font-weight:600}
+  .bxtbl td.pl .pos{color:var(--muted);font-weight:400;font-size:10.5px;margin-left:4px}
+  .bxtbl td.big{font-weight:700}
+  .bxtbl tbody tr:hover td{background:#161f33}
+  /* collapsible section cards */
+  .card.coll > h2{cursor:pointer;user-select:none;position:relative;padding-right:24px}
+  .card.coll > h2::after{content:'▾';position:absolute;right:3px;top:2px;font-size:12px;color:var(--muted);transition:transform .15s}
+  .card.coll.collapsed > h2::after{transform:rotate(-90deg)}
+  .card.coll.collapsed > :not(h2){display:none}
+  .card.coll > h2:hover::after{color:var(--txt)}
 
   /* injuries */
   .inj{display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid #1c2740;gap:8px}
@@ -1029,12 +1046,25 @@ function conditionsPanel(r){
 }
 function boxTeam(tm, t){
   if(!t) return '';
-  const m=META[tm]||{}; const rbs=(t.rush||[]); const wrs=(t.rec||[]).filter(x=>x.pos!=='RB'); const q=t.qb;
-  let h=`<div class="bxt"><div class="bh"><img src="${m.logo||''}" onerror="this.style.display='none'">${tm}</div>`;
-  if(q){ h+=`<div class="bxs">Passing</div><div class="bxr"><span class="bn">${q.name}</span><span class="bs">${q.cmp}/${q.pass_att}, ${q.pass_yds} yd, ${q.pass_td} TD, ${q.int} INT</span></div>`; }
-  if(rbs.length){ h+=`<div class="bxs">Rushing</div>`+rbs.map(x=>`<div class="bxr"><span class="bn">${x.name}</span><span class="bs">${x.carries} car, ${x.rush_yds} yd, ${x.rush_td} TD</span></div>`).join(''); }
-  const recAll=[...rbs.filter(x=>x.rec>0).map(x=>({name:x.name,rec:x.rec,targets:x.targets,rec_yds:x.rec_yds,rec_td:x.rec_td||0})),...wrs];
-  if(recAll.length){ h+=`<div class="bxs">Receiving</div>`+recAll.map(x=>`<div class="bxr"><span class="bn">${x.name}</span><span class="bs">${x.rec}/${x.targets}, ${x.rec_yds} yd, ${x.rec_td} TD</span></div>`).join(''); }
+  const m=META[tm]||{}, rbs=(t.rush||[]), wrs=(t.rec||[]).filter(x=>x.pos!=='RB'), q=t.qb;
+  const iv=v=>v==null?'—':Math.round(v);                    // yards / counts → whole numbers
+  const dv=v=>v==null?'—':(Math.round(v*10)/10).toFixed(1); // TD / INT projections → 1 decimal
+  const pn=x=>`<td class="pl">${esc(x.name)}${x.pos?`<span class="pos">${esc(x.pos)}</span>`:''}</td>`;
+  const td=v=>`<td class="${v>=1?'big':''}">${dv(v)}</td>`;
+  let h=`<div class="bxt"><div class="bh"><img src="${m.logo||''}" onerror="this.style.display='none'">${esc(m.team_name||tm)}</div>`;
+  if(q){
+    h+=`<table class="bxtbl"><thead><tr><th>Passing</th><th>C/ATT</th><th>Yds</th><th>TD</th><th>INT</th></tr></thead>
+      <tbody><tr><td class="pl">${esc(q.name)}</td><td>${iv(q.cmp)}/${iv(q.pass_att)}</td><td class="big">${iv(q.pass_yds)}</td>${td(q.pass_td)}<td>${dv(q.int)}</td></tr></tbody></table>`;
+  }
+  if(rbs.length){
+    h+=`<table class="bxtbl"><thead><tr><th>Rushing</th><th>Car</th><th>Yds</th><th>TD</th></tr></thead><tbody>`+
+      rbs.map(x=>`<tr>${pn(x)}<td>${iv(x.carries)}</td><td class="big">${iv(x.rush_yds)}</td>${td(x.rush_td)}</tr>`).join('')+`</tbody></table>`;
+  }
+  const recAll=[...rbs.filter(x=>x.rec>0).map(x=>({name:x.name,pos:x.pos,rec:x.rec,targets:x.targets,rec_yds:x.rec_yds,rec_td:x.rec_td||0})),...wrs];
+  if(recAll.length){
+    h+=`<table class="bxtbl"><thead><tr><th>Receiving</th><th>Tgt</th><th>Rec</th><th>Yds</th><th>TD</th></tr></thead><tbody>`+
+      recAll.map(x=>`<tr>${pn(x)}<td>${iv(x.targets)}</td><td>${iv(x.rec)}</td><td class="big">${iv(x.rec_yds)}</td>${td(x.rec_td)}</tr>`).join('')+`</tbody></table>`;
+  }
   return h+`</div>`;
 }
 
@@ -1090,7 +1120,13 @@ async function viewMatchup(home, away, neutral){
   <div class="card"><h2>Latest injuries <span>Out/Doubtful players are removed from the projection &amp; spread</span></h2>
     ${injImpactNote(r)}
     <div class="box">${injPanel(r.away, r.injuries[r.away])}${injPanel(r.home, r.injuries[r.home])}</div></div>
-  <div class="card"><h2>Projected box score <span>available players only</span></h2><div id="mBox" class="box"><div class="loading">Projecting player stat lines…</div></div></div>`;
+  <div class="card"><h2>Projected box score <span>expected stat lines · available players</span></h2><div id="mBox" class="box"><div class="loading">Projecting player stat lines…</div></div></div>`;
+  // make each section collapsible (cards with a direct h2 header)
+  res.querySelectorAll('.card').forEach(card=>{
+    const hd=card.querySelector(':scope > h2'); if(!hd) return;
+    card.classList.add('coll');
+    hd.addEventListener('click',()=>card.classList.toggle('collapsed'));
+  });
   // player box (reuse existing cached endpoint)
   const p = await j(`/api/matchup_players?home=${h}&away=${a}`);
   const box=document.getElementById('mBox');
