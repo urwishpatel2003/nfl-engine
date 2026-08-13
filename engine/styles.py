@@ -258,18 +258,23 @@ def build_team_styles(seasons: list = None, n_games: int = None) -> pd.DataFrame
         ftn = ftn[ftn["season"].isin(seasons)].copy() if "season" in ftn.columns else ftn.copy()
 
         # Join FTN to PBP via nflverse_game_id + play_id
-        ftn_cols_needed = ["nflverse_game_id","season","week",
+        ftn_cols_needed = ["nflverse_game_id","nflverse_play_id","season","week",
                            "is_play_action","is_motion","is_screen_pass",
                            "is_no_huddle","n_blitzers","n_pass_rushers",
                            "is_qb_out_of_pocket","is_drop","is_qb_fault_sack"]
         ftn_avail = [c for c in ftn_cols_needed if c in ftn.columns]
 
-        if len(ftn_avail) >= 4 and "nflverse_game_id" in ftn.columns:
-            # Merge FTN onto PBP by game_id + play_id
-            pbp_ftn = pbp.copy()
-            pbp_ftn = pbp_ftn.merge(
-                ftn[ftn_avail].rename(columns={"nflverse_game_id": "game_id"}),
-                on=["game_id"] + [c for c in ["season","week"] if c in ftn_avail],
+        if len(ftn_avail) >= 4 and {"nflverse_game_id", "nflverse_play_id"} <= set(ftn.columns):
+            # Merge FTN onto PBP by game_id + PLAY_ID. The play key is mandatory: joining on the
+            # game alone is a cartesian product (~166 FTN rows x ~171 PBP rows = ~28k rows per
+            # game, 8M per season). That blew peak memory past 5 GB — enough to get the hosted
+            # refresh worker OOM-killed — and silently averaged each team's FTN rates over every
+            # play in the game, the opponent's snaps and run plays included. FTN keys join 1:1
+            # onto PBP (verified: 100% of FTN rows match a play, no duplicates).
+            pbp_ftn = pbp.merge(
+                ftn[ftn_avail].rename(columns={"nflverse_game_id": "game_id",
+                                               "nflverse_play_id": "play_id"}),
+                on=["game_id", "play_id"] + [c for c in ["season","week"] if c in ftn_avail],
                 how="left"
             )
 
@@ -279,8 +284,10 @@ def build_team_styles(seasons: list = None, n_games: int = None) -> pd.DataFrame
                 if col in pbp_ftn.columns:
                     ftn_off_metrics[col] = (col, "mean")
 
+            # defined once: the defensive blitz aggregation below reads it too
+            pass_plays = pbp_ftn[pbp_ftn["pass_attempt"] == 1]
+
             if ftn_off_metrics:
-                pass_plays = pbp_ftn[pbp_ftn["pass_attempt"] == 1]
                 ftn_off = pass_plays.groupby(["season","posteam"]).agg(**ftn_off_metrics).reset_index()
                 ftn_off = ftn_off.rename(columns={
                     "posteam":          "team",
