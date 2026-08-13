@@ -429,10 +429,16 @@ def _recency_damp(by_year, damp=0.4, thresh=0.03):
 
 
 def _ol():
-    """Team O-line grade from raw data, MULTI-YEAR (recency-weighted, weighted by dropbacks/carries
-    so a degraded/injured season counts less). Pass protection dominates via PFR PRESSURE RATE
-    allowed (less QB-dependent than raw sacks); a smaller RB-ONLY run-block signal excludes QB
-    sneaks/kneels. Higher = better. (LAC's 2025 was wrecked by hurt tackles — 2023-24 lifts it back.)"""
+    """Team O-line grade, MULTI-YEAR measured performance ANCHORED to the preseason consensus.
+
+    The measured half is recency-weighted and weighted by dropbacks/carries so a degraded/injured
+    season counts less. Pass protection dominates via PFR PRESSURE RATE allowed (less QB-dependent
+    than raw sacks); a smaller RB-ONLY run-block signal excludes QB sneaks/kneels. (LAC's 2025 was
+    wrecked by hurt tackles — 2023-24 lifts it back.)
+
+    That measurement is blind to the offseason, so it is then blended toward the published expert
+    consensus (ml.ol_consensus), which prices in free agency/draft/trades — the one thing 2023-25
+    play-by-play cannot know. Higher = better."""
     try:
         pf = pd.read_parquet(RAW / "pfr_passing.parquet")
         ros_all = pd.read_parquet(RAW / "rosters_seasonal.parquet")
@@ -463,10 +469,12 @@ def _ol():
         df = pd.DataFrame({"press_rate": press_rate, "sack_rate": sack_rate}).join(R[["ypc", "stuff_rate"]])
         passpro = -(0.7 * _z(df["press_rate"]) + 0.3 * _z(df["sack_rate"]))
         runblk = _z(df["ypc"]) - 0.25 * _z(df["stuff_rate"])
-        return (0.7 * passpro + 0.3 * runblk).dropna()
+        measured = (0.7 * passpro + 0.3 * runblk).dropna()
     except Exception:                                              # fallback: old composite CSV
         ol = pd.read_csv(PROC / "ol_rankings_2025.csv").set_index("team")
-        return -_z(ol["sack_rate_allowed"]) + _z(ol.get("ypc", pd.Series(0, index=ol.index)))
+        measured = -_z(ol["sack_rate_allowed"]) + _z(ol.get("ypc", pd.Series(0, index=ol.index)))
+    from ml.ol_consensus import blend                               # no-op if the table is absent
+    return blend(measured)
 
 
 def _def_team():
