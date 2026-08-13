@@ -51,7 +51,7 @@ def _win_prob_fn():
     """Returns wp(home, away) using the matchup-engine margin computed inline off cached
     ratings/units — identical to project_game but O(1) per game."""
     from ml.squad import squad_ratings, SPREAD_SCALE, HFA
-    from ml.matchup_engine import team_units
+    from ml.matchup_engine import team_units, MARGIN_CALIBRATION
     out, _ = squad_ratings()
     r = out.set_index("team")["rating"]
     u = team_units()
@@ -66,7 +66,9 @@ def _win_prob_fn():
         if home not in r.index or away not in r.index:
             return None
         rm = float(np.clip((r[home] - r[away]) * SPREAD_SCALE + HFA, -18, 18))
-        fm = 0.55 * rm + 0.45 * (phase(home, away, +1) - phase(away, home, -1))
+        raw = 0.55 * rm + 0.45 * (phase(home, away, +1) - phase(away, home, -1))
+        # same market calibration project_game applies, or win totals would stay over-dispersed
+        fm = HFA + MARGIN_CALIBRATION * (raw - HFA)
         return float(1 / (1 + np.exp(-fm / 13.5 * np.pi / np.sqrt(3))))
     return wp
 

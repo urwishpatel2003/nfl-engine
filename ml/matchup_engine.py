@@ -35,6 +35,22 @@ _UNITS = None
 W25_MAX = 0.40       # max weight on 2025 performance (so 2026 talent is always >= 60%)
 PPG_SCALE = 4.5      # points/game per unit-talent z-score
 
+# Margin calibration. The raw roster+unit margin ranks teams well but spreads them far too wide.
+# Fitted against the 76 games of the 2026 schedule that already carry Vegas lines: raw model
+# margin has sd 7.66 vs the market's 4.62 (ratio 1.66) and regresses as model = 1.45*market-0.47
+# — yet correlates at r=0.88. So the ORDER is right and only the SCALE is wrong; shrinking it
+# cuts MAE vs the market from 3.47 to 1.85 pts and reorders nothing. (Symptom that prompted this:
+# DET projected 13.9 wins and was 5-13 pts too big in all four of its priced games.)
+#
+# Applied to the strength differential ONLY, leaving home field at full weight — scaling the whole
+# margin drags HFA down with it and leaves a -0.65 pt home bias, vs +0.20 when HFA is held out.
+#
+# 0.60 makes model dispersion match the market exactly on those games. Raw MAE alone would prefer
+# 0.52, but weeks 1-4 lines run 0.851x a full season's spread dispersion (pooled 2021-25), so the
+# full-season-equivalent factor is 0.52/0.851 = 0.61. The two routes agree; 0.60 sits between them.
+# Re-fit with scratch fit_k2-style sweep if the roster model's own dispersion ever changes.
+MARGIN_CALIBRATION = 0.60
+
 
 def _z(s: pd.Series) -> pd.Series:
     sd = s.std(ddof=0)
@@ -207,7 +223,9 @@ def project_game(home: str, away: str, neutral: bool = False, unit_adj: dict = N
 
     unit_margin = ph - pa_
     # anchor the margin to the roster-talent rating so it never contradicts the rankings
-    final_margin = 0.55 * roster["pred_margin"] + 0.45 * unit_margin
+    raw_margin = 0.55 * roster["pred_margin"] + 0.45 * unit_margin
+    # then calibrate team strength to market scale, holding home field at full weight
+    final_margin = hfa + MARGIN_CALIBRATION * (raw_margin - hfa)
     home_pts = (total + final_margin) / 2
     away_pts = (total - final_margin) / 2
     wp = float(1 / (1 + np.exp(-final_margin / 13.5 * np.pi / np.sqrt(3))))
