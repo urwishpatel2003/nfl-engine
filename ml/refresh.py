@@ -57,14 +57,17 @@ def _candidate_urls(season: int) -> dict:
       injuries      → matchup injury panels
       pbp_{season}  → trends/form, team styles, unit ratings (rebuilt into team_styles)
       schedules     → points for/against + upcoming games
-    Player weekly stats / depth charts / rosters are intentionally NOT fetched here:
-    they only feed the engine's composite rebuild, which is a heavy/offline step, not
-    part of this light refresh. (nflverse has fallback asset names, hence the lists.)"""
+      depth_charts  → live team assignments (cuts/trades/signings) → 2026 roster rebuild,
+                      so squad ratings track the CURRENT roster, not a stale snapshot
+    Player weekly stats are intentionally NOT fetched here: they only feed the engine's
+    composite rebuild, which is a heavy/offline step, not part of this light refresh.
+    (nflverse has fallback asset names, hence the lists.)"""
     s = season
     return {
         "injuries":  [f"{NFLVERSE}/injuries/injuries_{s}.parquet"],
         f"pbp_{s}":  [f"{NFLVERSE}/pbp/play_by_play_{s}.parquet"],
         "schedules": [f"{NFLDATA}/games.parquet", f"{NFLDATA}/games.csv"],
+        "depth_charts": [f"{NFLVERSE}/depth_charts/depth_charts_{s}.parquet"],
     }
 
 
@@ -139,6 +142,17 @@ def download_nflverse(season: int, log=_default_log) -> dict:
             elif name == "schedules":                # full multi-season file; authoritative
                 _safe_to_parquet(df, RAW / "schedules.parquet")
                 n = len(df)
+            elif name == "depth_charts":
+                # The current-season release is a CUMULATIVE dt-stamped live snapshot with no
+                # season column. Keep historical (season-tagged) rows, replace all live
+                # (season=NaN) rows with the fresh release — bounded size, no stale dupes.
+                path = RAW / "depth_charts.parquet"
+                if path.exists():
+                    old = pd.read_parquet(path)
+                    hist = old[old["season"].notna()] if "season" in old.columns else old
+                    df = pd.concat([hist, df], ignore_index=True)
+                _safe_to_parquet(df, path)
+                n = len(df)
             else:
                 n = _merge_by_season(name, df, season)
             results[name] = {"rows": int(n)}
@@ -173,6 +187,18 @@ def rebuild_light(log=_default_log) -> dict:
     except Exception as e:
         out["team_styles"] = f"error: {str(e)[:200]}"
         log(f"  team_styles FAILED — {e}", "WARN")
+
+    # 2026 roster: rebuild week-0 assignments from the just-refreshed live depth charts so
+    # squad ratings/depth pages track cuts, trades and signings. refresh=False keeps this
+    # network-free and (critically) avoids the nfl_data_py import that breaks the server env.
+    try:
+        from roster_update import build_2026_roster
+        build_2026_roster(refresh=False)
+        out["roster_2026"] = "ok"
+        log("  2026 roster rebuilt from live depth charts")
+    except Exception as e:
+        out["roster_2026"] = f"error: {str(e)[:200]}"
+        log(f"  2026 roster rebuild FAILED — {e}", "WARN")
 
     # Season projections: precomputed + stored (win totals fold in completed games from the
     # refreshed schedule; player totals pick up refreshed styles/SOS). This is the weekly update.

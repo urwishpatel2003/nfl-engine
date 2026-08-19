@@ -40,14 +40,22 @@ RAW  = Path(__file__).parent / "data" / "raw"
 PROC = Path(__file__).parent / "data" / "processed"
 
 POS_GROUPS = {
-    "QB":"QB","HB":"RB","FB":"RB","WR":"WR","TE":"TE",
+    "QB":"QB","HB":"RB","FB":"RB","RB":"RB","WR":"WR","TE":"TE",
     "LWR":"WR","RWR":"WR","SWR":"WR","SLOT":"WR",
     "LT":"OL","LG":"OL","C":"OL","RG":"OL","RT":"OL",
     "DE":"DL","DT":"DL","NT":"DL","LDE":"DL","RDE":"DL",
+    "LDT":"DL","RDT":"DL",                      # 2026 depth-chart release splits DT by side
     "LOLB":"LB","ROLB":"LB","MLB":"LB","ILB":"LB","LB":"LB",
-    "CB":"CB","FS":"S","SS":"S","DB":"S",
-    "K":"K","P":"P","LS":"LS",
+    "WLB":"LB","SLB":"LB","RILB":"LB","LILB":"LB",   # weak/strong-side + inside LB slots (2026)
+    "CB":"CB","RCB":"CB","LCB":"CB","NB":"CB",       # side corners + nickel back (2026)
+    "FS":"S","SS":"S","DB":"S",
+    "K":"K","PK":"K","P":"P","LS":"LS",
 }
+
+# Special-teams DUTY slots (return/holder listings). These are second rows for players who
+# already appear at a real position — drop them before the per-player dedupe so a returner's
+# KR row can't randomly beat their WR row and junk their position.
+ST_DUTY_SLOTS = {"KR", "PR", "H"}
 
 
 def load(name: str) -> pd.DataFrame:
@@ -85,8 +93,21 @@ def get_live_depth_charts() -> pd.DataFrame:
         ].copy()
         live["dt"] = str(datetime.now().date())
 
-    # Among live rows, take the most recent dt per player
+    # Drop special-teams duty rows (KR/PR/H) before deduping — see ST_DUTY_SLOTS.
+    if "pos_abb" in live.columns:
+        live = live[~live["pos_abb"].str.upper().isin(ST_DUTY_SLOTS)]
+
     live["dt"] = pd.to_datetime(live["dt"], errors="coerce", utc=True)
+
+    # The live data is a CUMULATIVE history of snapshots. Keep only each team's most
+    # recent published snapshot: a player cut on Aug 15 still has an Aug-14 row as his
+    # personal "most recent", so without this filter cut players never leave the roster.
+    team_col = "team" if "team" in live.columns else ("club_code" if "club_code" in live.columns else None)
+    if team_col:
+        live = live[live["dt"] == live.groupby(team_col)["dt"].transform("max")]
+
+    # Among the current snapshots, take the most recent row per player (a just-traded
+    # player can briefly appear in two teams' snapshots — newest wins).
     live = (live.sort_values("dt", ascending=False)
                 .drop_duplicates("gsis_id")
                 .copy())
