@@ -68,6 +68,7 @@ def _candidate_urls(season: int) -> dict:
         f"pbp_{s}":  [f"{NFLVERSE}/pbp/play_by_play_{s}.parquet"],
         "schedules": [f"{NFLDATA}/games.parquet", f"{NFLDATA}/games.csv"],
         "depth_charts": [f"{NFLVERSE}/depth_charts/depth_charts_{s}.parquet"],
+        f"rosters_{s}": [f"{NFLVERSE}/rosters/roster_{s}.parquet"],
     }
 
 
@@ -150,8 +151,28 @@ def download_nflverse(season: int, log=_default_log) -> dict:
                 if path.exists():
                     old = pd.read_parquet(path)
                     hist = old[old["season"].notna()] if "season" in old.columns else old
-                    df = pd.concat([hist, df], ignore_index=True)
-                _safe_to_parquet(df, path)
+                    combined = pd.concat([hist, df], ignore_index=True)
+                else:
+                    combined = df
+                _safe_to_parquet(combined, path)
+                # Also refresh depth_2026_current.parquet — the CANONICAL "current depth
+                # chart" every model reads (squad, projections, qb_overlay). It is each
+                # team's most recent published snapshot from the cumulative live data.
+                cur = df.copy()
+                cur["dt"] = cur["dt"].astype(str)
+                cur = cur[cur["dt"] == cur.groupby("team")["dt"].transform("max")]
+                _safe_to_parquet(cur, RAW / f"depth_{season}_current.parquet")
+                log(f"  depth_{season}_current: {len(cur):,} rows (latest per-team snapshot)")
+                n = len(combined)
+            elif name.startswith("rosters_"):
+                # nflverse seasonal roster release → the canonical rosters_{season}.parquet
+                # consumed across ml/ (squad, fantasy, matchup_engine, …). Align the release
+                # schema to the columns consumers expect.
+                df = df.rename(columns={"full_name": "player_name", "gsis_id": "player_id"})
+                if "age" not in df.columns and "birth_date" in df.columns:
+                    bd = pd.to_datetime(df["birth_date"], errors="coerce")
+                    df["age"] = ((pd.Timestamp.now() - bd).dt.days / 365.25).round(1)
+                _safe_to_parquet(df, RAW / f"{name}.parquet")
                 n = len(df)
             else:
                 n = _merge_by_season(name, df, season)
