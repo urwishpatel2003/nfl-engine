@@ -322,11 +322,11 @@ def api_team():
         _DEPTH_CACHE[team] = team_depth_chart(team)
     m = team_meta().get(team, {})
     qb = qb1_2026().get(team, "")
-    return jsonify({
+    return jsonify(_native({    # _native: camp players can carry NaN ids → invalid JSON otherwise
         "team": team, "name": m.get("team_name", team),
         "color": m.get("team_color") or "#334155", "logo": m.get("team_logo_espn", ""),
         "qb": qb, "groups": _DEPTH_CACHE[team],
-    })
+    }))
 
 
 _PROJ_CACHE = {}
