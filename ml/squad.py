@@ -694,6 +694,30 @@ def _draft_rating(pick):
 
 _DEPTH_RT = {1: 48, 2: 42, 3: 37, 4: 33}   # replacement rating by depth-chart rank
 
+_PFF_CACHE = None
+
+
+def _pff_grades():
+    """Optional PFF headline grades (subscriber CSVs imported by pff_import.py).
+    Returns (by nm+team, by lastname-initial key) lookups, or (None, None) when absent.
+    Name-based matching only — PFF ids don't map to gsis; the key lookup keeps only
+    keys unique within PFF so a shared lastname+initial can't mis-grade a player."""
+    global _PFF_CACHE
+    if _PFF_CACHE is None:
+        p = PROC / "pff_grades.parquet"
+        if p.exists():
+            d = pd.read_parquet(p).dropna(subset=["pff_grade"])
+            by_nt = d.drop_duplicates(["nm", "team"]).set_index(["nm", "team"])["pff_grade"]
+            # key fallback is TEAM-scoped: a bare lastname+initial collides across the league
+            # (Chris Jones/KC vs Christian Jones/ARI are both "jonesc"), so only match a key
+            # within the same team, and drop keys duplicated inside a team entirely.
+            uniq = d[~d.duplicated(["key", "team"], keep=False)]
+            by_key = uniq.set_index(["key", "team"])["pff_grade"]
+            _PFF_CACHE = (by_nt, by_key)
+        else:
+            _PFF_CACHE = (None, None)
+    return _PFF_CACHE
+
 
 def team_depth_chart(team: str) -> list:
     """Every depth-chart player gets a 0-100 rating via a waterfall, tagged with its source:
@@ -772,11 +796,18 @@ def team_depth_chart(team: str) -> list:
         if sub.empty:
             continue
         players = []
+        pff_nt, pff_key = _pff_grades()
         for r in sub.itertuples():
             rt, src = rate(grp, r.gsis_id, r.player_name, r.pos_rank)
+            pg = None
+            if pff_nt is not None:
+                pg = pff_nt.get((_norm(r.player_name), team))
+                if pg is None or pd.isna(pg):
+                    pg = pff_key.get((_key(r.player_name), team))
+                pg = round(float(pg), 1) if pg is not None and pd.notna(pg) else None
             players.append({"name": r.player_name, "slot": r.pos_abb, "gsis": r.gsis_id,
                             "rank": int(r.pos_rank) if pd.notna(r.pos_rank) else None,
-                            "rating": rt, "source": src})
+                            "rating": rt, "source": src, "pff": pg})
         groups.append({"pos": grp, "label": POS_LABEL.get(grp, grp), "players": players})
     return groups
 
