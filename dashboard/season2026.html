@@ -418,7 +418,13 @@ let META = {};                     // team -> {rank,rating,name,color,logo,qb,..
 let TEAMS = [];                    // sorted [{team,name}]
 let RANKINGS = null;               // cached power_rankings response
 
-async function j(u){ const r = await fetch(u); if(!r.ok && r.status>=500) throw new Error(u); return r.json(); }
+async function j(u){
+  // carry the owner token (if saved) on every API call so gated PFF fields — e.g. the
+  // depth-chart badges on Team Profile — unlock across the whole app, not just the PFF tab
+  const t=localStorage.getItem('pff_token');
+  const r = await fetch(u, t?{headers:{'X-Refresh-Token':t}}:undefined);
+  if(!r.ok && r.status>=500) throw new Error(u); return r.json();
+}
 const app = () => document.getElementById('app');
 const esc = s => (s==null?'':String(s));
 const f1 = x => x==null? '—' : (x>0?'+':'') + Number(x).toFixed(1);
