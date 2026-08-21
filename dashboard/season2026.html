@@ -738,14 +738,58 @@ function pffPlayerRow(p){
       <span style="color:var(--muted);font-size:10px"> (PFF ${p.pff})</span></div>
     <span class="pffb" style="min-width:32px;text-align:center;color:${p.gap>0?'var(--good)':'var(--bad)'};background:${p.gap>0?'#22c55e1a':'#ef44441a'};border-color:${p.gap>0?'#22c55e44':'#ef444444'}">${p.gap>0?'+':''}${p.gap}</span></div>`;
 }
+function pffToken(){ return localStorage.getItem('pff_token')||''; }
+function pffAdminBox(locked){
+  const t=pffToken();
+  return `<div class="card"><h2>${locked?'PFF data is locked':'Load PFF data onto this server'} <span>owner only</span></h2>
+    <div class="note">${locked
+      ?'This is licensed subscriber data — it only unlocks with the owner token (the REFRESH_TOKEN from your Railway service variables).'
+      :'Upload your locally built parquets (from <code>data/processed/</code> — the repo folder syncs via OneDrive, so you can grab them from any device).'}</div>
+    <div style="display:flex;flex-direction:column;gap:10px;max-width:460px;margin-top:12px">
+      <input id="pffTok" type="password" placeholder="owner token" value="${esc(t)}"
+        style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;color:var(--txt);padding:9px 12px;font-size:13px">
+      <button onclick="pffUnlock()">Unlock view</button>
+      <div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px">
+        <label style="font-size:11.5px;color:var(--muted)">pff_grades.parquet (players — required)</label>
+        <input id="pffFileG" type="file" accept=".parquet" style="font-size:12px;color:var(--muted)">
+        <label style="font-size:11.5px;color:var(--muted)">pff_team_grades.parquet (teams — optional)</label>
+        <input id="pffFileT" type="file" accept=".parquet" style="font-size:12px;color:var(--muted)">
+        <button onclick="pffUpload()">Upload to server</button>
+      </div>
+      <div id="pffAdminMsg" style="font-size:12px;color:var(--muted)"></div>
+    </div></div>`;
+}
+function pffUnlock(){
+  const t=(document.getElementById('pffTok')||{}).value||'';
+  if(t) localStorage.setItem('pff_token', t);
+  viewPffCompare();
+}
+async function pffUpload(){
+  const msg=document.getElementById('pffAdminMsg');
+  const t=(document.getElementById('pffTok')||{}).value||pffToken();
+  const g=(document.getElementById('pffFileG')||{}).files, tg=(document.getElementById('pffFileT')||{}).files;
+  if(!t){ msg.textContent='Enter the owner token first.'; return; }
+  if(!g||!g.length){ msg.textContent='Pick at least the pff_grades.parquet file.'; return; }
+  localStorage.setItem('pff_token', t);
+  const fd=new FormData(); fd.append('grades', g[0]); if(tg&&tg.length) fd.append('team_grades', tg[0]);
+  msg.textContent='Uploading…';
+  try{
+    const r=await fetch('/api/pff_upload',{method:'POST',headers:{'X-Refresh-Token':t},body:fd});
+    const d=await r.json();
+    if(d.ok){ msg.textContent='Uploaded. Loading…'; viewPffCompare(); }
+    else msg.textContent='Failed: '+(d.error||r.status);
+  }catch(e){ msg.textContent='Upload error: '+e.message; }
+}
 async function viewPffCompare(){
   app().innerHTML = `<div class="pad"><div class="loading">Comparing model vs PFF…</div></div>`;
-  const d = await j('/api/pff_compare');
+  const hdrs = pffToken()?{'X-Refresh-Token':pffToken()}:{};
+  const d = await fetch('/api/pff_compare',{headers:hdrs}).then(r=>r.json());
   if(!d.available){
-    app().innerHTML = `<div class="pad"><div class="card"><h2>PFF vs Model</h2>
-      <div class="note">No PFF data imported on this server. PFF grades are subscriber-only and stay on your local machine —
-        ask Claude to "refresh my PFF grades" (or run <code>pff_import.py</code> on CSV exports), then reload. See <code>data/raw/pff/README.md</code>.</div>
-    </div></div>`;
+    app().innerHTML = `<div class="pad">
+      ${d.locked?'':`<div class="note">No PFF data on this server yet. PFF grades are subscriber-only — build them locally
+        (ask Claude to "refresh my PFF grades", or run <code>pff_import.py</code> on CSV exports; see <code>data/raw/pff/README.md</code>)${location.hostname==='localhost'?', then reload':' , then upload them below'}.</div>`}
+      ${(location.hostname!=='localhost'||d.locked)?pffAdminBox(!!d.locked):''}
+    </div>`;
     return;
   }
   const T=d.teams;

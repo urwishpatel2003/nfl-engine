@@ -312,6 +312,59 @@ _DEPTH_CACHE = {}
 _PFF_COMPARE = None
 
 
+def _pff_unlocked() -> bool:
+    """PFF data is licensed subscriber content: on the hosted (public) dashboard it is
+    only served to requests carrying the owner's token. Locally (no REFRESH_TOKEN env,
+    i.e. dev laptop) there is no gate."""
+    tok = os.environ.get("REFRESH_TOKEN")
+    if not tok:
+        return True
+    return (request.headers.get("X-Refresh-Token") or "") == tok
+
+
+def _scrub_pff(groups):
+    """Copy depth-chart groups with per-player pff grades removed (never mutate the cache)."""
+    return [{**g, "players": [{k: v for k, v in p.items() if k != "pff"} for p in g["players"]]}
+            for g in groups]
+
+
+@app.route('/api/pff_upload', methods=['POST'])
+def api_pff_upload():
+    """Owner-only upload of the locally built PFF parquets to the server volume.
+    Guarded by REFRESH_TOKEN (must be configured — refuses when absent so an unconfigured
+    deployment can't accept anonymous uploads). Validates schema before writing."""
+    global _PFF_COMPARE
+    tok = os.environ.get("REFRESH_TOKEN")
+    if not tok or (request.headers.get("X-Refresh-Token") or "") != tok:
+        return jsonify({"error": "unauthorized"}), 403
+    import io as _io
+    saved = {}
+    spec = {"grades": ("pff_grades.parquet", {"pff_grade", "nm", "team"}),
+            "team_grades": ("pff_team_grades.parquet", {"grades_overall", "team", "pff_rank"})}
+    for field, (fname, need) in spec.items():
+        f = request.files.get(field)
+        if f is None:
+            continue
+        try:
+            df = pd.read_parquet(_io.BytesIO(f.read()))
+        except Exception as e:
+            return jsonify({"error": f"{field}: not a readable parquet ({e})"}), 400
+        if not need.issubset(df.columns):
+            return jsonify({"error": f"{field}: missing columns {sorted(need - set(df.columns))}"}), 400
+        df.to_parquet(PROC / fname, index=False)
+        saved[field] = len(df)
+    if not saved:
+        return jsonify({"error": "no files provided (fields: grades, team_grades)"}), 400
+    _PFF_COMPARE = None                                # rebuilt on next request
+    _DEPTH_CACHE.clear()
+    try:
+        import ml.squad as _sq
+        _sq._PFF_CACHE = None
+    except Exception:
+        pass
+    return jsonify({"ok": True, "saved": saved})
+
+
 @app.route('/api/pff_compare')
 def api_pff_compare():
     """Model-vs-PFF disagreement view. Needs locally imported PFF data (subscriber-only,
@@ -320,11 +373,13 @@ def api_pff_compare():
     so PFF grades are converted to percentiles within their PFF position group; comparing
     raw grade to percentile would manufacture fake disagreements."""
     global _PFF_COMPARE
+    if not _pff_unlocked():                            # public request on the hosted site
+        return jsonify({"available": False, "locked": True})
     if _PFF_COMPARE is not None:
         return jsonify(_PFF_COMPARE)
     pg_path = PROC / "pff_grades.parquet"
     if not pg_path.exists():
-        return jsonify({"available": False})
+        return jsonify({"available": False, "locked": False})
     from ml.squad import squad_ratings, team_depth_chart, _norm, _key
     d = pd.read_parquet(pg_path).dropna(subset=["pff_grade"])
     # Only compare players PFF itself considers graded (meets_snap_minimum): a grade off a
@@ -394,10 +449,11 @@ def api_team():
         _DEPTH_CACHE[team] = team_depth_chart(team)
     m = team_meta().get(team, {})
     qb = qb1_2026().get(team, "")
+    groups = _DEPTH_CACHE[team] if _pff_unlocked() else _scrub_pff(_DEPTH_CACHE[team])
     return jsonify(_native({    # _native: camp players can carry NaN ids → invalid JSON otherwise
         "team": team, "name": m.get("team_name", team),
         "color": m.get("team_color") or "#334155", "logo": m.get("team_logo_espn", ""),
-        "qb": qb, "groups": _DEPTH_CACHE[team],
+        "qb": qb, "groups": groups,
     }))
 
 
@@ -764,7 +820,7 @@ def api_team_profile():
         "tendencies": _tendencies(team, season),
         "units": _units_display(team),
         "coaching": team_coaching(team),
-        "groups": _DEPTH_CACHE[team],
+        "groups": _DEPTH_CACHE[team] if _pff_unlocked() else _scrub_pff(_DEPTH_CACHE[team]),
         "injuries": team_injury_map(team),
     }))
 
