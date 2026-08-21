@@ -16,7 +16,7 @@ data_seed/
 
 # PFF subscriber data — LICENSED, personal use only. Never commit or redistribute
 # (the repo is on public GitHub). Rebuild locally with: python pff_import.py
-data/raw/pff/
+data/raw/pff/*
 !data/raw/pff/README.md
 data/processed/pff_grades.parquet
 
