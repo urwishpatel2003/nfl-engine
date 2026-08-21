@@ -1579,6 +1579,29 @@ if os.environ.get("REFRESH_DAILY") == "1":
     threading.Thread(target=_daily_scheduler, daemon=True).start()
 
 
+def _pff_boot_sync():
+    """Pull the PFF parquets from the private data repo on boot, so a redeploy alone
+    brings the site current — no manual refresh needed after a weekly grade push."""
+    import time as _t
+    _t.sleep(5)                                       # let gunicorn finish booting
+    try:
+        from ml.refresh import pull_pff
+        res = pull_pff()
+        if "parquet" in (res or ""):
+            global _PFF_COMPARE
+            _PFF_COMPARE = None
+            import ml.squad as _sq
+            _sq._PFF_CACHE = None
+            _DEPTH_CACHE.clear()
+        print(f"[boot] pff sync: {res}")
+    except Exception as e:
+        print(f"[boot] pff sync failed: {e}")
+
+
+if os.environ.get("PFF_DATA_REPO") and os.environ.get("PFF_DATA_TOKEN"):
+    threading.Thread(target=_pff_boot_sync, daemon=True).start()
+
+
 if __name__ == '__main__':
     # Local dev entrypoint. In production (Railway) gunicorn imports `app` directly
     # and this block never runs — but honor $PORT / $HOST if someone runs it directly.
