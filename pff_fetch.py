@@ -1,6 +1,12 @@
 """
 pff_fetch.py  —  pull PFF player grades for all 32 squads via your PFF+ session
 ================================================================================
+KNOWN LIMITATION (verified 2026-08-19): PFF's session JWT rotates every ~60s,
+so a copied cookie is usually stale by fetch time — you get rosters but only the
+publicly-teased grades (~1 player/team). The reliable path is the live
+browser-session fetch driven from Claude Code (see data/raw/pff/README.md);
+this script is kept for completeness / in case PFF's auth changes.
+
 pff.com's team-roster endpoint (the one behind /nfl/teams/<slug>/<id>/roster)
 returns every player's grade fields as JSON — but zeroed/"locked":"premium"
 unless the request carries a logged-in PFF+ session. Grades are subscriber-only,

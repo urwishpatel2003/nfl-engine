@@ -1,31 +1,28 @@
 # PFF grades (subscriber data — stays local)
 
-Everything in this folder except this README is **git-ignored**: PFF grades and
-your session cookie are licensed/private and must never be committed (the repo
-is public).
+Everything in this folder except this README is **git-ignored**: PFF grades are
+licensed subscriber data and must never be committed or redistributed (the repo
+is public). The output `data/processed/pff_grades.parquet` is ignored too.
 
-## Easiest path: fetch all squads at once (recommended)
+## Primary path: browser-session fetch (via Claude Code)
 
-1. Log into premium.pff.com in your browser.
-2. DevTools (F12) → Network → reload any pff.com page → click the first request
-   → Request Headers → copy the whole `Cookie:` header value.
-3. Paste it into `cookie.txt` in this folder (create the file).
-4. From the repo root:
+Ask Claude to "refresh my PFF grades". The flow:
+1. Claude opens pff.com in the in-app Browser pane.
+2. **You** log in there yourself (Claude never touches credentials).
+3. Claude pulls all 32 team rosters through the page's own authenticated
+   session (`/api/teams/{1-32}/roster?league=nfl` — every grade field, ~40s)
+   and rebuilds `pff_grades.parquet`.
 
-   ```
-   python pff_fetch.py
-   ```
+Why not a saved cookie? PFF's session JWT rotates every ~60 seconds, so any
+copied cookie is stale before a fetch finishes — `pff_fetch.py` (the cookie-file
+approach) survives only for the handful of publicly-teased grades. The live
+browser session refreshes its own token, which is what makes this work.
 
-One JSON call per team pulls every player's grade fields (offense, defense,
-pass, run, pass rush, coverage, run defense, pass/run block, receiving).
-If grades come back locked, the cookie expired — repeat steps 1–3.
-
-## Fallback: manual CSV exports
+## Fallback: manual CSV exports (no Claude needed)
 
 premium.pff.com → Premium Stats → Export CSV for Passing / Rushing / Receiving /
 Offense Blocking / Defense / Special Teams → drop the files here → run
 `python pff_import.py` (filenames don't matter; detection is column-based).
 
-Both paths write `data/processed/pff_grades.parquet` (also ignored). Restart
-the dashboard and every matched player on the Team Profile depth charts shows a
-gold **PFF** badge.
+Either way, restart the dashboard and matched players on the Team Profile depth
+charts show a gold **PFF** badge (PFF 0–100 scale) next to our rating.
