@@ -1470,6 +1470,11 @@ def clear_caches():
     _PROJ_CACHE.clear()
     _PBP_CACHE.clear()
     _SCHED_PRED.clear()
+    try:                                              # PFF grade lookups (squad player cards)
+        import ml.squad as _sq
+        _sq._PFF_CACHE = None
+    except Exception:
+        pass
     for modname, cachename in [("ml.adjust", "_ADJ_CACHE"), ("ml.backtest_spreads", "_BT_CACHE")]:
         try:
             import importlib

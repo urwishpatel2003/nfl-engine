@@ -23,6 +23,7 @@ Usage:
 
 import argparse
 import io
+import os
 import json
 import sys
 import time
@@ -186,6 +187,40 @@ def download_nflverse(season: int, log=_default_log) -> dict:
     return results
 
 
+def pull_pff(log=_default_log) -> str:
+    """Optionally sync the PFF grade parquets from the owner's PRIVATE GitHub data repo
+    (the transfer channel between the dev laptop and this server — the laptop cannot
+    reach the server directly). Enabled by two env vars:
+        PFF_DATA_REPO  = owner/repo          (e.g. urwishpatel2003/nfl-pff-data)
+        PFF_DATA_TOKEN = fine-grained PAT with contents:read on that repo only
+    Skips silently when unconfigured. Files are licensed subscriber data — the repo
+    must stay private."""
+    repo = os.environ.get("PFF_DATA_REPO")
+    tok = os.environ.get("PFF_DATA_TOKEN")
+    if not repo or not tok:
+        return "skipped (not configured)"
+    got = []
+    for fname in ("pff_grades.parquet", "pff_team_grades.parquet"):
+        try:
+            r = requests.get(f"https://api.github.com/repos/{repo}/contents/{fname}",
+                             headers={"Authorization": f"Bearer {tok}",
+                                      "Accept": "application/vnd.github.raw"}, timeout=60)
+            r.raise_for_status()
+            df = pd.read_parquet(io.BytesIO(r.content))     # validate before writing
+            _safe_to_parquet(df, PROC / fname)
+            got.append(f"{fname}:{len(df)}")
+        except Exception as e:
+            log(f"  pff {fname}: FAILED — {str(e)[:120]}", "WARN")
+    if got:
+        try:                                                # drop the squad-side grade cache
+            import ml.squad as _sq
+            _sq._PFF_CACHE = None
+        except Exception:
+            pass
+        log(f"  pff data synced ({', '.join(got)})")
+    return ", ".join(got) or "failed"
+
+
 # ── light rebuild (no network, idempotent) ───────────────────────────
 def rebuild_light(log=_default_log) -> dict:
     """Recompute situational_stats (from PBP) + team_styles (all PBP seasons)."""
@@ -247,6 +282,7 @@ def run(season: int, log=_default_log, skip_download: bool = False) -> dict:
     log(f"Refresh start — season {season}")
 
     files = {} if skip_download else download_nflverse(season, log)
+    files["pff_sync"] = {"status": pull_pff(log)}
     rebuild = rebuild_light(log)
 
     ok = (skip_download or any("rows" in v for v in files.values())) and \

@@ -1,4 +1,17 @@
-# PFF grades (subscriber data — stays local)
+# PFF grades (subscriber data)
+
+## Weekly in-season update (the whole ritual)
+
+After each week's games (Mon/Tue), tell Claude: **"refresh my PFF grades"**. What happens:
+1. Claude opens pff.com in the Browser pane — log in there if it asks (session usually persists).
+2. Claude pulls all 32 rosters + the team overview, runs `pff_assemble.py`, then `pff_publish.py`
+   which pushes the parquets to the **private** GitHub repo `nfl-pff-data` (the transfer channel).
+3. The live site pulls from that repo on its daily refresh (`ml.refresh.pull_pff`, enabled by the
+   `PFF_DATA_REPO` + `PFF_DATA_TOKEN` Railway variables) — or immediately via the site's ↻ Refresh tab.
+
+Nothing manual beyond the one sentence (and an occasional pff.com login). The transfer repo must
+stay PRIVATE — licensed data.
+
 
 Everything in this folder except this README is **git-ignored**: PFF grades are
 licensed subscriber data and must never be committed or redistributed (the repo
