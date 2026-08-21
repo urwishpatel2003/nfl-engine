@@ -79,6 +79,10 @@ def build(players: list) -> pd.DataFrame:
     })
     out["nm"] = out["player"].map(_norm)
     out["key"] = out["player"].map(_key)
+    # PFF's own qualifier (meets_snap_minimum, slimmed to "q" by the browser fetch) — grades
+    # on a handful of snaps are real but noisy; comparisons should filter on this.
+    qsrc = "q" if "q" in d.columns else "meets_snap_minimum"
+    out["qualifies"] = d[qsrc].fillna(False).astype(bool) if qsrc in d.columns else True
     for src, col in GRADE_FIELDS.items():
         if src in d.columns:
             v = pd.to_numeric(d[src], errors="coerce")

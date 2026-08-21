@@ -483,9 +483,9 @@ function parseHash(){
   return { view: parts[0]||'rankings', arg: parts[1], params };
 }
 const NAV = [
-  {id:'rankings', label:'Rankings', views:['rankings','epa','stats','team','trends','matchup'], items:[
+  {id:'rankings', label:'Rankings', views:['rankings','epa','stats','pff','team','trends','matchup'], items:[
     ['Power Rankings','#/rankings'],['Unit EPA Map','#/epa'],['League Stats','#/stats'],
-    ['Team Profile','#/team'],['Trends','#/trends'],['Matchup','#/matchup']]},
+    ['PFF vs Model','#/pff'],['Team Profile','#/team'],['Trends','#/trends'],['Matchup','#/matchup']]},
   {id:'betting', label:'Betting', views:['schedule','props','season'], items:[
     ['Schedule & Picks','#/schedule'],['Player Props','#/props'],['Season & Futures','#/season']]},
   {id:'fantasy', label:'Fantasy', views:['fantasy'], items:[
@@ -514,6 +514,7 @@ async function route(){
     if(view==='rankings')      await viewRankings();
     else if(view==='epa')      await viewEpaMap();
     else if(view==='stats')    await viewLeagueStats();
+    else if(view==='pff')      await viewPffCompare();
     else if(view==='schedule') await viewSchedule(params);
     else if(view==='team')     await viewTeam(arg || TEAMS[0].team);
     else if(view==='trends')   await viewTrends(arg || (RANKINGS[0]&&RANKINGS[0].team));
@@ -727,6 +728,56 @@ async function viewLeagueStats(){
         <i style="background:var(--good);opacity:.6"></i>green = top of the league ·
         <i style="background:var(--bad);opacity:.6"></i>red = bottom · defense EPA is allowed (negative = elite) · click a team for its profile</span></div>
     </div></div>`;
+}
+// ── VIEW: PFF vs Model (own tab; needs locally imported PFF data) ───
+function pffPlayerRow(p){
+  return `<div class="pl"><img src="${p.logo}" style="width:20px;height:20px;object-fit:contain" onerror="this.style.visibility='hidden'">
+    <div class="pn">${esc(p.name)} <span style="color:var(--muted);font-size:10.5px">${p.team} · ${p.pos}</span></div>
+    <div style="font-variant-numeric:tabular-nums;font-size:12px;white-space:nowrap">
+      <b>${p.ours}</b><span style="color:var(--muted)"> vs </span><b style="color:#b8a24a">${p.pff_pctl}</b>
+      <span style="color:var(--muted);font-size:10px"> (PFF ${p.pff})</span></div>
+    <span class="pffb" style="min-width:32px;text-align:center;color:${p.gap>0?'var(--good)':'var(--bad)'};background:${p.gap>0?'#22c55e1a':'#ef44441a'};border-color:${p.gap>0?'#22c55e44':'#ef444444'}">${p.gap>0?'+':''}${p.gap}</span></div>`;
+}
+async function viewPffCompare(){
+  app().innerHTML = `<div class="pad"><div class="loading">Comparing model vs PFF…</div></div>`;
+  const d = await j('/api/pff_compare');
+  if(!d.available){
+    app().innerHTML = `<div class="pad"><div class="card"><h2>PFF vs Model</h2>
+      <div class="note">No PFF data imported on this server. PFF grades are subscriber-only and stay on your local machine —
+        ask Claude to "refresh my PFF grades" (or run <code>pff_import.py</code> on CSV exports), then reload. See <code>data/raw/pff/README.md</code>.</div>
+    </div></div>`;
+    return;
+  }
+  const T=d.teams;
+  const teamRows=(T?T.rows:[]).map(t=>{
+    const dl=t.delta, c=dl>1?'var(--good)':dl<-1?'var(--bad)':'var(--muted)';
+    return `<tr onclick="go('#/team/${t.team}')" style="cursor:pointer">
+      <td style="text-align:right;font-weight:700">#${t.our_rank}</td>
+      <td><div class="tmc"><img src="${t.logo}" onerror="this.style.visibility='hidden'"><span class="ab">${esc(t.name)}</span></div></td>
+      <td>#${t.pff_rank}</td>
+      <td style="color:${c};font-weight:700">${dl>0?'+':''}${dl}</td>
+      <td>${t.pff_overall.toFixed(1)}</td>
+      <td style="color:var(--muted)">${t.record}</td></tr>`;
+  }).join('');
+  app().innerHTML = `
+    <div class="note"><b>PFF vs Model</b> — where our numbers and PFF's disagree. Player comparison is
+      <b>percentile vs percentile</b> (our 0–100 rating is a position percentile; PFF grades are converted to
+      percentiles within their position group — raw PFF grades shown in parentheses). Starters &amp; primary
+      backups with measured 2025 ratings only. Big gaps are the scouting questions worth digging into.</div>
+    ${T?`<div class="pad"><div class="card">
+      <h2>Team ranking: ours vs PFF <span>our 2026 roster-talent rank vs PFF's 2025 season grade rank — different vintages, so gaps ≈ how much we think the roster changed</span></h2>
+      <div class="lstat-wrap"><table class="lstat" style="min-width:520px">
+        <thead><tr><th>Ours</th><th class="tmh">Team</th><th>PFF '25</th><th>Δ</th><th>PFF grade</th><th>'25 record</th></tr></thead>
+        <tbody>${teamRows}</tbody></table></div>
+    </div></div>`:''}
+    <div class="pad"><div class="box" style="margin-top:0">
+      <div class="card"><h2>We're higher than PFF <span>model sees more than the grades did</span></h2>
+        ${d.model_high.map(pffPlayerRow).join('')}</div>
+      <div class="card"><h2>PFF is higher than us <span>the grades see more than our model</span></h2>
+        ${d.pff_high.map(pffPlayerRow).join('')}</div>
+    </div></div>
+    <div class="pad" style="padding-top:0"><div class="epa-leg"><span>${d.n_players} starters/backups compared ·
+      <span class="pffb" style="margin:0 2px">+20</span> = our percentile minus PFF's · green = we're higher, red = PFF is higher</span></div></div>`;
 }
 
 // ── VIEW: team profile ──────────────────────────────────────────────

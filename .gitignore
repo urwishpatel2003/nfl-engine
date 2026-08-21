@@ -19,6 +19,7 @@ data_seed/
 data/raw/pff/*
 !data/raw/pff/README.md
 data/processed/pff_grades.parquet
+data/processed/pff_team_grades.parquet
 
 # Claude Code local settings
 .claude/settings.local.json

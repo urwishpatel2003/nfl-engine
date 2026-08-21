@@ -169,6 +169,8 @@ def download_nflverse(season: int, log=_default_log) -> dict:
                 # consumed across ml/ (squad, fantasy, matchup_engine, …). Align the release
                 # schema to the columns consumers expect.
                 df = df.rename(columns={"full_name": "player_name", "gsis_id": "player_id"})
+                if "team" in df.columns:              # this release calls Arizona "AZ";
+                    df["team"] = df["team"].replace({"AZ": "ARI"})   # everything else here uses ARI
                 if "age" not in df.columns and "birth_date" in df.columns:
                     bd = pd.to_datetime(df["birth_date"], errors="coerce")
                     df["age"] = ((pd.Timestamp.now() - bd).dt.days / 365.25).round(1)

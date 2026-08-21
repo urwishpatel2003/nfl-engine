@@ -309,6 +309,78 @@ def api_league_stats():
 
 
 _DEPTH_CACHE = {}
+_PFF_COMPARE = None
+
+
+@app.route('/api/pff_compare')
+def api_pff_compare():
+    """Model-vs-PFF disagreement view. Needs locally imported PFF data (subscriber-only,
+    git-ignored, never on the hosted volume) — returns available:false without it.
+    Player comparison is percentile-vs-percentile: our rating IS a position percentile,
+    so PFF grades are converted to percentiles within their PFF position group; comparing
+    raw grade to percentile would manufacture fake disagreements."""
+    global _PFF_COMPARE
+    if _PFF_COMPARE is not None:
+        return jsonify(_PFF_COMPARE)
+    pg_path = PROC / "pff_grades.parquet"
+    if not pg_path.exists():
+        return jsonify({"available": False})
+    from ml.squad import squad_ratings, team_depth_chart, _norm, _key
+    d = pd.read_parquet(pg_path).dropna(subset=["pff_grade"])
+    # Only compare players PFF itself considers graded (meets_snap_minimum): a grade off a
+    # handful of snaps is noise, and it flooded the disagreement lists with depth players.
+    # Percentiles are computed within the qualifying population for the same reason.
+    if "qualifies" in d.columns:
+        d = d[d["qualifies"]]
+    d["pff_pctl"] = d.groupby("position")["pff_grade"].rank(pct=True) * 100
+    by_nt = {(r.nm, r.team): (float(r.pff_grade), float(r.pff_pctl)) for r in d.itertuples()}
+    uniq = d[~d.duplicated(["key", "team"], keep=False)]
+    by_key = {(r.key, r.team): (float(r.pff_grade), float(r.pff_pctl)) for r in uniq.itertuples()}
+
+    meta = team_meta()
+    ranks, _ = squad_ratings()
+    rows = []
+    for team in ranks["team"]:
+        if team not in _DEPTH_CACHE:
+            _DEPTH_CACHE[team] = team_depth_chart(team)
+        for g in _DEPTH_CACHE[team]:
+            for p in g["players"]:
+                # measured ratings only (projections aren't an opinion worth comparing),
+                # top-2 depth (starters/primary backups) to keep the list meaningful.
+                if p.get("source") != "measured" or p.get("pff") is None:
+                    continue
+                if p.get("rank") and p["rank"] > 2:
+                    continue
+                hit = by_nt.get((_norm(p["name"]), team)) or by_key.get((_key(p["name"]), team))
+                if not hit:
+                    continue
+                m = meta.get(team, {})
+                rows.append({"name": p["name"], "team": team, "pos": g["pos"],
+                             "ours": p["rating"], "pff": round(hit[0], 1), "pff_pctl": int(round(hit[1])),
+                             "gap": int(round(p["rating"] - hit[1])),
+                             "logo": m.get("team_logo_espn", "")})
+    rows.sort(key=lambda x: -x["gap"])
+    payload = {"available": True, "n_players": len(rows),
+               "model_high": rows[:15], "pff_high": rows[::-1][:15]}
+
+    tg_path = PROC / "pff_team_grades.parquet"
+    if tg_path.exists():
+        tg = pd.read_parquet(tg_path)
+        our_rank = dict(zip(ranks["team"], ranks["rank"]))
+        teams = []
+        for r in tg.itertuples():
+            m = meta.get(r.team, {})
+            orank = int(our_rank.get(r.team, 0))
+            teams.append({"team": r.team, "name": m.get("team_name", r.team),
+                          "logo": m.get("team_logo_espn", ""), "color": m.get("team_color") or "#334155",
+                          "our_rank": orank, "pff_rank": int(r.pff_rank),
+                          "delta": int(r.pff_rank) - orank,      # + = we're higher on them than PFF
+                          "pff_overall": float(r.grades_overall),
+                          "record": f"{int(r.wins)}-{int(r.losses)}" + (f"-{int(r.ties)}" if r.ties else "")})
+        teams.sort(key=lambda x: x["our_rank"])
+        payload["teams"] = {"season": 2025, "rows": teams}
+    _PFF_COMPARE = payload
+    return jsonify(_native(payload))
 
 
 @app.route('/api/team')
@@ -1355,8 +1427,8 @@ _REFRESH_LOCK = threading.Lock()
 
 def clear_caches():
     """Drop every in-process cache so freshly refreshed data is served immediately."""
-    global _TEAM_META, _QB1, _SQUAD, _STYLES, _INJ, _SCHED
-    _TEAM_META = _QB1 = _SQUAD = _STYLES = _INJ = _SCHED = None
+    global _TEAM_META, _QB1, _SQUAD, _STYLES, _INJ, _SCHED, _PFF_COMPARE
+    _TEAM_META = _QB1 = _SQUAD = _STYLES = _INJ = _SCHED = _PFF_COMPARE = None
     _DEPTH_CACHE.clear()
     _PROJ_CACHE.clear()
     _PBP_CACHE.clear()
