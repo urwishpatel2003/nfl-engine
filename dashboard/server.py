@@ -1577,6 +1577,8 @@ def _daily_scheduler():
 
 if os.environ.get("REFRESH_DAILY") == "1":
     threading.Thread(target=_daily_scheduler, daemon=True).start()
+    print(f"[boot] daily refresh scheduled: {int(os.environ.get('REFRESH_HOUR', 8)):02d}:00 UTC, "
+          f"season {os.environ.get('REFRESH_SEASON', 2026)}")
 
 
 def _pff_boot_sync():
