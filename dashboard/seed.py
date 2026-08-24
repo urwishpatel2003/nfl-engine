@@ -61,6 +61,10 @@ def main():
     summary = ("first-boot copied " + str(copied) if volume_empty
                else f"synced {synced} curated files, filled {copied} missing")
     print(f"seed: {summary} -> {DATA}")
+    # PFF grades ship via .railwayignore (git-ignored, deploy-carried) — log their state so
+    # the boot logs prove whether the licensed overlay made it onto the volume.
+    pff = DATA / "processed" / "pff_grades.parquet"
+    print(f"seed: pff grades {'present' if pff.exists() else 'absent'} on volume")
 
 
 if __name__ == "__main__":

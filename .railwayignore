@@ -1,0 +1,29 @@
+# Railway upload filter. Mirrors .gitignore EXCEPT: the two processed PFF parquets
+# ship with the deploy (they're git-ignored to keep licensed data off public GitHub,
+# but the Railway image is private — seed.py syncs them onto the volume every boot,
+# which is how the live site gets weekly grade updates without any manual upload).
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+data/processed/last_refresh.json
+data_seed/
+
+.claude/
+
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+
+# raw PFF inputs stay local (cookies/CSV exports) — only the processed tables ship
+data/raw/pff/
+
+# explicit un-ignore (covers CLI versions that also apply .gitignore)
+!data/processed/pff_grades.parquet
+!data/processed/pff_team_grades.parquet
