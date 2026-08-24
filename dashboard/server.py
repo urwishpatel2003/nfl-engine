@@ -312,6 +312,101 @@ _DEPTH_CACHE = {}
 _PFF_COMPARE = None
 
 
+# ── PFF unit reports (per-team drilldowns from the preseason facet tables) ──────
+# (parquet file, unit label, sort/grade column, volume column that must be > 0,
+#  then the curated analyst columns as (col, short label, decimals)).
+_PFF_UNIT_SPEC = [
+    ("passing", "pff_preseason_passing", "Passing", "grades_pass", "dropbacks", [
+        ("grades_pass", "Grade", 1), ("dropbacks", "DB", 0), ("completions", "Cmp", 0),
+        ("attempts", "Att", 0), ("yards", "Yds", 0), ("touchdowns", "TD", 0),
+        ("interceptions", "INT", 0), ("ypa", "YPA", 1), ("accuracy_percent", "Acc%", 1),
+        ("btt_rate", "BTT%", 1), ("twp_rate", "TWP%", 1), ("avg_time_to_throw", "TTT", 2),
+        ("qb_rating", "Rate", 1)]),
+    ("pressure", "pff_preseason_qb_pressure", "QB vs pressure", "grades_pass", "pressure_dropbacks", [
+        ("grades_pass", "Grade", 1), ("pressure_dropbacks", "PrsDB", 0),
+        ("pressure_completion_percent", "PrsCmp%", 1), ("pressure_qb_rating", "PrsRate", 1),
+        ("pressure_twp_rate", "PrsTWP%", 1), ("pressure_to_sack_rate", "Prs→Sk%", 1),
+        ("no_pressure_qb_rating", "CleanRate", 1), ("blitz_qb_rating", "BlitzRate", 1)]),
+    ("rushing", "pff_preseason_rushing", "Rushing", "grades_run", "attempts", [
+        ("grades_run", "Grade", 1), ("attempts", "Att", 0), ("yards", "Yds", 0),
+        ("ypa", "YPA", 1), ("touchdowns", "TD", 0), ("yco_attempt", "YAC/A", 1),
+        ("avoided_tackles", "MTF", 0), ("elusive_rating", "Elu", 1),
+        ("explosive", "Expl", 0), ("fumbles", "Fum", 0)]),
+    ("receiving", "pff_preseason_receiving", "Receiving", "grades_pass_route", "targets", [
+        ("grades_pass_route", "Grade", 1), ("targets", "Tgt", 0), ("receptions", "Rec", 0),
+        ("yards", "Yds", 0), ("touchdowns", "TD", 0), ("yprr", "YPRR", 2),
+        ("avg_depth_of_target", "ADOT", 1), ("drops", "Drop", 0),
+        ("contested_catch_rate", "Cont%", 1), ("targeted_qb_rating", "TgtRate", 1)]),
+    ("pass_block", "pff_preseason_pass_blocking", "Pass blocking", "grades_pass_block", "snap_counts_pass_block", [
+        ("grades_pass_block", "Grade", 1), ("snap_counts_pass_block", "Snaps", 0),
+        ("pbe", "PBE", 1), ("pressures_allowed", "Prs", 0), ("sacks_allowed", "Sk", 0),
+        ("hits_allowed", "Hit", 0), ("hurries_allowed", "Hur", 0),
+        ("true_pass_set_pbe", "TPS PBE", 1), ("penalties", "Pen", 0)]),
+    ("run_block", "pff_preseason_run_blocking", "Run blocking", "grades_run_block", "snap_counts_run_block", [
+        ("grades_run_block", "Grade", 1), ("snap_counts_run_block", "Snaps", 0),
+        ("gap_grades_run_block", "Gap", 1), ("zone_grades_run_block", "Zone", 1),
+        ("penalties", "Pen", 0)]),
+    ("pass_rush", "pff_preseason_pass_rush", "Pass rush", "grades_pass_rush_defense", "snap_counts_pass_rush", [
+        ("grades_pass_rush_defense", "Grade", 1), ("snap_counts_pass_rush", "Snaps", 0),
+        ("total_pressures", "Prs", 0), ("sacks", "Sk", 0), ("hits", "Hit", 0),
+        ("hurries", "Hur", 0), ("pass_rush_win_rate", "Win%", 1), ("prp", "PRP", 1),
+        ("batted_passes", "Bat", 0)]),
+    ("coverage", "pff_preseason_coverage", "Coverage", "grades_coverage_defense", "snap_counts_coverage", [
+        ("grades_coverage_defense", "Grade", 1), ("snap_counts_coverage", "Snaps", 0),
+        ("targets", "Tgt", 0), ("receptions", "Rec", 0), ("catch_rate", "Cat%", 1),
+        ("yards", "Yds", 0), ("yards_per_coverage_snap", "Y/CS", 2),
+        ("qb_rating_against", "RateAg", 1), ("pass_break_ups", "PBU", 0),
+        ("interceptions", "INT", 0), ("missed_tackles", "MT", 0), ("stops", "Stop", 0)]),
+    ("run_def", "pff_preseason_defense", "Run defense", "grades_run_defense", "player_game_count", [
+        ("grades_run_defense", "Grade", 1), ("grades_tackle", "Tackling", 1),
+        ("tackles", "Tkl", 0), ("assists", "Ast", 0), ("stops", "Stop", 0),
+        ("missed_tackles", "MT", 0), ("forced_fumbles", "FF", 0),
+        ("grades_defense", "Def grade", 1)]),
+]
+_PFF_UNITS_CACHE = {}
+
+
+@app.route('/api/pff_units')
+def api_pff_units():
+    """Per-team PFF unit reports (the premium 'Team Reports' drilldowns): every unit's
+    player table with the stats an analyst actually reads. Built from the league-wide
+    preseason facet parquets; absent files → available:false."""
+    team = (request.args.get('team') or '').upper()
+    if not team:
+        return jsonify({"error": "team required"}), 400
+    if team in _PFF_UNITS_CACHE:
+        return jsonify(_PFF_UNITS_CACHE[team])
+    units, season_tag = [], "2026 preseason"
+    for key, fname, label, grade_col, vol_col, cols in _PFF_UNIT_SPEC:
+        p = PROC / f"{fname}.parquet"
+        if not p.exists():
+            continue
+        d = pd.read_parquet(p)
+        if "team" not in d.columns or grade_col not in d.columns:
+            continue
+        d = d[(d["team"] == team) & d[grade_col].notna()]
+        if vol_col in d.columns:
+            d = d[pd.to_numeric(d[vol_col], errors="coerce").fillna(0) > 0]
+        if d.empty:
+            continue
+        cols_avail = [(c, lbl, dec) for c, lbl, dec in cols if c in d.columns]
+        d = d.sort_values(grade_col, ascending=False)
+        rows = []
+        for r in d.itertuples():
+            row = {"player": r.player, "position": getattr(r, "position", ""),
+                   "games": safe_json(getattr(r, "player_game_count", None))}
+            for c, _, dec in cols_avail:
+                v = getattr(r, c, None)
+                row[c] = round(float(v), dec) if v is not None and pd.notna(v) else None
+            rows.append(row)
+        units.append({"key": key, "label": label,
+                      "columns": [{"k": c, "label": lbl, "dec": dec} for c, lbl, dec in cols_avail],
+                      "grade_col": grade_col, "rows": rows})
+    payload = {"available": bool(units), "team": team, "season": season_tag, "units": units}
+    _PFF_UNITS_CACHE[team] = payload
+    return jsonify(_native(payload))
+
+
 @app.route('/api/pff_upload', methods=['POST'])
 def api_pff_upload():
     """Owner-only upload of the locally built PFF parquets to the server volume.
@@ -341,6 +436,7 @@ def api_pff_upload():
         return jsonify({"error": "no files provided (fields: grades, team_grades)"}), 400
     _PFF_COMPARE = None                                # rebuilt on next request
     _DEPTH_CACHE.clear()
+    _PFF_UNITS_CACHE.clear()
     try:
         import ml.squad as _sq
         _sq._PFF_CACHE = _sq._PFF_PRE_CACHE = None
@@ -1496,6 +1592,7 @@ def clear_caches():
     _PROJ_CACHE.clear()
     _PBP_CACHE.clear()
     _SCHED_PRED.clear()
+    _PFF_UNITS_CACHE.clear()
     try:                                              # PFF grade lookups (squad player cards)
         import ml.squad as _sq
         _sq._PFF_CACHE = _sq._PFF_PRE_CACHE = None
@@ -1621,6 +1718,7 @@ def _pff_boot_sync():
             import ml.squad as _sq
             _sq._PFF_CACHE = _sq._PFF_PRE_CACHE = None
             _DEPTH_CACHE.clear()
+            _PFF_UNITS_CACHE.clear()
         print(f"[boot] pff sync: {res}")
     except Exception as e:
         print(f"[boot] pff sync failed: {e}")

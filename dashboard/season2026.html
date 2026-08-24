@@ -939,8 +939,54 @@ async function viewTeam(team){
         ${d.groups.some(g=>g.players.some(p=>p.pff!=null))?'<span class="pffb" style="margin:0 2px">70.0</span> = PFF grade (0–100, PFF scale).':''}
         ${d.groups.some(g=>g.players.some(p=>p.pre!=null))?'<span class="preb" style="margin:0 2px">P74</span> = PFF 2026 preseason grade; rookie/depth ratings blend preseason play with their prior.':''}${INJ_NOTE}</div>
     </div>
+    <div id="pffUnits"></div>
   </div>`;
   document.getElementById('teamPick').addEventListener('change', e=>go('#/team/'+e.target.value));
+  loadPffUnits(d.team);
+}
+
+// ── PFF unit reports on the team profile ────────────────────────────
+let PFF_UNITS=null, PFF_UNIT_SEL=null;
+function gradeColor(v){ return v==null?'var(--muted)':v>=90?'#38c172':v>=75?'#7ac142':v>=60?'#b8a24a':v>=45?'#e0883a':'#e05252'; }
+function pffUnitTable(){
+  const u=(PFF_UNITS.units||[]).find(x=>x.key===PFF_UNIT_SEL);
+  if(!u) return '<div class="loading">No data for this unit.</div>';
+  const head=`<tr><th class="tmh">Player</th><th>Pos</th><th>G</th>${u.columns.map(c=>`<th>${c.label}</th>`).join('')}</tr>`;
+  const body=u.rows.map(r=>{
+    const cells=u.columns.map(c=>{
+      const v=r[c.k];
+      const isGrade=c.k.startsWith('grades_')||['pbe','true_pass_set_pbe','gap_grades_run_block','zone_grades_run_block'].includes(c.k);
+      const st=isGrade&&v!=null?` style="color:${gradeColor(v)};font-weight:700"`:'';
+      return `<td${st}>${v==null?'—':v.toFixed(c.dec)}</td>`;
+    }).join('');
+    return `<tr><td class="tmh" style="text-align:left;font-weight:600;white-space:nowrap">${esc(r.player)}</td>
+      <td style="color:var(--muted)">${esc(r.position||'')}</td><td style="color:var(--muted)">${r.games??'—'}</td>${cells}</tr>`;
+  }).join('');
+  return `<div class="lstat-wrap"><table class="lstat" style="min-width:560px"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+}
+function setPffUnit(key){
+  PFF_UNIT_SEL=key;
+  document.querySelectorAll('#pffUnitSeg button').forEach(b=>b.classList.toggle('on',b.dataset.u===key));
+  const host=document.getElementById('pffUnitHost'); if(host) host.innerHTML=pffUnitTable();
+}
+async function loadPffUnits(team){
+  const host=document.getElementById('pffUnits'); if(!host) return;
+  try{
+    const d=await j(`/api/pff_units?team=${team}`);
+    if(!d.available||!d.units.length) return;                  // no PFF data on this server → no card
+    PFF_UNITS=d; PFF_UNIT_SEL=d.units[0].key;
+    host.innerHTML=`<div class="card"><h2 style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <span>PFF unit reports <span style="color:var(--muted);font-weight:400;font-size:12px">${esc(d.season)} · per-player, sorted by grade</span></span>
+      </h2>
+      <div class="segbar" id="pffUnitSeg" style="margin-bottom:12px;flex-wrap:wrap">
+        ${d.units.map(u=>`<button class="${u.key===PFF_UNIT_SEL?'on':''}" data-u="${u.key}" onclick="setPffUnit('${u.key}')">${u.label}</button>`).join('')}
+      </div>
+      <div id="pffUnitHost">${pffUnitTable()}</div>
+      <div class="epa-leg" style="margin-top:8px"><span>Grades are PFF 0–100 (colored). BTT/TWP = big-time throw / turnover-worthy play rates ·
+        PBE = pass-block efficiency · TPS = true pass sets · PRP = pass-rush productivity · Y/CS = yards per coverage snap ·
+        MTF = missed tackles forced · preseason sample — small snap counts, read accordingly</span></div>
+    </div>`;
+  }catch(e){ /* leave the section empty */ }
 }
 
 // ── VIEW: trends ────────────────────────────────────────────────────
