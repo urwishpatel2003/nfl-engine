@@ -4,13 +4,15 @@
 
 After each week's games (Mon/Tue), tell Claude: **"refresh my PFF grades"**. What happens:
 1. Claude opens pff.com in the Browser pane — log in there if it asks (session usually persists).
-2. Claude pulls all 32 rosters + the team overview, runs `pff_assemble.py`, then `pff_publish.py`
-   which pushes the parquets to the **private** GitHub repo `nfl-pff-data` (the transfer channel).
-3. The live site pulls from that repo on its daily refresh (`ml.refresh.pull_pff`, enabled by the
-   `PFF_DATA_REPO` + `PFF_DATA_TOKEN` Railway variables) — or immediately via the site's ↻ Refresh tab.
+2. Claude pulls all 32 rosters + the team overview and runs `pff_assemble.py` → the two parquets
+   in `data/processed/`.
+3. Claude runs `railway up`. The parquets ship inside the deploy (`.railwayignore` lets them
+   through while `.gitignore` keeps them off public GitHub), and `dashboard/seed.py` syncs them
+   onto the server volume at boot — the site is current the moment the deploy finishes.
 
-Nothing manual beyond the one sentence (and an occasional pff.com login). The transfer repo must
-stay PRIVATE — licensed data.
+Nothing manual beyond the one sentence (and an occasional pff.com login). No tokens involved.
+(An alternative env-gated channel via a private GitHub repo exists in `ml.refresh.pull_pff` /
+`pff_publish.py` but is NOT part of the ritual and needs no configuration.)
 
 
 Everything in this folder except this README is **git-ignored**: PFF grades are
