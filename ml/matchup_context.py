@@ -207,6 +207,80 @@ def _offense_vs_defense(off_t, def_t, tab) -> tuple:
     return round(b, 2), notes
 
 
+# ── coverage-scheme clash (PFF man/zone charting) ───────────────────
+# "Does this passing attack beat man or zone?" vs "how much man will they see?"
+# DEF side: each team's man-coverage rate + snap-weighted man/zone coverage grades from
+# per-defender PFF charting. OFF side: the CURRENT roster's top route-runners (players are
+# mapped to their 2026 team via the PFF grades table, so a traded WR carries his splits),
+# route-weighted man vs zone route grades. The clash: a man-heavy defense amplifies the
+# offense's man-vs-zone differential. Small bounded nudge — charting is one season and
+# receiver-centric (it proxies the QB+receivers jointly, which is what actually meets
+# the coverage).
+_COV_SCHEME = None
+_COV_MIN_ROUTES = 50        # receiver needs real 2025 route volume to inform the split
+_COV_PTS_SCALE = 0.45       # pts per (man-rate deviation × grade differential)
+_COV_PTS_CAP = 1.5
+
+
+def _coverage_scheme() -> dict:
+    global _COV_SCHEME
+    if _COV_SCHEME is not None:
+        return _COV_SCHEME
+    pr, pdf, pg = (PROC / "pff_scheme_receiving.parquet", PROC / "pff_scheme_defense.parquet",
+                   PROC / "pff_grades.parquet")
+    if not (pr.exists() and pdf.exists()):
+        _COV_SCHEME = {}
+        return _COV_SCHEME
+    d = pd.read_parquet(pdf)
+    dd = d.groupby("team").agg(man=("man_snap_counts_coverage", "sum"),
+                               zone=("zone_snap_counts_coverage", "sum")).astype(float)
+    dd["man_rate"] = dd["man"] / (dd["man"] + dd["zone"]).clip(lower=1)
+
+    def _wavg(sub, grade, wt):
+        s = sub.dropna(subset=[grade])
+        w = s[wt].clip(lower=0)
+        return float((s[grade] * w).sum() / w.sum()) if w.sum() > 0 else None
+
+    dd["man_grade"] = [ _wavg(d[d.team == t], "man_grades_coverage_defense", "man_snap_counts_coverage") for t in dd.index]
+    dd["zone_grade"] = [_wavg(d[d.team == t], "zone_grades_coverage_defense", "zone_snap_counts_coverage") for t in dd.index]
+
+    r = pd.read_parquet(pr)
+    r["routes_total"] = r["man_routes"].fillna(0) + r["zone_routes"].fillna(0)
+    r = r[r["routes_total"] >= _COV_MIN_ROUTES]
+    if pg.exists():                                   # map to CURRENT team (grades table is live-roster)
+        cur = pd.read_parquet(pg)[["pff_id", "team"]].dropna().drop_duplicates("pff_id")
+        r = r.merge(cur.rename(columns={"pff_id": "player_id", "team": "cur_team"}),
+                    on="player_id", how="left")
+        r["team"] = r["cur_team"].fillna(r["team"])
+    off = {}
+    for t, sub in r.groupby("team"):
+        top = sub.nlargest(5, "routes_total")
+        man = _wavg(top, "man_grades_pass_route", "man_routes")
+        zone = _wavg(top, "zone_grades_pass_route", "zone_routes")
+        if man is not None and zone is not None:
+            off[t] = {"man": man, "zone": zone}
+    _COV_SCHEME = {"def": dd.to_dict("index"), "off": off,
+                   "lg_man_rate": float(dd["man_rate"].mean())}
+    return _COV_SCHEME
+
+
+def _coverage_clash(off_team: str, def_team: str):
+    """(points for the offense, note or None) for this passing attack vs that coverage mix."""
+    cs = _coverage_scheme()
+    if not cs or off_team not in cs["off"] or def_team not in cs["def"]:
+        return 0.0, None
+    o, dfn = cs["off"][off_team], cs["def"][def_team]
+    dev = float(dfn["man_rate"]) - cs["lg_man_rate"]          # + = man-heavy opponent
+    diff = o["man"] - o["zone"]                               # + = receivers better vs man
+    pts = max(-_COV_PTS_CAP, min(_COV_PTS_CAP, dev * diff * _COV_PTS_SCALE * 10))
+    if abs(pts) < 0.3:
+        return round(pts, 1), None
+    note = (f"{def_team} plays man {dfn['man_rate']:.0%} ({'above' if dev > 0 else 'below'} the "
+            f"{cs['lg_man_rate']:.0%} league norm) — {off_team}'s top receivers grade "
+            f"{diff:+.1f} vs man relative to zone ({pts:+.1f} pts)")
+    return round(pts, 1), note
+
+
 def scheme_matchup(home: str, away: str, season=None) -> dict:
     """Per-team scheme-mismatch points + notes. Each side's scheme follows its coordinator: a
     new OC/DC borrows his prior team's style (fingerprint), and unknown new hires are regressed."""
@@ -217,6 +291,13 @@ def scheme_matchup(home: str, away: str, season=None) -> dict:
     tab = _scheme_tables(season) if season is not None else {"label": {}}
     h_b, h_notes = _offense_vs_defense(home, away, tab)   # home offense vs away defense
     a_b, a_notes = _offense_vs_defense(away, home, tab)   # away offense vs home defense
+    cov_h, note_h = _coverage_clash(home, away)           # PFF man/zone charting clash
+    cov_a, note_a = _coverage_clash(away, home)
+    h_b, a_b = round(h_b + cov_h, 1), round(a_b + cov_a, 1)
+    if note_h:
+        h_notes.append(note_h)
+    if note_a:
+        a_notes.append(note_a)
     hs, aws = _style_row(home, season), _style_row(away, season)
     return {
         "home_delta": h_b, "away_delta": a_b,
@@ -232,6 +313,6 @@ def scheme_matchup(home: str, away: str, season=None) -> dict:
 
 
 def clear():
-    global _INJ, _STY, _SCHEME, _RATINGS
-    _INJ = _STY = _SCHEME = None
+    global _INJ, _STY, _SCHEME, _RATINGS, _COV_SCHEME
+    _INJ = _STY = _SCHEME = _COV_SCHEME = None
     _RATINGS = {}
