@@ -499,6 +499,44 @@ def _coaching():
     return c.groupby("team")["coaching_score"].mean()
 
 
+# ── PFF overlay on the unit scores ──────────────────────────────────
+# PFF grades are an INDEPENDENT film-based rater of the same players our stats-based
+# signals rate. Blending a second honest rater improves the estimate — especially where
+# our signals are weakest (coverage/safeties are rated by target outcomes, which punishes
+# players QBs avoid). Roster-based like everything else: each team's PFF unit score is
+# aggregated from the players currently on its roster (the grade table's team column came
+# from live camp rosters, so grades travel with the player). Weight is conservative —
+# our composite stays the primary signal — and the overlay is skipped entirely when no
+# PFF data is present (fresh clones / no subscription).
+PFF_UNIT_W = 0.30
+# unit → (PFF positions, grade column, top-N of roster to average)
+_PFF_UNIT_AGG = {
+    "qb":       ({"QB"}, "grades_offense", 1),
+    "skill":    ({"WR", "TE", "HB", "FB"}, "grades_offense", 5),
+    "ol":       ({"T", "G", "C"}, "grades_offense", 5),
+    "def_team": ({"DI", "ED", "LB", "CB", "S"}, "grades_defense", 11),
+    "rush":     ({"DI", "ED", "LB"}, "grades_pass_rush_defense", 4),
+    "cover":    ({"CB", "S", "LB"}, "grades_coverage_defense", 5),
+}
+
+
+def _pff_unit_scores(teams) -> pd.DataFrame | None:
+    """Per-team PFF unit grades from current rosters, or None when no PFF data exists."""
+    p = PROC / "pff_grades.parquet"
+    if not p.exists():
+        return None
+    d = pd.read_parquet(p)
+    if "qualifies" in d.columns:                    # PFF's own snap minimum — kills noise grades
+        d = d[d["qualifies"]]
+    out = pd.DataFrame(index=teams)
+    for unit, (poss, col, topn) in _PFF_UNIT_AGG.items():
+        if col not in d.columns:
+            continue
+        sub = d[d["position"].isin(poss)].dropna(subset=[col])
+        out[unit] = sub.groupby("team")[col].apply(lambda s: s.nlargest(topn).mean())
+    return out
+
+
 # ── assemble ────────────────────────────────────────────────────────
 def squad_ratings(breakdown: bool = False) -> pd.DataFrame:
     roster = _team_rosters_2026()
@@ -517,6 +555,15 @@ def squad_ratings(breakdown: bool = False) -> pd.DataFrame:
     for c in g.columns:
         g[c] = g[c].fillna(g[c].median())
     z = g.apply(_z)
+
+    pff = _pff_unit_scores(teams)
+    if pff is not None:
+        for unit in _PFF_UNIT_AGG:
+            if unit in pff.columns and pff[unit].notna().sum() >= 24:   # need real league coverage
+                zp = _z(pff[unit].fillna(pff[unit].median()))
+                z[unit] = (1 - PFF_UNIT_W) * z[unit] + PFF_UNIT_W * zp
+                g[unit] = z[unit]        # breakdown consumers (matchup engine z-units, the
+                                         # dashboard off/def split) inherit the blended signal
 
     z["blend"] = sum(z[c] * w for c, w in WEIGHTS.items())
     z["rating"] = (z["blend"] * RATING_SCALE).round(1)
