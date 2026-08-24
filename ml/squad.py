@@ -719,6 +719,30 @@ def _pff_grades():
     return _PFF_CACHE
 
 
+_PFF_PRE_CACHE = None
+
+
+def _pff_preseason():
+    """Current-season PFF PRESEASON grades (pff_preseason_players.parquet), as
+    (grade, position-percentile) lookups by nm+team and team-scoped name key.
+    The percentile is computed within PFF position group across all preseason-graded
+    players — it's the 'observed preseason play' signal used for players who have no
+    regular-season history."""
+    global _PFF_PRE_CACHE
+    if _PFF_PRE_CACHE is None:
+        p = PROC / "pff_preseason_players.parquet"
+        if p.exists():
+            d = pd.read_parquet(p).dropna(subset=["pre_grade"])
+            d["pctl"] = d.groupby("position")["pre_grade"].rank(pct=True) * 100
+            by_nt = {(r.nm, r.team): (float(r.pre_grade), float(r.pctl)) for r in d.itertuples()}
+            uniq = d[~d.duplicated(["key", "team"], keep=False)]
+            by_key = {(r.key, r.team): (float(r.pre_grade), float(r.pctl)) for r in uniq.itertuples()}
+            _PFF_PRE_CACHE = (by_nt, by_key)
+        else:
+            _PFF_PRE_CACHE = (None, None)
+    return _PFF_PRE_CACHE
+
+
 def team_depth_chart(team: str) -> list:
     """Every depth-chart player gets a 0-100 rating via a waterfall, tagged with its source:
        measured (2025 production) → team (O-line grade) → rookie (draft slot) → proj (depth)."""
@@ -797,6 +821,7 @@ def team_depth_chart(team: str) -> list:
             continue
         players = []
         pff_nt, pff_key = _pff_grades()
+        pre_nt, pre_key = _pff_preseason()
         for r in sub.itertuples():
             rt, src = rate(grp, r.gsis_id, r.player_name, r.pos_rank)
             pg = None
@@ -805,9 +830,21 @@ def team_depth_chart(team: str) -> list:
                 if pg is None or pd.isna(pg):
                     pg = pff_key.get((_key(r.player_name), team))
                 pg = round(float(pg), 1) if pg is not None and pd.notna(pg) else None
+            pre = None
+            if pre_nt is not None:
+                pre = pre_nt.get((_norm(r.player_name), team)) or pre_key.get((_key(r.player_name), team))
+            if pre is not None:
+                # Players with NO regular-season history (rookies rated by draft slot, depth
+                # players rated by roster position) get their first OBSERVED signal from
+                # preseason play: blend it 50/50 with the prior. Measured players keep their
+                # production rating untouched — one camp game doesn't outrank a real season.
+                if src in ("rookie", "proj"):
+                    rt = int(round(0.5 * rt + 0.5 * pre[1]))
+                    src = "preseason"
             players.append({"name": r.player_name, "slot": r.pos_abb, "gsis": r.gsis_id,
                             "rank": int(r.pos_rank) if pd.notna(r.pos_rank) else None,
-                            "rating": rt, "source": src, "pff": pg})
+                            "rating": rt, "source": src, "pff": pg,
+                            "pre": round(pre[0], 1) if pre is not None else None})
         groups.append({"pos": grp, "label": POS_LABEL.get(grp, grp), "players": players})
     return groups
 

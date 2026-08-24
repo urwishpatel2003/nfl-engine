@@ -218,6 +218,8 @@
   .pl .st.mini{padding:0 5px;font-size:9px;line-height:15px;flex:0 0 auto}
   .pl .pffb{flex:0 0 auto;font-size:9.5px;font-weight:700;font-variant-numeric:tabular-nums;color:#b8a24a;
             background:#b8a24a1a;border:1px solid #b8a24a44;border-radius:4px;padding:0 4px;line-height:14px}
+  .pl .preb{flex:0 0 auto;font-size:9.5px;font-weight:700;font-variant-numeric:tabular-nums;color:#4ac0b8;
+            background:#4ac0b81a;border:1px solid #4ac0b844;border-radius:4px;padding:0 4px;line-height:14px}
 
   /* matchup */
   .selrow{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;margin-bottom:14px}
@@ -808,6 +810,21 @@ async function viewPffCompare(){
       <div class="card"><h2>PFF is higher than us <span>the grades see more than our model</span></h2>
         ${d.pff_high.map(pffPlayerRow).join('')}</div>
     </div></div>
+    ${d.preseason_teams?`<div class="pad"><div class="box" style="margin-top:0">
+      <div class="card"><h2>PFF preseason team grades <span>2026 · exhibition play, mostly depth players — not blended into rankings</span></h2>
+        <div class="lstat-wrap"><table class="lstat" style="min-width:420px">
+          <thead><tr><th>#</th><th class="tmh">Team</th><th>Overall</th><th>Off</th><th>Def</th><th>Record</th></tr></thead>
+          <tbody>${d.preseason_teams.map(t=>`<tr onclick="go('#/team/${t.team}')" style="cursor:pointer">
+            <td style="font-weight:700">${t.pre_rank}</td>
+            <td><div class="tmc"><img src="${t.logo}" onerror="this.style.visibility='hidden'"><span class="ab">${esc(t.name)}</span></div></td>
+            <td>${t.overall.toFixed(1)}</td><td>${t.off.toFixed(1)}</td><td>${t.def.toFixed(1)}</td>
+            <td style="color:var(--muted)">${t.record}</td></tr>`).join('')}</tbody></table></div></div>
+      <div class="card"><h2>Preseason standouts <span>top PFF preseason grades (2+ games) — camp names to know</span></h2>
+        ${(d.preseason_top||[]).map(p=>`<div class="pl">
+          <img src="${p.logo}" style="width:20px;height:20px;object-fit:contain" onerror="this.style.visibility='hidden'">
+          <div class="pn">${esc(p.name)} <span style="color:var(--muted);font-size:10.5px">${p.team} · ${p.pos}${p.games?` · ${p.games} g`:''}</span></div>
+          <span class="preb" style="font-size:11px">${p.grade.toFixed(1)}</span></div>`).join('')}</div>
+    </div></div>`:''}
     <div class="pad" style="padding-top:0"><div class="epa-leg"><span>${d.n_players} starters/backups compared ·
       <span class="pffb" style="margin:0 2px">+20</span> = our percentile minus PFF's · green = we're higher, red = PFF is higher</span></div></div>`;
 }
@@ -907,18 +924,20 @@ async function viewTeam(team){
             const bar=r==null?'':`<div class="rb"><i style="width:${r}%;background:${ratingColor(r)};${est?'opacity:.5':''}"></i></div>`;
             const tag=(p.slot&&p.slot!==g.pos)?p.slot:(p.rank??'');
             const st=est?`opacity:.6;font-style:italic`:'';
-            const ttl=est?`title="projected — ${p.source==='rookie'?'rookie draft slot':p.source==='team'?'team O-line grade':'roster depth'}, not 2025 stats"`:'';
+            const ttl=est?`title="projected — ${p.source==='rookie'?'rookie draft slot':p.source==='team'?'team O-line grade':p.source==='preseason'?'2026 preseason play blended with draft/depth prior':'roster depth'}, not 2025 stats"`:'';
             // injury marker: Out → red name, Doubtful → yellow name; small status pill from the latest report
             const iv=INJ[p.gsis]; const ic=iv?(iv.status==='Out'?'inj-out':iv.status==='Doubtful'?'inj-doubt':''):'';
             const pill=iv?`<span class="st mini st-${esc(iv.status)}" title="${esc(iv.status)}${iv.injury?' — '+esc(iv.injury):''}">${esc((iv.status||'')[0])}</span>`:'';
             const pff=p.pff!=null?`<span class="pffb" title="PFF grade (imported)">${p.pff.toFixed(1)}</span>`:'';
-            return `<div class="pl ${p.rank===1?'starter':''}" ${ttl}><div class="dr">${tag}</div><div class="pn ${ic}">${p.name}</div>${pill}${pff}${bar}<div class="rt" style="color:${ratingColor(r)};${st}">${r==null?'—':r}</div></div>`;
+            const pre=p.pre!=null?`<span class="preb" title="PFF 2026 preseason grade">P${p.pre.toFixed(0)}</span>`:'';
+            return `<div class="pl ${p.rank===1?'starter':''}" ${ttl}><div class="dr">${tag}</div><div class="pn ${ic}">${p.name}</div>${pill}${pff}${pre}${bar}<div class="rt" style="color:${ratingColor(r)};${st}">${r==null?'—':r}</div></div>`;
           }).join('')}
         </div>`).join('')}</div>
       <div style="color:var(--muted);font-size:11px;margin-top:12px">Ratings are 0–100 (position percentile).
         <span style="opacity:.6;font-style:italic">Faded/italic</span> = projected from rookie draft slot,
         roster depth, or team O-line grade rather than 2025 on-field production.
-        ${d.groups.some(g=>g.players.some(p=>p.pff!=null))?'<span class="pffb" style="margin:0 2px">70.0</span> = your imported PFF grade (0–100, PFF scale).':''}${INJ_NOTE}</div>
+        ${d.groups.some(g=>g.players.some(p=>p.pff!=null))?'<span class="pffb" style="margin:0 2px">70.0</span> = PFF grade (0–100, PFF scale).':''}
+        ${d.groups.some(g=>g.players.some(p=>p.pre!=null))?'<span class="preb" style="margin:0 2px">P74</span> = PFF 2026 preseason grade; rookie/depth ratings blend preseason play with their prior.':''}${INJ_NOTE}</div>
     </div>
   </div>`;
   document.getElementById('teamPick').addEventListener('change', e=>go('#/team/'+e.target.value));

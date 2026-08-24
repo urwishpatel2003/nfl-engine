@@ -25,5 +25,4 @@ Thumbs.db
 data/raw/pff/
 
 # explicit un-ignore (covers CLI versions that also apply .gitignore)
-!data/processed/pff_grades.parquet
-!data/processed/pff_team_grades.parquet
+!data/processed/pff_*.parquet
