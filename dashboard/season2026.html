@@ -1208,9 +1208,11 @@ function boxTeam(tm, t){
     h+=`<table class="bxtbl"><thead><tr><th>Passing</th><th>C/ATT</th><th>Yds</th><th>TD</th><th>INT</th></tr></thead>
       <tbody><tr><td class="pl">${esc(q.name)}</td><td>${iv(q.cmp)}/${iv(q.pass_att)}</td><td class="big">${iv(q.pass_yds)}</td>${td(q.pass_td)}<td>${dv(q.int)}</td></tr></tbody></table>`;
   }
-  if(rbs.length){
+  // rushing table includes the QB when he carries the ball (dual-threat QBs especially)
+  const rushers=[...(q&&(q.carries>0||q.rush_yds>0)?[{name:q.name,pos:'QB',carries:q.carries,rush_yds:q.rush_yds,rush_td:q.rush_td}]:[]),...rbs];
+  if(rushers.length){
     h+=`<table class="bxtbl"><thead><tr><th>Rushing</th><th>Car</th><th>Yds</th><th>TD</th></tr></thead><tbody>`+
-      rbs.map(x=>`<tr>${pn(x)}<td>${iv(x.carries)}</td><td class="big">${iv(x.rush_yds)}</td>${td(x.rush_td)}</tr>`).join('')+`</tbody></table>`;
+      rushers.map(x=>`<tr>${pn(x)}<td>${iv(x.carries)}</td><td class="big">${iv(x.rush_yds)}</td>${td(x.rush_td)}</tr>`).join('')+`</tbody></table>`;
   }
   const recAll=[...rbs.filter(x=>x.rec>0).map(x=>({name:x.name,pos:x.pos,rec:x.rec,targets:x.targets,rec_yds:x.rec_yds,rec_td:x.rec_td||0})),...wrs];
   if(recAll.length){

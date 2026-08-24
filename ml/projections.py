@@ -184,7 +184,8 @@ def _qb_starters() -> dict:
 
 
 # league-average starter line (used for rookies / no-2025-usage starters)
-ROOKIE_QB = {"cmp_pct": 0.62, "ypa": 6.4, "ptd_pa": 0.036, "int_pa": 0.028, "carry_pg": 3.0, "ypc": 4.0}
+ROOKIE_QB = {"cmp_pct": 0.62, "ypa": 6.4, "ptd_pa": 0.036, "int_pa": 0.028,
+             "carry_pg": 3.0, "ypc": 4.0, "rtd_carry": 0.03}
 
 
 # ── 4. distribute team volume to players for a matchup ──────────────
@@ -197,34 +198,47 @@ def _distribute(team: str, team_pa: float, team_ra: float, off_tds: float, prof:
     pass_tds = off_tds * 0.62 * pass_factor
     rush_tds = off_tds - off_tds * 0.62          # ground TDs unaffected by pass factor
 
-    # QB: first depth-chart QB who isn't ruled out (rookie/no-2025 -> replacement prior)
+    # QB: first depth-chart QB who isn't ruled out (rookie/no-2025 -> replacement prior).
+    # QB rushing is the QB's OWN 2025 rate (scrambles + designed runs both count as rush
+    # attempts in PBP), so a dual threat (Lamar ~10 car/g) projects very differently from a
+    # pocket passer (~2) — carries, matchup-scaled yards, AND a share of the rushing TDs.
     sid, sname = _available_qb(team, unavail)
     qrow = roster[roster.player_id == sid]
     q = qrow.iloc[0] if not qrow.empty else None
+    rk = ROOKIE_QB
+    qb_car = float(q.carry_pg) if q is not None else rk["carry_pg"]
+    qb_ypc = float(q.ypc) if q is not None else rk["ypc"]
+    qb_tdw = qb_car * (float(q.rtd_carry) if q is not None else rk["rtd_carry"])
     if q is None:
         # rookie / unknown starter — use the depth-chart name with a replacement line
-        rk = ROOKIE_QB
         qb_line = {"name": sname or "Starter", "pos": "QB", "rookie": True,
                    "pass_att": round(team_pa), "cmp": round(team_pa * rk["cmp_pct"]),
                    "pass_yds": round(team_pa * rk["ypa"] * pass_factor), "pass_td": round(pass_tds, 1),
-                   "int": round(team_pa * rk["int_pa"], 1), "rush_yds": round(rk["carry_pg"] * rk["ypc"])}
+                   "int": round(team_pa * rk["int_pa"], 1)}
     else:
         qb_line = {"name": q.player_name, "pos": "QB", "rookie": False,
                    "pass_att": round(team_pa), "cmp": round(team_pa * q.cmp_pct),
                    "pass_yds": round(team_pa * q.ypa * pass_factor), "pass_td": round(pass_tds, 1),
-                   "int": round(team_pa * q.int_pa, 1), "rush_yds": round(q.carry_pg * q.ypc)}
+                   "int": round(team_pa * q.int_pa, 1)}
+    qb_line["carries"] = round(qb_car)
+    qb_line["rush_yds"] = round(qb_car * qb_ypc * rush_factor)
 
-    # Rushers: concentrate carries on the actual backfield (top 4), scaled by run matchup
+    # Rushers: QB carries come off the top of team volume, the backfield (top 4) splits the
+    # rest; rushing TDs are shared across QB + RBs by each rusher's own TD rate — so Hurts'
+    # and Lamar's sneak/read-option TDs stop being handed to their running backs.
     rbs = roster[(roster.position == "RB") & (roster.carry_pg > 1)].sort_values(
         "carry_pg", ascending=False).head(4).copy()
+    rb_ra = max(team_ra - qb_car, team_ra * 0.5)
+    tdw_total = max(1e-6, qb_tdw + ((rbs.carry_pg * rbs.rtd_carry).sum() if not rbs.empty else 0.0))
+    qb_line["rush_td"] = round(rush_tds * qb_tdw / tdw_total, 1)
     rush_lines = []
     if not rbs.empty:
-        denom = rbs["carry_pg"].sum(); tdw = max(1e-6, (rbs.carry_pg * rbs.rtd_carry).sum())
+        denom = rbs["carry_pg"].sum()
         for _, r in rbs.iterrows():
-            car = team_ra * (r.carry_pg / denom)
+            car = rb_ra * (r.carry_pg / denom)
             rush_lines.append({"name": r.player_name, "pos": "RB",
                                "carries": round(car), "rush_yds": round(car * r.ypc * rush_factor),
-                               "rush_td": round(rush_tds * (r.carry_pg * r.rtd_carry) / tdw, 1),
+                               "rush_td": round(rush_tds * (r.carry_pg * r.rtd_carry) / tdw_total, 1),
                                "targets": round(r.tgt_pg), "rec": round(r.tgt_pg * r.catch_pct),
                                "rec_yds": round(r.tgt_pg * r.ypt * pass_factor), "rec_td": 0})
 
