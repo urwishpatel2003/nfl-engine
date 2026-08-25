@@ -281,7 +281,7 @@ PBP_COLUMNS = [
     # Passing
     "air_yards","yards_after_catch","yards_gained",
     "complete_pass","incomplete_pass","interception","touchdown",
-    "sack","penalty","penalty_yards","fumble",
+    "sack","penalty","penalty_yards","penalty_team","penalty_type","fumble",
     # Advanced metrics
     "epa","wpa","success","cpoe",
     # Player IDs (scrimmage)

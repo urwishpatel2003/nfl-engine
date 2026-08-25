@@ -53,6 +53,38 @@ def load_pbp(seasons: list) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+def _penalty_metrics(pbp: pd.DataFrame) -> pd.DataFrame:
+    """Per (season, team) offensive & defensive penalty rates from the FULL play set.
+    Attribution needs penalty_team (added to the slim 2026-08; older seasons without it get
+    NaN rather than a misleading zero). Scrimmage-unit penalties only — special-teams plays
+    excluded so the numbers describe the offense/defense the matchup engine models."""
+    if "penalty_team" not in pbp.columns:
+        return pd.DataFrame(columns=["season", "team"])
+    scrim = {"pass", "run", "no_play", "qb_kneel", "qb_spike"}
+    d = pbp[(pbp["penalty"] == 1) & pbp["penalty_team"].notna()
+            & pbp["play_type"].isin(scrim) & pbp["posteam"].notna() & pbp["defteam"].notna()].copy()
+    games = pbp[pbp["posteam"].notna()].groupby(["season", "posteam"])["game_id"] \
+        .nunique().rename("g").reset_index().rename(columns={"posteam": "team"})
+    rows = []
+    for side, team_col in (("off", "posteam"), ("def", "defteam")):
+        sub = d[d["penalty_team"] == d[team_col]]
+        agg = sub.groupby(["season", team_col]).agg(
+            n=("penalty", "sum"), yds=("penalty_yards", "sum")).reset_index() \
+            .rename(columns={team_col: "team"})
+        agg = agg.merge(games, on=["season", "team"], how="right").fillna({"n": 0, "yds": 0})
+        agg[f"{side}_penalties_pg"] = agg["n"] / agg["g"].clip(lower=1)
+        agg[f"{side}_penalty_yds_pg"] = agg["yds"] / agg["g"].clip(lower=1)
+        rows.append(agg[["season", "team", f"{side}_penalties_pg", f"{side}_penalty_yds_pg"]])
+    out = rows[0].merge(rows[1], on=["season", "team"], how="outer")
+    # a season whose slim predates penalty_team has no attributed penalties at all — NaN it
+    tot = d.groupby("season")["penalty"].sum()
+    dead = [s for s in out["season"].unique() if tot.get(s, 0) == 0]
+    if dead:
+        cols = [c for c in out.columns if c.endswith("_pg")]
+        out.loc[out["season"].isin(dead), cols] = np.nan
+    return out
+
+
 def build_team_styles(seasons: list = None, n_games: int = None) -> pd.DataFrame:
     """
     Compute per-team offensive and defensive style metrics.
@@ -67,6 +99,11 @@ def build_team_styles(seasons: list = None, n_games: int = None) -> pd.DataFrame
 
     print(f"Loading PBP for seasons {seasons}...")
     pbp = load_pbp(seasons)
+
+    # Penalty metrics come from the UNFILTERED data: most penalties negate the play
+    # (false start, offside → play_type 'no_play'), so counting after the scrimmage
+    # filter below would miss the bulk of them.
+    penalties = _penalty_metrics(pbp)
 
     # Keep only scrimmage plays
     pbp = pbp[pbp["play_type"].isin(["pass", "run", "qb_spike", "qb_kneel"])].copy()
@@ -230,6 +267,10 @@ def build_team_styles(seasons: list = None, n_games: int = None) -> pd.DataFrame
         on=["season", "posteam"], how="outer"
     )
     styles = styles.rename(columns={"posteam": "team"})
+
+    if not penalties.empty:
+        styles = styles.merge(penalties, on=["season", "team"], how="left")
+        print("Merged penalty metrics (off/def counts + yards per game)")
 
     # ── MERGE SITUATIONAL STATS ────────────────────────────────────
     sit_path = RAW / "situational_stats.parquet"

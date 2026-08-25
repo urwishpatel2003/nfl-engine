@@ -26,7 +26,7 @@ app = Flask(__name__, static_folder=str(Path(__file__).parent))
 
 @app.after_request
 def _no_cache(resp):
-    """Never let the browser/edge serve a stale page or API response â€” the model and data
+    """Never let the browser/edge serve a stale page or API response — the model and data
     change on every deploy/refresh, so always revalidate."""
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     resp.headers["Pragma"] = "no-cache"
@@ -63,7 +63,7 @@ def legacy():
     return send_from_directory(str(Path(__file__).parent), 'dashboard.html')
 
 
-# â”€â”€ Team metadata (colors + logos) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Team metadata (colors + logos) ─────────────────────────────────
 _TEAM_META = None
 
 
@@ -87,7 +87,7 @@ def api_team_meta():
     return jsonify(team_meta())
 
 
-# â”€â”€ 2026 projected starting QB (informational; does NOT affect ratings) â”€â”€â”€â”€â”€
+# ── 2026 projected starting QB (informational; does NOT affect ratings) ─────
 _QB1 = None
 
 
@@ -122,7 +122,7 @@ def api_power_rankings():
             from ml.squad import squad_ratings, WEIGHTS
             bd = squad_ratings(breakdown=True)[0].copy()
             # split the rating into an offense (qb+skill+ol) and defense (def_team+rush+cover)
-            # composite, then rank teams on each â€” far more intuitive than the raw z-score.
+            # composite, then rank teams on each — far more intuitive than the raw z-score.
             bd["off"] = WEIGHTS["qb"] * bd["qb"] + WEIGHTS["skill"] * bd["skill"] + WEIGHTS["ol"] * bd["ol"]
             bd["def"] = (WEIGHTS["def_team"] * bd["def_team"] + WEIGHTS["rush"] * bd["rush"]
                          + WEIGHTS["cover"] * bd["cover"])
@@ -163,7 +163,7 @@ _UNIT_EPA_CACHE = {}
 
 @app.route('/api/unit_epa')
 def api_unit_epa():
-    """Per-team opponent-adjusted EPA/play split into pass vs rush, for both offense and defense â€”
+    """Per-team opponent-adjusted EPA/play split into pass vs rush, for both offense and defense —
     powers the quadrant scatter on the Rankings page. Latest completed season (2025 by default), since
     EPA needs games played. Convention: off_* higher = better offense; def_* is EPA ALLOWED so lower =
     better defense (the frontend negates it so 'up-right = elite in both phases' reads the same way)."""
@@ -191,23 +191,25 @@ _LEAGUE_STATS_CACHE = {}
 
 # Per-side stat leaderboards for the Rankings page. Each column pulls a raw team_styles
 # metric (or a schedule-derived scoring average) and declares its direction so the frontend
-# can rank + color it. `pct` columns are stored 0-1 and rendered Ã—100; `better` fixes which
+# can rank + color it. `pct` columns are stored 0-1 and rendered ×100; `better` fixes which
 # end of the distribution is #1 (defense EPA/points are "lower = better").
 _OFF_COLS = [
     {"key": "epa",     "label": "EPA/play",   "src": "off_epa_per_play", "better": "hi", "dec": 2, "pct": False,
-     "tip": "Expected Points Added per offensive play â€” how many points the average snap gains vs a league-average play from the same spot. The best single number for offense quality."},
+     "tip": "Expected Points Added per offensive play — how many points the average snap gains vs a league-average play from the same spot. The best single number for offense quality."},
     {"key": "pts",     "label": "Pts/G",      "src": "_pf",              "better": "hi", "dec": 1, "pct": False,
      "tip": "Points scored per game (regular season, from final scores)."},
     {"key": "success", "label": "Success%",   "src": "off_success_rate", "better": "hi", "dec": 1, "pct": True,
      "tip": "Share of plays that gain positive expected points (stay 'on schedule'). Measures consistency, where EPA can be skewed by a few big plays."},
     {"key": "pass",    "label": "Pass EPA",   "src": "off_epa_per_pass", "better": "hi", "dec": 2, "pct": False,
-     "tip": "EPA per dropback â€” passing-game efficiency including sacks and scrambles."},
+     "tip": "EPA per dropback — passing-game efficiency including sacks and scrambles."},
     {"key": "rush",    "label": "Rush EPA",   "src": "off_epa_per_rush", "better": "hi", "dec": 2, "pct": False,
-     "tip": "EPA per designed rush â€” running-game efficiency. League average is slightly negative (passing is more efficient)."},
+     "tip": "EPA per designed rush — running-game efficiency. League average is slightly negative (passing is more efficient)."},
     {"key": "rztd",    "label": "RZ TD%",     "src": "rz_td_rate",       "better": "hi", "dec": 1, "pct": True,
-     "tip": "Share of red-zone plays that end in a touchdown â€” finishing drives with 7 instead of 3."},
+     "tip": "Share of red-zone plays that end in a touchdown — finishing drives with 7 instead of 3."},
     {"key": "sk_all",  "label": "Sack% all'd","src": "sack_rate_allowed","better": "lo", "dec": 1, "pct": True,
-     "tip": "Share of dropbacks where the QB is sacked â€” pass protection (lower is better)."},
+     "tip": "Share of dropbacks where the QB is sacked — pass protection (lower is better)."},
+    {"key": "pen",     "label": "Pen/G",      "src": "off_penalties_pg", "better": "lo", "dec": 1, "pct": False,
+     "tip": "Offensive penalties per game (false starts, holding — negated plays included). Lower = more disciplined."},
 ]
 # NOTE on defense EPA sign: team_styles stores def_epa_per_* already NEGATED
 # (def_epa_per_play = -mean(EPA), so HIGHER = better defense) and def_success_rate as a
@@ -216,19 +218,21 @@ _OFF_COLS = [
 # and rank them lo=best; points-allowed is the only raw "lower is better" metric.
 _DEF_COLS = [
     {"key": "epa",     "label": "EPA/play",   "src": "def_epa_per_play", "better": "lo", "dec": 2, "pct": False, "neg": True,
-     "tip": "Expected Points Added allowed per play â€” how many points the average opposing snap gains against this defense. Negative = the defense takes points off the board; the best single number for defense quality."},
+     "tip": "Expected Points Added allowed per play — how many points the average opposing snap gains against this defense. Negative = the defense takes points off the board; the best single number for defense quality."},
     {"key": "pts",     "label": "Pts/G",      "src": "_pf",              "better": "lo", "dec": 1, "pct": False,
      "tip": "Points allowed per game (regular season, from final scores). Includes points given up by turnovers/special teams, so it can diverge from per-play EPA."},
     {"key": "success", "label": "Stop%",      "src": "def_success_rate", "better": "hi", "dec": 1, "pct": True,
-     "tip": "Share of opponent plays stopped for negative expected points â€” down-to-down consistency of the defense."},
+     "tip": "Share of opponent plays stopped for negative expected points — down-to-down consistency of the defense."},
     {"key": "pass",    "label": "Pass EPA",   "src": "def_epa_per_pass", "better": "lo", "dec": 2, "pct": False, "neg": True,
-     "tip": "EPA allowed per opponent dropback â€” pass defense (coverage + pass rush). Negative = elite."},
+     "tip": "EPA allowed per opponent dropback — pass defense (coverage + pass rush). Negative = elite."},
     {"key": "rush",    "label": "Rush EPA",   "src": "def_epa_per_rush", "better": "lo", "dec": 2, "pct": False, "neg": True,
-     "tip": "EPA allowed per opponent rush â€” run defense. Negative = elite."},
+     "tip": "EPA allowed per opponent rush — run defense. Negative = elite."},
     {"key": "sack",    "label": "Sack%",      "src": "sack_rate_gen",    "better": "hi", "dec": 1, "pct": True,
-     "tip": "Share of opponent dropbacks ending in a sack â€” pass-rush production."},
+     "tip": "Share of opponent dropbacks ending in a sack — pass-rush production."},
     {"key": "stop3",   "label": "3rd stop%",  "src": "third_down_stop_rate", "better": "hi", "dec": 1, "pct": True,
-     "tip": "Share of opponent third downs that fail to convert â€” getting off the field."},
+     "tip": "Share of opponent third downs that fail to convert — getting off the field."},
+    {"key": "pen",     "label": "Pen/G",      "src": "def_penalties_pg", "better": "lo", "dec": 1, "pct": False,
+     "tip": "Defensive penalties per game (offsides, DPI, holding — negated plays included). Lower = more disciplined."},
 ]
 
 
@@ -288,7 +292,7 @@ def _stat_side(df: pd.DataFrame, cols: list, meta: dict, scoring: dict, is_def: 
 @app.route('/api/league_stats')
 def api_league_stats():
     """Per-team offense & defense stat leaderboards (value + league rank per metric) for the
-    Rankings page. Latest completed season by default â€” these are actual on-field results, so
+    Rankings page. Latest completed season by default — these are actual on-field results, so
     they need games played (unlike the roster-talent power ranking)."""
     season = int(request.args.get('season', latest_style_season()))
     if season in _LEAGUE_STATS_CACHE:
@@ -410,7 +414,7 @@ def api_pff_units():
 @app.route('/api/pff_upload', methods=['POST'])
 def api_pff_upload():
     """Owner-only upload of the locally built PFF parquets to the server volume.
-    Guarded by REFRESH_TOKEN (must be configured â€” refuses when absent so an unconfigured
+    Guarded by REFRESH_TOKEN (must be configured — refuses when absent so an unconfigured
     deployment can't accept anonymous uploads). Validates schema before writing."""
     global _PFF_COMPARE
     tok = os.environ.get("REFRESH_TOKEN")
@@ -448,7 +452,7 @@ def api_pff_upload():
 @app.route('/api/pff_compare')
 def api_pff_compare():
     """Model-vs-PFF disagreement view. Needs locally imported PFF data (subscriber-only,
-    git-ignored, never on the hosted volume) â€” returns available:false without it.
+    git-ignored, never on the hosted volume) — returns available:false without it.
     Player comparison is percentile-vs-percentile: our rating IS a position percentile,
     so PFF grades are converted to percentiles within their PFF position group; comparing
     raw grade to percentile would manufacture fake disagreements."""
@@ -553,7 +557,7 @@ def api_team():
         _DEPTH_CACHE[team] = team_depth_chart(team)
     m = team_meta().get(team, {})
     qb = qb1_2026().get(team, "")
-    return jsonify(_native({    # _native: camp players can carry NaN ids â†’ invalid JSON otherwise
+    return jsonify(_native({    # _native: camp players can carry NaN ids → invalid JSON otherwise
         "team": team, "name": m.get("team_name", team),
         "color": m.get("team_color") or "#334155", "logo": m.get("team_logo_espn", ""),
         "qb": qb, "groups": _DEPTH_CACHE[team],
@@ -725,12 +729,12 @@ def get_teams():
     return jsonify(df_to_json(df[cols]))
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-#  RESEARCH FEATURES â€” team profile, trends, full matchup
+# ═══════════════════════════════════════════════════════════════════
+#  RESEARCH FEATURES — team profile, trends, full matchup
 #  All read the parquet already in the repo; no network at request time.
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════
 
-# â”€â”€ lazy dataframe caches â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── lazy dataframe caches ───────────────────────────────────────────
 _STYLES = None
 _INJ = None
 _SCHED = None
@@ -772,8 +776,8 @@ def latest_style_season() -> int:
     return int(s["season"].max()) if len(s) else 2025
 
 
-# â”€â”€ team strengths / weaknesses via league percentiles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# (column, human label, higher_is_better) â€” direction-normalised so a high
+# ── team strengths / weaknesses via league percentiles ──────────────
+# (column, human label, higher_is_better) — direction-normalised so a high
 # percentile always means "good".
 _PROFILE_METRICS = [
     ("off_epa_per_play",     "Offense EPA/play",     True),
@@ -783,7 +787,7 @@ _PROFILE_METRICS = [
     ("rz_td_rate",           "Red-zone TD rate",     True),
     ("two_min_epa",          "Two-minute offense",   True),
     # team_styles stores def_epa_per_* NEGATED (higher = better) and def_success_rate as a
-    # STOP rate â€” so higher IS better for all four, despite the "allowed" mental model.
+    # STOP rate — so higher IS better for all four, despite the "allowed" mental model.
     ("def_epa_per_play",     "Defense EPA/play",     True),
     ("def_epa_per_pass",     "Pass defense",         True),
     ("def_epa_per_rush",     "Run defense",          True),
@@ -812,6 +816,8 @@ _TENDENCY_SPEC = [
     ("third_down_stop_rate", "Strong third-down defense", None,                  0.16),
     ("sack_rate_gen",        "Heavy pass rush",           None,                  0.16),
     ("def_epa_per_play",     "Stingy defense",            None,                  0.15),  # stored higher=better
+    ("off_penalties_pg",     "Penalty-prone offense",     "Disciplined offense", 0.15),
+    ("def_penalties_pg",     "Penalty-prone defense",     None,                  0.12),
 ]
 
 
@@ -898,7 +904,8 @@ def api_team_profile():
                   "blitz_rate", "avg_blitzers", "scramble_rate", "qb_rush_rate"]
     sit_keys = ["pressure_rate_gen", "sack_rate_gen", "pressure_rate_allowed", "sack_rate_allowed",
                 "rz_td_rate", "rz_td_rate_allowed_y", "two_min_epa", "fourth_go_rate",  # _x is a broken all-1.0 merge artifact
-                "def_points_allowed_avg", "turnover_rate", "third_down_stop_rate"]
+                "def_points_allowed_avg", "turnover_rate", "third_down_stop_rate",
+                "off_penalties_pg", "def_penalties_pg", "off_penalty_yds_pg", "def_penalty_yds_pg"]
     style = {k: safe_json(row[k]) for k in style_keys if k in row.index}
     situational = {k: safe_json(row[k]) for k in sit_keys if k in row.index}
 
@@ -928,7 +935,7 @@ def api_team_profile():
     }))
 
 
-# â”€â”€ weekly form / trends â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── weekly form / trends ────────────────────────────────────────────
 def team_weekly_form(team: str, season: int) -> list:
     """Per-week offensive/defensive EPP + points for/against for a team's season."""
     p = pbp_season(season)
@@ -999,7 +1006,7 @@ def api_team_trends():
     }))
 
 
-# â”€â”€ latest injuries + full matchup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── latest injuries + full matchup ──────────────────────────────────
 _STATUS_RANK = {"Out": 0, "Doubtful": 1, "Questionable": 2}
 
 
@@ -1029,7 +1036,7 @@ def latest_injuries(team: str) -> dict:
 
 
 def team_injury_map(team: str) -> dict:
-    """Latest injury report for a team keyed by gsis_id â€” for the profile depth chart.
+    """Latest injury report for a team keyed by gsis_id — for the profile depth chart.
     Id-keyed (not name) to stay coherent with the id-first depth-chart join. Empty in
     the offseason before that season's game reports publish (nflverse has no file yet)."""
     inj = injuries_df()
@@ -1048,16 +1055,16 @@ def team_injury_map(team: str) -> dict:
         if not gid or (isinstance(gid, float) and pd.isna(gid)):
             continue
         if not st or (isinstance(st, float) and pd.isna(st)):
-            continue                                   # no designation â†’ healthy, skip
+            continue                                   # no designation → healthy, skip
         by_id[str(gid)] = {"status": str(st),
                            "injury": r.get("report_primary_injury") or ""}
     return {"season": season, "week": week, "by_id": by_id}
 
 
 def _adjusted_prediction(home: str, away: str, neutral: bool = False, unavail=None) -> dict:
-    """project_game score with three second-order layers: (1) injuryâ†’unit routing so a hurt
+    """project_game score with three second-order layers: (1) injury→unit routing so a hurt
     unit loses harder to a strong opposing unit (interaction), (2) scheme/play-caller mismatch
-    nudges, (3) the flat QB/skill availability points penalty â€” then recompute margin/total/wp."""
+    nudges, (3) the flat QB/skill availability points penalty — then recompute margin/total/wp."""
     from ml.matchup_engine import project_game
     from ml.projections import injury_impact, unavailable_ids
     from ml.matchup_context import unit_injury_deltas, scheme_matchup
@@ -1082,7 +1089,7 @@ def _adjusted_prediction(home: str, away: str, neutral: bool = False, unavail=No
     return res
 
 
-# â”€â”€ Detailed matchup analysis helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Detailed matchup analysis helpers ───────────────────────────────
 # Each dimension pits an offensive metric against the defensive metric it attacks.
 # `obet`/`dbet` = which end of the STORED value ranks #1 (team_styles def_* are pre-flipped
 # higher=better, see the leaderboard note). `dneg` displays defensive EPA as raw "EPA allowed".
@@ -1093,6 +1100,7 @@ _MDIMS = [  # key, label, off_col, obet, def_col, dbet, pct, dec, dneg
     ("succ",    "Success rate",    "off_success_rate", "hi", "def_success_rate", "hi", True,  1, False),
     ("rz",      "Red-zone TD%",    "rz_td_rate",       "hi", "rz_td_rate_allowed_y", "lo", True, 1, False),  # _x is a broken all-1.0 merge artifact
     ("protect", "Pass pro vs rush","sack_rate_allowed","lo", "sack_rate_gen",    "hi", True,  1, False),
+    ("disc",    "Penalties / G",   "off_penalties_pg", "lo", "def_penalties_pg", "lo", False, 1, False),
 ]
 
 
@@ -1452,7 +1460,7 @@ def api_backtest():
     arg = request.args.get('season')
     season = int(arg) if arg else None
     res = evaluate(season)
-    if "error" in res:                               # requested season not gradable â†’ latest completed
+    if "error" in res:                               # requested season not gradable → latest completed
         res = evaluate(latest_completed_season())
     return jsonify(_native(res))
 
@@ -1571,12 +1579,12 @@ def api_season():
                             "has_book": bool(lines), "teams": teams}))
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-#  DATA REFRESH â€” download latest nflverse data + rebuild light tables
+# ═══════════════════════════════════════════════════════════════════
+#  DATA REFRESH — download latest nflverse data + rebuild light tables
 #  Runs in a background thread (POST /api/refresh) or on an in-process
 #  daily schedule. Uses ml.refresh, which downloads release parquets
-#  directly (no nfl_data_py â€” that conflicts with pandas 3).
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+#  directly (no nfl_data_py — that conflicts with pandas 3).
+# ═══════════════════════════════════════════════════════════════════
 import os
 import threading
 
@@ -1706,7 +1714,7 @@ if os.environ.get("REFRESH_DAILY") == "1":
 
 def _pff_boot_sync():
     """Pull the PFF parquets from the private data repo on boot, so a redeploy alone
-    brings the site current â€” no manual refresh needed after a weekly grade push."""
+    brings the site current — no manual refresh needed after a weekly grade push."""
     import time as _t
     _t.sleep(5)                                       # let gunicorn finish booting
     try:
@@ -1730,11 +1738,11 @@ if os.environ.get("PFF_DATA_REPO") and os.environ.get("PFF_DATA_TOKEN"):
 
 if __name__ == '__main__':
     # Local dev entrypoint. In production (Railway) gunicorn imports `app` directly
-    # and this block never runs â€” but honor $PORT / $HOST if someone runs it directly.
+    # and this block never runs — but honor $PORT / $HOST if someone runs it directly.
     port = int(os.environ.get("PORT", 5000))
     host = os.environ.get("HOST", "0.0.0.0")
     debug = os.environ.get("FLASK_DEBUG", "1") == "1"
-    print("NFL 2026 Dashboard â€” power rankings + matchup predictions")
+    print("NFL 2026 Dashboard — power rankings + matchup predictions")
     print(f"Open: http://localhost:{port}   (legacy engine dashboard at /legacy)")
     print()
     app.run(debug=debug, host=host, port=port, use_reloader=False)
