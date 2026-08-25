@@ -57,7 +57,13 @@ def _penalty_metrics(pbp: pd.DataFrame) -> pd.DataFrame:
     """Per (season, team) offensive & defensive penalty rates from the FULL play set.
     Attribution needs penalty_team (added to the slim 2026-08; older seasons without it get
     NaN rather than a misleading zero). Scrimmage-unit penalties only — special-teams plays
-    excluded so the numbers describe the offense/defense the matchup engine models."""
+    excluded so the numbers describe the offense/defense the matchup engine models.
+
+    ANALYSIS-ONLY, by evidence: a walk-forward study (2023-25, 582 games, weeks 6-18,
+    prior-weeks data) regressed game margin on strength diff + penalty-EPA diff. Penalty
+    coefficient -0.123 (t=-0.34), sign-unstable across seasons (+0.26/-0.98/+0.48) — past
+    discipline adds NO incremental margin signal once strength is controlled (its real-time
+    cost is already embedded in scoring records). Do not wire these into predictions."""
     if "penalty_team" not in pbp.columns:
         return pd.DataFrame(columns=["season", "team"])
     scrim = {"pass", "run", "no_play", "qb_kneel", "qb_spike"}
