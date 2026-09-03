@@ -926,7 +926,7 @@ async function viewTeam(team){
             const bar=r==null?'':`<div class="rb"><i style="width:${r}%;background:${ratingColor(r)};${est?'opacity:.5':''}"></i></div>`;
             const tag=(p.slot&&p.slot!==g.pos)?p.slot:(p.rank??'');
             const st=est?`opacity:.6;font-style:italic`:'';
-            const srcTxt={measured:'2025 on-field production, blended 70/30 with the PFF grade where available', rookie:'rookie draft-slot estimate (no NFL snaps yet)',
+            const srcTxt={measured:'the PFF grade (80%) blended with 2025 production (20%) where graded, else pure production', rookie:'rookie draft-slot estimate (no NFL snaps yet)',
               team:'team O-line grade (no individual history)', preseason:'2026 preseason play blended with draft/depth prior',
               proj:'roster-depth estimate (no recent production)'}[p.source]||'roster depth';
             const rtTtl=`title="Rating ${r??'—'} of 100 — percentile among ${g.label}s league-wide, from ${srcTxt}. 80+ elite · ~50 average starter · under 40 replacement level."`;

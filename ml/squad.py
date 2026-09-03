@@ -895,11 +895,12 @@ def team_depth_chart(team: str) -> list:
                 if hit is not None and pd.notna(hit[0]):
                     pg = round(float(hit[0]), 1)
                     pff_pctl = float(hit[1]) if pd.notna(hit[1]) else None
-            # Measured ratings blend 70/30 with the player's PFF-grade percentile — the same
-            # weight the team units use, so cards and units read the same signal (and one
-            # metric's quirks — e.g. EPA adoring system QBs — get a film-grade counterweight).
+            # Measured ratings: PFF film grade DOMINATES (owner decision 2026-09: 80/20
+            # PFF/production). Our stats-based percentile stays as a 20% seasoning — it
+            # catches usage/volume reality, but the film graders decide the headline number
+            # (EPA's system-QB adoration stops driving the cards).
             if src == "measured" and pff_pctl is not None:
-                rt = int(round(0.7 * rt + 0.3 * pff_pctl))
+                rt = int(round(0.2 * rt + 0.8 * pff_pctl))
             pre = None
             if pre_nt is not None:
                 pre = pre_nt.get((_norm(r.player_name), team)) or pre_key.get((_key(r.player_name), team))
