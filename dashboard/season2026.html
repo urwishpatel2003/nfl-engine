@@ -208,7 +208,7 @@
   .grp .gh{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
   .pl{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px}
   .pl .dr{width:26px;color:var(--muted);font-size:10px;text-align:right}
-  .pl .pn{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pl .pn{flex:1;min-width:0;overflow-wrap:anywhere;line-height:1.2}  /* wrap, never truncate names */
   .pl.starter .pn{font-weight:600}
   .pl .rt{width:30px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;font-size:12px}
   .pl .rb{width:44px;height:6px;border-radius:3px;background:#0e1626;overflow:hidden}
@@ -926,13 +926,17 @@ async function viewTeam(team){
             const bar=r==null?'':`<div class="rb"><i style="width:${r}%;background:${ratingColor(r)};${est?'opacity:.5':''}"></i></div>`;
             const tag=(p.slot&&p.slot!==g.pos)?p.slot:(p.rank??'');
             const st=est?`opacity:.6;font-style:italic`:'';
-            const ttl=est?`title="projected — ${p.source==='rookie'?'rookie draft slot':p.source==='team'?'team O-line grade':p.source==='preseason'?'2026 preseason play blended with draft/depth prior':'roster depth'}, not 2025 stats"`:'';
+            const srcTxt={measured:'2025 on-field production', rookie:'rookie draft-slot estimate (no NFL snaps yet)',
+              team:'team O-line grade (no individual history)', preseason:'2026 preseason play blended with draft/depth prior',
+              proj:'roster-depth estimate (no recent production)'}[p.source]||'roster depth';
+            const rtTtl=`title="Rating ${r??'—'} of 100 — percentile among ${g.label}s league-wide, from ${srcTxt}. 80+ elite · ~50 average starter · under 40 replacement level."`;
+            const ttl=est?`title="projected — ${srcTxt}, not 2025 stats"`:'';
             // injury marker: Out → red name, Doubtful → yellow name; small status pill from the latest report
             const iv=INJ[p.gsis]; const ic=iv?(iv.status==='Out'?'inj-out':iv.status==='Doubtful'?'inj-doubt':''):'';
             const pill=iv?`<span class="st mini st-${esc(iv.status)}" title="${esc(iv.status)}${iv.injury?' — '+esc(iv.injury):''}">${esc((iv.status||'')[0])}</span>`:'';
             const pff=p.pff!=null?`<span class="pffb" title="PFF grade (imported)">${p.pff.toFixed(1)}</span>`:'';
             const pre=p.pre!=null?`<span class="preb" title="PFF 2026 preseason grade">P${p.pre.toFixed(0)}</span>`:'';
-            return `<div class="pl ${p.rank===1?'starter':''}" ${ttl}><div class="dr">${tag}</div><div class="pn ${ic}">${p.name}</div>${pill}${pff}${pre}${bar}<div class="rt" style="color:${ratingColor(r)};${st}">${r==null?'—':r}</div></div>`;
+            return `<div class="pl ${p.rank===1?'starter':''}" ${ttl}><div class="dr">${tag}</div><div class="pn ${ic}" title="${esc(p.name)}">${p.name}</div>${pill}${pff}${pre}${bar}<div class="rt" ${rtTtl} style="color:${ratingColor(r)};${st};cursor:help">${r==null?'—':r}</div></div>`;
           }).join('')}
         </div>`).join('')}</div>
       <div style="color:var(--muted);font-size:11px;margin-top:12px">Ratings are 0–100 (position percentile).
