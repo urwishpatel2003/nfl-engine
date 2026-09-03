@@ -469,7 +469,8 @@ def api_pff_compare():
     # Percentiles are computed within the qualifying population for the same reason.
     if "qualifies" in d.columns:
         d = d[d["qualifies"]]
-    d["pff_pctl"] = d.groupby("position")["pff_grade"].rank(pct=True) * 100
+    d["pff_pctl"] = d.groupby(d["position"].replace({"FB": "HB"}))["pff_grade"] \
+        .rank(pct=True) * 100    # FB folded into HB — tiny cohorts mint fake percentiles
     by_nt = {(r.nm, r.team): (float(r.pff_grade), float(r.pff_pctl)) for r in d.itertuples()}
     uniq = d[~d.duplicated(["key", "team"], keep=False)]
     by_key = {(r.key, r.team): (float(r.pff_grade), float(r.pff_pctl)) for r in uniq.itertuples()}

@@ -680,12 +680,16 @@ def _player_pct():
     if _PCT_CACHE is not None:
         return _PCT_CACHE
     comp = _composite_2025()
-    comp["pct"] = comp.groupby("position")["adjusted_score"].rank(pct=True) * 100
+    # Percentile FULLBACKS within the RB pool, not among the ~15 other FBs — a tiny cohort
+    # hands its best member a fake 100 (Juszczyk showed 100 next to McCaffrey's 97).
+    comp["pct"] = comp.groupby(comp["position"].replace({"FB": "RB"}))["adjusted_score"] \
+        .rank(pct=True) * 100
     skill = comp.set_index("player_id")["pct"]                       # composite %ile (all positions)
     skill_nm = comp.dropna(subset=["nm"]).drop_duplicates("nm").set_index("nm")["pct"]
     # RB/WR/TE rated on real PBP production (fixes volume backs), %ile within position
     sv = _skill_value().copy()
-    sv["pct"] = sv.groupby("position")["adjusted_score"].rank(pct=True) * 100
+    sv["pct"] = sv.groupby(sv["position"].replace({"FB": "RB"}))["adjusted_score"] \
+        .rank(pct=True) * 100
     prod = sv.set_index("player_id")["pct"]
     prod_nm = sv.dropna(subset=["nm"]).drop_duplicates("nm").set_index("nm")["pct"]
     qb = _qb_value_table(); qb_pct = qb.rank(pct=True) * 100         # QB by multi-year EPA + draft prior
@@ -756,13 +760,23 @@ def _pff_grades():
     if _PFF_CACHE is None:
         p = PROC / "pff_grades.parquet"
         if p.exists():
-            d = pd.read_parquet(p).dropna(subset=["pff_grade"])
-            by_nt = d.drop_duplicates(["nm", "team"]).set_index(["nm", "team"])["pff_grade"]
+            d = pd.read_parquet(p).dropna(subset=["pff_grade"]).copy()
+            # Percentile each QUALIFYING player's grade within his PFF position (FB folded
+            # into HB — tiny cohorts mint fake 100s). Used to blend cards toward the film
+            # grades; non-qualifying grades keep a badge but don't blend (too little snap
+            # evidence to move a rating).
+            q = d[d["qualifies"]] if "qualifies" in d.columns else d
+            q = q.copy()
+            q["pctl"] = q.groupby(q["position"].replace({"FB": "HB"}))["pff_grade"] \
+                .rank(pct=True) * 100
+            d = d.merge(q[["pctl"]], left_index=True, right_index=True, how="left")
+            dd = d.drop_duplicates(["nm", "team"]).set_index(["nm", "team"])
+            by_nt = {i: (r["pff_grade"], r["pctl"]) for i, r in dd.iterrows()}
             # key fallback is TEAM-scoped: a bare lastname+initial collides across the league
             # (Chris Jones/KC vs Christian Jones/ARI are both "jonesc"), so only match a key
             # within the same team, and drop keys duplicated inside a team entirely.
-            uniq = d[~d.duplicated(["key", "team"], keep=False)]
-            by_key = uniq.set_index(["key", "team"])["pff_grade"]
+            uniq = d[~d.duplicated(["key", "team"], keep=False)].set_index(["key", "team"])
+            by_key = {i: (r["pff_grade"], r["pctl"]) for i, r in uniq.iterrows()}
             _PFF_CACHE = (by_nt, by_key)
         else:
             _PFF_CACHE = (None, None)
@@ -783,7 +797,8 @@ def _pff_preseason():
         p = PROC / "pff_preseason_players.parquet"
         if p.exists():
             d = pd.read_parquet(p).dropna(subset=["pre_grade"])
-            d["pctl"] = d.groupby("position")["pre_grade"].rank(pct=True) * 100
+            d["pctl"] = d.groupby(d["position"].replace({"FB": "HB"}))["pre_grade"] \
+                .rank(pct=True) * 100
             by_nt = {(r.nm, r.team): (float(r.pre_grade), float(r.pctl)) for r in d.itertuples()}
             uniq = d[~d.duplicated(["key", "team"], keep=False)]
             by_key = {(r.key, r.team): (float(r.pre_grade), float(r.pctl)) for r in uniq.itertuples()}
@@ -874,12 +889,17 @@ def team_depth_chart(team: str) -> list:
         pre_nt, pre_key = _pff_preseason()
         for r in sub.itertuples():
             rt, src = rate(grp, r.gsis_id, r.player_name, r.pos_rank)
-            pg = None
+            pg, pff_pctl = None, None
             if pff_nt is not None:
-                pg = pff_nt.get((_norm(r.player_name), team))
-                if pg is None or pd.isna(pg):
-                    pg = pff_key.get((_key(r.player_name), team))
-                pg = round(float(pg), 1) if pg is not None and pd.notna(pg) else None
+                hit = pff_nt.get((_norm(r.player_name), team)) or pff_key.get((_key(r.player_name), team))
+                if hit is not None and pd.notna(hit[0]):
+                    pg = round(float(hit[0]), 1)
+                    pff_pctl = float(hit[1]) if pd.notna(hit[1]) else None
+            # Measured ratings blend 70/30 with the player's PFF-grade percentile — the same
+            # weight the team units use, so cards and units read the same signal (and one
+            # metric's quirks — e.g. EPA adoring system QBs — get a film-grade counterweight).
+            if src == "measured" and pff_pctl is not None:
+                rt = int(round(0.7 * rt + 0.3 * pff_pctl))
             pre = None
             if pre_nt is not None:
                 pre = pre_nt.get((_norm(r.player_name), team)) or pre_key.get((_key(r.player_name), team))
