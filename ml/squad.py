@@ -506,10 +506,15 @@ def _coaching():
 # our signals are weakest (coverage/safeties are rated by target outcomes, which punishes
 # players QBs avoid). Roster-based like everything else: each team's PFF unit score is
 # aggregated from the players currently on its roster (the grade table's team column came
-# from live camp rosters, so grades travel with the player). Weight is conservative —
-# our composite stays the primary signal — and the overlay is skipped entirely when no
-# PFF data is present (fresh clones / no subscription).
-PFF_UNIT_W = 0.30
+# from live camp rosters, so grades travel with the player). Weighted by the global PFF_W
+# (film-first per owner decision); the overlay is skipped entirely when no PFF data is
+# present (fresh clones / no subscription), leaving the pure stats-based model.
+# THE PFF weight — one dial, applied everywhere (owner decision 2026-09: 80/20 PFF-first,
+# top to bottom, no per-layer exceptions). Used by: the team unit blends (power rankings +
+# matchup engine), the player-card ratings, and the rookie/depth preseason blends. If this
+# philosophy changes, change THIS constant — do not fork per-layer weights again.
+PFF_W = 0.80
+PFF_UNIT_W = PFF_W
 # unit → (PFF positions, grade column, top-N of roster to average)
 _PFF_UNIT_AGG = {
     "qb":       ({"QB"}, "grades_offense", 1),
@@ -895,22 +900,21 @@ def team_depth_chart(team: str) -> list:
                 if hit is not None and pd.notna(hit[0]):
                     pg = round(float(hit[0]), 1)
                     pff_pctl = float(hit[1]) if pd.notna(hit[1]) else None
-            # Measured ratings: PFF film grade DOMINATES (owner decision 2026-09: 80/20
-            # PFF/production). Our stats-based percentile stays as a 20% seasoning — it
-            # catches usage/volume reality, but the film graders decide the headline number
-            # (EPA's system-QB adoration stops driving the cards).
+            # Measured ratings: PFF film grade dominates at the SAME global weight the team
+            # units use (PFF_W). Our stats-based percentile is the remainder — it catches
+            # usage/volume reality, but the film graders decide the headline number.
             if src == "measured" and pff_pctl is not None:
-                rt = int(round(0.2 * rt + 0.8 * pff_pctl))
+                rt = int(round((1 - PFF_W) * rt + PFF_W * pff_pctl))
             pre = None
             if pre_nt is not None:
                 pre = pre_nt.get((_norm(r.player_name), team)) or pre_key.get((_key(r.player_name), team))
             if pre is not None:
                 # Players with NO regular-season history (rookies rated by draft slot, depth
                 # players rated by roster position) get their first OBSERVED signal from
-                # preseason play: blend it 50/50 with the prior. Measured players keep their
-                # production rating untouched — one camp game doesn't outrank a real season.
+                # preseason play — PFF-graded, so it carries the same global PFF_W weight
+                # against the draft/depth prior. Measured players keep their season signal.
                 if src in ("rookie", "proj"):
-                    rt = int(round(0.5 * rt + 0.5 * pre[1]))
+                    rt = int(round((1 - PFF_W) * rt + PFF_W * pre[1]))
                     src = "preseason"
             players.append({"name": r.player_name, "slot": r.pos_abb, "gsis": r.gsis_id,
                             "rank": int(r.pos_rank) if pd.notna(r.pos_rank) else None,
