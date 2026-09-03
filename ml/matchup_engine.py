@@ -197,7 +197,8 @@ def project_game(home: str, away: str, neutral: bool = False, unit_adj: dict = N
         return {"error": "unknown team(s)"}
     from ml.squad import predict_matchup
     roster = predict_matchup(home, away, neutral)
-    hfa = 0.0 if neutral else 2.0
+    from ml.squad import team_hfa
+    hfa = 0.0 if neutral else team_hfa(home)   # per-team, shrunken (see squad.team_hfa)
     lg_pace = float(u["pace"].mean())
 
     def uz(team, col):                      # unit z-score with any per-game adjustment

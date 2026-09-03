@@ -578,7 +578,34 @@ def squad_ratings(breakdown: bool = False) -> pd.DataFrame:
     return (out if breakdown else out[["rank", "team", "rating"]]), g
 
 
-HFA = 2.0            # home-field points
+HFA = 2.0            # league home-field points — VALIDATED: actual home margin +2.06 (2021-25),
+                     # +2.21 (2023-25), so 2.0 is within noise of measured reality.
+# Per-team HFA is a weak-but-real trait: team HFA estimates correlate r=0.367 between the
+# 2015-19 and 2020-25 eras (t≈2.1, n=31) — unlike penalties/H2H, which tested as pure noise.
+# So each team's home edge = league 2.0 + a SHRUNKEN deviation (shrink ≈ the era-stability r),
+# clipped to ±0.8. Denver's altitude edge survives both eras (+2.4/+3.0 raw).
+HFA_SHRINK = 0.35
+_HFA_CACHE = None
+
+
+def team_hfa(team: str) -> float:
+    """This team's home-field points: league base + shrunken persistent deviation."""
+    global _HFA_CACHE
+    if _HFA_CACHE is None:
+        try:
+            s = pd.read_parquet(RAW / "schedules.parquet")
+            s = s[s["home_score"].notna() & (s["week"] <= 18) & (s["season"] >= 2015)]
+            m = s["home_score"] - s["away_score"]
+            hm = m.groupby(s["home_team"]).mean()
+            aw = (-m).groupby(s["away_team"]).mean()
+            est = (hm - aw) / 2                        # strength cancels; leaves per-team HFA
+            dev = (est - est.mean()) * HFA_SHRINK
+            _HFA_CACHE = (HFA + dev.clip(-0.8, 0.8)).to_dict()
+        except Exception:
+            _HFA_CACHE = {}
+    return float(_HFA_CACHE.get(team, HFA))
+
+
 SPREAD_SCALE = 0.9   # map roster-talent rating difference to a point spread
 
 
@@ -589,7 +616,7 @@ def predict_matchup(home: str, away: str, neutral: bool = False) -> dict:
     r = out.set_index("team")["rating"]
     if home not in r.index or away not in r.index:
         return {"error": "unknown team(s)"}
-    hfa = 0.0 if neutral else HFA
+    hfa = 0.0 if neutral else team_hfa(home)
     margin = float(np.clip((r[home] - r[away]) * SPREAD_SCALE + hfa, -18, 18))
     total = 44.0        # league-average total; scores split around the margin
     home_pts, away_pts = (total + margin) / 2, (total - margin) / 2
