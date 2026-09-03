@@ -642,10 +642,12 @@ def _ol_players():
     a["snap_score"] = a["share"].rank(pct=True) * 100                 # proven-starter percentile
     try:
         rm = pd.read_parquet(RAW / "rosters_2026.parquet").drop_duplicates("player_id").set_index("player_id")
-        dn = pd.to_numeric(rm.get("draft_number"), errors="coerce")
+        raw_dn = rm.get("draft_number")               # upstream drops this column sometimes
+        dn = pd.to_numeric(raw_dn, errors="coerce") if isinstance(raw_dn, pd.Series) else None
     except Exception:
         dn = None
-    a["draft_score"] = a["gsis"].map(dn).apply(lambda p: _draft_rating(p) if pd.notna(p) else 42.0) if dn is not None else 42.0
+    a["draft_score"] = (a["gsis"].map(dn).apply(lambda p: _draft_rating(p) if pd.notna(p) else 42.0)
+                        if isinstance(dn, pd.Series) else 42.0)
     a["q"] = 0.6 * a["snap_score"] + 0.4 * a["draft_score"]           # proven starter + draft pedigree
     return a[["q", "gsis", "k"]]
 
