@@ -34,16 +34,17 @@ import pandas as pd
 RAW = Path(__file__).parent.parent / "data" / "raw"
 PROC = Path(__file__).parent.parent / "data" / "processed"
 
-# QB is the dominant position in the NFL, so it carries the most weight. Coaching is
-# down-weighted: it's noisy, partly results-derived, and blind to 2026 staff changes.
-# Team-quality weights. Offense (0.59) = QB + skill + OL, with OL weighted heavily (0.14) because a
-# QB/RB only produce behind protection. Defense (0.34) is a deliberate ROSTER + PERFORMANCE blend:
-# team-EPA performance (def_team, 0.14 — includes run defense, which isn't cleanly measurable per
-# player) PLUS current-roster individual defenders (pass rush 0.09 + coverage 0.11 = 0.20, given the
-# larger share). Coaching 0.07. (Base was calibrated to ESPN FPI; this rebalances OL up + defense
-# toward roster per design intent, so the FPI correlation loosens slightly by choice.)
-WEIGHTS = {"qb": 0.33, "skill": 0.12, "ol": 0.14,
-           "def_team": 0.14, "rush": 0.09, "cover": 0.11, "coach": 0.07}
+# QB is the dominant position in the NFL, so it carries the most weight.
+# PLAYER-FIRST weighting (owner decision 2026-09): rankings should ride on the grades and
+# production of the players CURRENTLY on the roster, with only a token anchor on last
+# year's team-level results — rosters and coaching staffs turn over too much for prior-year
+# team outcomes to deserve real weight. Player-carried units (qb/skill/rush/cover, each
+# also 30%-blended with current-roster PFF grades): 0.77. Team-history units kept small:
+# def_team 0.05 (still the only clean read on run-defense structure) + coach 0.04 (noisy,
+# blind to staff changes) = 0.09. OL 0.14 sits between: a unit-continuity grade whose PFF
+# blend and card layer are individual. W-L record is used NOWHERE.
+WEIGHTS = {"qb": 0.33, "skill": 0.15, "ol": 0.14,
+           "def_team": 0.05, "rush": 0.13, "cover": 0.16, "coach": 0.04}
 RATING_SCALE = 9.0   # maps the blended z-score to ~points; sets the spread of the ranking
 
 
