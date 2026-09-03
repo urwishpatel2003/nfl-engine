@@ -1153,7 +1153,12 @@ def _matchup_situational(home: str, away: str, season: int) -> dict:
 
 
 def _head_to_head(home: str, away: str, limit: int = 6) -> dict:
-    """Past meetings between the two teams (either venue) + series record & ATS/O-U trends."""
+    """Past meetings between the two teams (either venue) + series record & ATS/O-U trends.
+
+    DISPLAY-ONLY, by evidence: walk-forward study (2023-25 targets, 302 games with 2+ prior
+    meetings, strength-controlled) found H2H margin history predicts nothing incremental
+    (coef +0.012, t=+0.11; sign-unstable by season; frequent rivals 4+ meetings: -0.057,
+    t=-0.41 — if anything mild mean reversion). Do not wire H2H into predictions."""
     s = schedules_df()
     if not len(s):
         return None
