@@ -485,9 +485,9 @@ function parseHash(){
   return { view: parts[0]||'rankings', arg: parts[1], params };
 }
 const NAV = [
-  {id:'rankings', label:'Rankings', views:['rankings','epa','stats','pff','team','trends','matchup'], items:[
+  {id:'rankings', label:'Rankings', views:['rankings','epa','stats','pff','history','team','trends','matchup'], items:[
     ['Power Rankings','#/rankings'],['Unit EPA Map','#/epa'],['League Stats','#/stats'],
-    ['PFF vs Model','#/pff'],['Team Profile','#/team'],['Trends','#/trends'],['Matchup','#/matchup']]},
+    ['PFF vs Model','#/pff'],['History','#/history'],['Team Profile','#/team'],['Trends','#/trends'],['Matchup','#/matchup']]},
   {id:'betting', label:'Betting', views:['schedule','props','season'], items:[
     ['Schedule & Picks','#/schedule'],['Player Props','#/props'],['Season & Futures','#/season']]},
   {id:'fantasy', label:'Fantasy', views:['fantasy'], items:[
@@ -517,6 +517,7 @@ async function route(){
     else if(view==='epa')      await viewEpaMap();
     else if(view==='stats')    await viewLeagueStats();
     else if(view==='pff')      await viewPffCompare();
+    else if(view==='history')  await viewHistory();
     else if(view==='schedule') await viewSchedule(params);
     else if(view==='team')     await viewTeam(arg || TEAMS[0].team);
     else if(view==='trends')   await viewTrends(arg || (RANKINGS[0]&&RANKINGS[0].team));
@@ -1117,6 +1118,80 @@ function injImpactNote(r){
   if(!parts.length) return `<div class="note">No ruled-out players affect this matchup.</div>`;
   return `<div class="note warn">Spread adjusted for absences — ${parts.join(' · ')}</div>`;
 }
+// ── VIEW: History (opponent-adjusted QB seasons + unit EPA by season) ──
+let HIST_QB=null, HIST_UNIT=null, HIST_UNIT_SEL='off_pass';
+function epaColor(v,lo=-0.15,hi=0.3){ if(v==null)return 'var(--muted)';
+  const p=Math.max(0,Math.min(1,(v-lo)/(hi-lo))); return `hsl(${Math.round(p*120)},60%,50%)`; }
+function qbHistTable(){
+  const d=HIST_QB; const qbs=d.qbs.slice(0,45); const last=d.seasons[d.seasons.length-1];
+  const head=`<tr><th class="tmh">QB</th><th>Team</th><th title="Dropback-weighted, recency-tilted opponent-adjusted EPA/play across the window">Wgt adj</th>
+    ${d.seasons.map(s=>`<th title="Opponent-adjusted EPA per play in ${s} (raw EPA and dropbacks on hover)">${s}</th>`).join('')}
+    <th title="Completion % over expected, ${last}">CPOE</th><th title="Success rate, ${last}">Succ%</th>
+    <th title="TD per attempt, ${last}">TD%</th><th title="INT per attempt, ${last}">INT%</th><th title="Sacks per dropback, ${last}">Sk%</th></tr>`;
+  const rows=qbs.map(q=>{
+    const cells=d.seasons.map(s=>{const st=q.seasons[s];
+      if(!st) return '<td style="color:var(--muted)">—</td>';
+      return `<td title="raw ${st.epa>=0?'+':''}${st.epa.toFixed(3)} · ${st.db} dropbacks" style="color:${epaColor(st.adj_epa)};font-weight:700">${st.adj_epa>=0?'+':''}${st.adj_epa.toFixed(3)}</td>`;}).join('');
+    const L=q.seasons[last]||{};
+    const f=(v,dec,pct)=>v==null?'—':((pct?100*v:v).toFixed(dec));
+    return `<tr><td class="tmh" style="text-align:left;font-weight:600;white-space:nowrap">${esc(q.name)}</td>
+      <td style="color:var(--muted)">${esc(q.team||'—')}</td>
+      <td style="font-weight:700;color:${epaColor(q.adj_epa_w)}">${q.adj_epa_w>=0?'+':''}${(q.adj_epa_w??0).toFixed(3)}</td>${cells}
+      <td>${f(L.cpoe,1)}</td><td>${f(L.success,1,true)}</td><td>${f(L.td_pct,1,true)}</td>
+      <td>${f(L.int_pct,1,true)}</td><td>${f(L.sack_pct,1,true)}</td></tr>`;
+  }).join('');
+  return `<div class="lstat-wrap"><table class="lstat" style="min-width:760px"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
+}
+const UNIT_HIST_OPTS=[['off_pass','Pass offense',false],['off_rush','Rush offense',false],
+                      ['def_pass','Pass defense',true],['def_rush','Run defense',true]];
+function unitHistTable(){
+  const d=HIST_UNIT, key=HIST_UNIT_SEL;
+  const lowerBetter=UNIT_HIST_OPTS.find(o=>o[0]===key)[2];
+  const last=d.seasons[d.seasons.length-1];
+  const teams=Object.keys(d.teams).filter(t=>META[t]);
+  teams.sort((a,b)=>{const va=(d.teams[a][last]||{})[key], vb=(d.teams[b][last]||{})[key];
+    return (lowerBetter?1:-1)*((va??9)-(vb??9));});
+  const head=`<tr><th class="tmh">Team</th>${d.seasons.map(s=>`<th>${s}</th>`).join('')}</tr>`;
+  const rows=teams.map(t=>{
+    const cells=d.seasons.map(s=>{const v=(d.teams[t][s]||{})[key];
+      if(v==null) return '<td style="color:var(--muted)">—</td>';
+      const disp=lowerBetter?-1*0+v:v;                       // def shown as raw EPA allowed
+      const col=epaColor(lowerBetter?-v:v,-0.12,0.2);
+      return `<td style="color:${col};font-weight:600">${disp>=0?'+':''}${disp.toFixed(3)}</td>`;}).join('');
+    const m=META[t]||{};
+    return `<tr onclick="go('#/team/${t}')" style="cursor:pointer"><td class="tmh" style="text-align:left"><div class="tmc"><img src="${m.logo||''}" onerror="this.style.visibility='hidden'"><span class="ab">${t}</span></div></td>${cells}</tr>`;
+  }).join('');
+  return `<div class="lstat-wrap"><table class="lstat" style="min-width:640px"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
+}
+function setUnitHist(key){ HIST_UNIT_SEL=key;
+  document.querySelectorAll('#unitHistSeg button').forEach(b=>b.classList.toggle('on',b.dataset.u===key));
+  const h=document.getElementById('unitHistHost'); if(h) h.innerHTML=unitHistTable(); }
+async function viewHistory(){
+  app().innerHTML = `<div class="pad"><div class="loading">Computing opponent-adjusted history (first load takes ~30s)…</div></div>`;
+  if(!HIST_QB)   HIST_QB   = await j('/api/qb_history');
+  if(!HIST_UNIT) HIST_UNIT = await j('/api/unit_history');
+  app().innerHTML = `
+    <div class="note"><b>Opponent-adjusted history</b> — every EPA number here subtracts the quality of the
+      defenses actually faced (alternating-least-squares fit over every play), so a QB or unit isn't punished
+      for a brutal schedule. Rolling: when ${HIST_UNIT.seasons[HIST_UNIT.seasons.length-1]+1} play-by-play starts
+      landing, the current season appears automatically and updates weekly.</div>
+    <div class="pad"><div class="card">
+      <h2>QB seasons <span>last ${HIST_QB.seasons.length} seasons · opponent-adjusted EPA/play · min 150 dropbacks per season cell</span></h2>
+      ${qbHistTable()}
+      <div class="epa-leg" style="margin-top:8px"><span>Hover a season cell for raw EPA + dropbacks · Wgt adj = dropback-weighted,
+        recency-tilted window average · CPOE/rate stats from the latest qualifying season · sorted by Wgt adj</span></div>
+    </div></div>
+    <div class="pad"><div class="card">
+      <h2 style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <span>Team unit EPA by season <span style="color:var(--muted);font-weight:400;font-size:12px">opponent-adjusted · all ${HIST_UNIT.seasons.length} seasons on file</span></span>
+        <span class="seg" id="unitHistSeg">${UNIT_HIST_OPTS.map(([k,l])=>`<button class="${k===HIST_UNIT_SEL?'on':''}" data-u="${k}" onclick="setUnitHist('${k}')">${l}</button>`).join('')}</span>
+      </h2>
+      <div id="unitHistHost">${unitHistTable()}</div>
+      <div class="epa-leg" style="margin-top:8px"><span>Offense: higher = better. Defense: shown as EPA allowed — negative = elite.
+        Green→red per cell · rows sorted by the latest season · click a team for its profile</span></div>
+    </div></div>`;
+}
+
 // ── Detailed matchup panels ─────────────────────────────────────────
 const fmtSituVal=(v,row)=> v==null?'—':(row.pct?(v*100).toFixed(row.dec)+'%':(v>=0?'+':'')+v.toFixed(row.dec));
 function situRow(row, offColor, defColor){

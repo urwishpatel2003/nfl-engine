@@ -316,6 +316,21 @@ _DEPTH_CACHE = {}
 _PFF_COMPARE = None
 
 
+@app.route('/api/qb_history')
+def api_qb_history():
+    """Per-QB, per-season opponent-adjusted passing table (rolling — grows as the
+    current season's PBP lands via the daily refresh)."""
+    from ml.history import qb_seasons
+    return jsonify(_native(qb_seasons()))
+
+
+@app.route('/api/unit_history')
+def api_unit_history():
+    """Team offense/defense opponent-adjusted unit EPA for every season with PBP."""
+    from ml.history import unit_epa_history
+    return jsonify(_native(unit_epa_history()))
+
+
 # ── PFF unit reports (per-team drilldowns from the preseason facet tables) ──────
 # (parquet file, unit label, sort/grade column, volume column that must be > 0,
 #  then the curated analyst columns as (col, short label, decimals)).
@@ -1610,6 +1625,11 @@ def clear_caches():
     try:                                              # PFF grade lookups (squad player cards)
         import ml.squad as _sq
         _sq._PFF_CACHE = _sq._PFF_PRE_CACHE = None
+    except Exception:
+        pass
+    try:                                              # QB/unit history tables
+        import ml.history as _hist
+        _hist.clear()
     except Exception:
         pass
     for modname, cachename in [("ml.adjust", "_ADJ_CACHE"), ("ml.backtest_spreads", "_BT_CACHE")]:
