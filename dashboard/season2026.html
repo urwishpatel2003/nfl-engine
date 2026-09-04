@@ -1120,14 +1120,38 @@ function injImpactNote(r){
 }
 // ── VIEW: History (opponent-adjusted QB seasons + unit EPA by season) ──
 let HIST_QB=null, HIST_UNIT=null, HIST_UNIT_SEL='off_pass';
+let QBH_SORT={key:'w',dir:1};                 // dir 1 = best-first for that column
+const QBH_LOWER_BETTER=new Set(['int_pct','sack_pct']);
 function epaColor(v,lo=-0.15,hi=0.3){ if(v==null)return 'var(--muted)';
   const p=Math.max(0,Math.min(1,(v-lo)/(hi-lo))); return `hsl(${Math.round(p*120)},60%,50%)`; }
+function qbSortVal(q,key){
+  const last=HIST_QB.seasons[HIST_QB.seasons.length-1];
+  if(key==='w') return q.adj_epa_w;
+  if(typeof key==='number'||/^\d+$/.test(key)) { const st=q.seasons[key]; return st?st.adj_epa:null; }
+  const L=q.seasons[last]||{}; return L[key];
+}
+function qbSortClick(key){
+  QBH_SORT = (String(QBH_SORT.key)===String(key)) ? {key,dir:-QBH_SORT.dir} : {key,dir:1};
+  const h=document.getElementById('qbHistHost'); if(h) h.innerHTML=qbHistTable();
+}
 function qbHistTable(){
-  const d=HIST_QB; const qbs=d.qbs.slice(0,45); const last=d.seasons[d.seasons.length-1];
-  const head=`<tr><th class="tmh">QB</th><th>Team</th><th title="Dropback-weighted, recency-tilted opponent-adjusted EPA/play across the window">Wgt adj</th>
-    ${d.seasons.map(s=>`<th title="Opponent-adjusted EPA per play in ${s} (raw EPA and dropbacks on hover)">${s}</th>`).join('')}
-    <th title="Completion % over expected, ${last}">CPOE</th><th title="Success rate, ${last}">Succ%</th>
-    <th title="TD per attempt, ${last}">TD%</th><th title="INT per attempt, ${last}">INT%</th><th title="Sacks per dropback, ${last}">Sk%</th></tr>`;
+  const d=HIST_QB; const last=d.seasons[d.seasons.length-1];
+  const lowFirst=QBH_LOWER_BETTER.has(QBH_SORT.key);
+  const qbs=[...d.qbs].sort((a,b)=>{
+    const va=qbSortVal(a,QBH_SORT.key), vb=qbSortVal(b,QBH_SORT.key);
+    if(va==null&&vb==null) return 0; if(va==null) return 1; if(vb==null) return -1;
+    return (lowFirst?1:-1)*QBH_SORT.dir*(va-vb);
+  }).slice(0,45);
+  const mk=(key,label,tip)=>{
+    const on=String(QBH_SORT.key)===String(key);
+    return `<th class="sortable${on?' sorted':''}" title="${tip} — click to sort" onclick="qbSortClick(${typeof key==='number'?key:`'${key}'`})">${label}${on?` <span class="sortmk">${QBH_SORT.dir===1?'▲':'▼'}</span>`:''}</th>`;
+  };
+  const head=`<tr><th class="tmh">QB</th><th>Team</th>
+    ${mk('w','Wgt adj','Dropback-weighted, recency-tilted opponent-adjusted EPA/play across the window')}
+    ${d.seasons.map(s=>mk(s,s,`Opponent-adjusted EPA per play in ${s} (raw EPA and dropbacks on hover)`)).join('')}
+    ${mk('cpoe','CPOE',`Completion % over expected, ${last}`)}${mk('success','Succ%',`Success rate, ${last}`)}
+    ${mk('td_pct','TD%',`TD per attempt, ${last}`)}${mk('int_pct','INT%',`INT per attempt, ${last}`)}
+    ${mk('sack_pct','Sk%',`Sacks per dropback, ${last}`)}</tr>`;
   const rows=qbs.map(q=>{
     const cells=d.seasons.map(s=>{const st=q.seasons[s];
       if(!st) return '<td style="color:var(--muted)">—</td>';
@@ -1144,14 +1168,23 @@ function qbHistTable(){
 }
 const UNIT_HIST_OPTS=[['off_pass','Pass offense',false],['off_rush','Rush offense',false],
                       ['def_pass','Pass defense',true],['def_rush','Run defense',true]];
+let UNITH_SORT=null;                          // {season, dir}; null = latest season, best-first
+function unitHistSortClick(season){
+  UNITH_SORT = (UNITH_SORT&&UNITH_SORT.season===season) ? {season,dir:-UNITH_SORT.dir} : {season,dir:1};
+  const h=document.getElementById('unitHistHost'); if(h) h.innerHTML=unitHistTable();
+}
 function unitHistTable(){
   const d=HIST_UNIT, key=HIST_UNIT_SEL;
   const lowerBetter=UNIT_HIST_OPTS.find(o=>o[0]===key)[2];
-  const last=d.seasons[d.seasons.length-1];
+  const sort=UNITH_SORT||{season:d.seasons[d.seasons.length-1],dir:1};
   const teams=Object.keys(d.teams).filter(t=>META[t]);
-  teams.sort((a,b)=>{const va=(d.teams[a][last]||{})[key], vb=(d.teams[b][last]||{})[key];
-    return (lowerBetter?1:-1)*((va??9)-(vb??9));});
-  const head=`<tr><th class="tmh">Team</th>${d.seasons.map(s=>`<th>${s}</th>`).join('')}</tr>`;
+  teams.sort((a,b)=>{const va=(d.teams[a][sort.season]||{})[key], vb=(d.teams[b][sort.season]||{})[key];
+    if(va==null&&vb==null) return 0; if(va==null) return 1; if(vb==null) return -1;
+    return (lowerBetter?1:-1)*sort.dir*(va-vb);});
+  const head=`<tr><th class="tmh">Team</th>${d.seasons.map(s=>{
+    const on=s===sort.season;
+    return `<th class="sortable${on?' sorted':''}" title="Click to sort by ${s}" onclick="unitHistSortClick(${s})">${s}${on?` <span class="sortmk">${sort.dir===1?'▲':'▼'}</span>`:''}</th>`;
+  }).join('')}</tr>`;
   const rows=teams.map(t=>{
     const cells=d.seasons.map(s=>{const v=(d.teams[t][s]||{})[key];
       if(v==null) return '<td style="color:var(--muted)">—</td>';
@@ -1177,9 +1210,9 @@ async function viewHistory(){
       landing, the current season appears automatically and updates weekly.</div>
     <div class="pad"><div class="card">
       <h2>QB seasons <span>last ${HIST_QB.seasons.length} seasons · opponent-adjusted EPA/play · min 150 dropbacks per season cell</span></h2>
-      ${qbHistTable()}
-      <div class="epa-leg" style="margin-top:8px"><span>Hover a season cell for raw EPA + dropbacks · Wgt adj = dropback-weighted,
-        recency-tilted window average · CPOE/rate stats from the latest qualifying season · sorted by Wgt adj</span></div>
+      <div id="qbHistHost">${qbHistTable()}</div>
+      <div class="epa-leg" style="margin-top:8px"><span><b>Click any column to sort</b> (click again to reverse) · hover a season cell for raw EPA + dropbacks ·
+        Wgt adj = dropback-weighted, recency-tilted window average · CPOE/rate stats from the latest qualifying season</span></div>
     </div></div>
     <div class="pad"><div class="card">
       <h2 style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
@@ -1188,7 +1221,7 @@ async function viewHistory(){
       </h2>
       <div id="unitHistHost">${unitHistTable()}</div>
       <div class="epa-leg" style="margin-top:8px"><span>Offense: higher = better. Defense: shown as EPA allowed — negative = elite.
-        Green→red per cell · rows sorted by the latest season · click a team for its profile</span></div>
+        Green→red per cell · <b>click a season header to sort</b> (again to reverse) · click a team for its profile</span></div>
     </div></div>`;
 }
 
