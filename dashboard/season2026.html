@@ -1147,11 +1147,13 @@ function qbHistTable(){
     return `<th class="sortable${on?' sorted':''}" title="${tip} — click to sort" onclick="qbSortClick(${typeof key==='number'?key:`'${key}'`})">${label}${on?` <span class="sortmk">${QBH_SORT.dir===1?'▲':'▼'}</span>`:''}</th>`;
   };
   const head=`<tr><th class="tmh">QB</th><th>Team</th>
-    ${mk('w','Wgt adj','Dropback-weighted, recency-tilted opponent-adjusted EPA/play across the window')}
-    ${d.seasons.map(s=>mk(s,s,`Opponent-adjusted EPA per play in ${s} (raw EPA and dropbacks on hover)`)).join('')}
-    ${mk('cpoe','CPOE',`Completion % over expected, ${last}`)}${mk('success','Succ%',`Success rate, ${last}`)}
-    ${mk('td_pct','TD%',`TD per attempt, ${last}`)}${mk('int_pct','INT%',`INT per attempt, ${last}`)}
-    ${mk('sack_pct','Sk%',`Sacks per dropback, ${last}`)}</tr>`;
+    ${mk('w','Wgt adj','The headline number: opponent-adjusted EPA per play averaged across the whole window, weighted by dropbacks and tilted toward recent seasons. Elite is +0.20 or better; league average is around +0.05.')}
+    ${d.seasons.map(s=>mk(s,s,`Opponent-adjusted EPA per play in ${s}: each play's Expected Points Added minus the rating of the defense it came against, so a brutal schedule doesn't hide good play. Hover a cell for the raw (unadjusted) EPA and dropback count.`)).join('')}
+    ${mk('cpoe','CPOE',`Completion % Over Expected (${last}): actual completion rate minus what an average QB would complete on the same throws (by depth, location, situation). Isolates pure accuracy from play style — +3 elite, 0 average, −3 scattershot.`)}
+    ${mk('success','Succ%',`Success rate (${last}): share of plays with POSITIVE EPA — how often the QB keeps the offense ahead of schedule. Consistency measure: high EPA with low success = boom-bust; high both = elite.`)}
+    ${mk('td_pct','TD%',`Touchdown passes per attempt (${last}). League average ≈ 4.5%.`)}
+    ${mk('int_pct','INT%',`Interceptions per attempt (${last}). Lower is better; league average ≈ 2.3%. Note INTs are noisy year to year — turnover-worthy-play rate on the PFF unit reports is steadier.`)}
+    ${mk('sack_pct','Sk%',`Sacks per dropback (${last}). Lower is better. Largely a QB trait (time-to-throw, pocket feel, throwaways) rather than an O-line stat — sack rate follows the quarterback when he changes teams.`)}</tr>`;
   const rows=qbs.map(q=>{
     const cells=d.seasons.map(s=>{const st=q.seasons[s];
       if(!st) return '<td style="color:var(--muted)">—</td>';
@@ -1166,8 +1168,11 @@ function qbHistTable(){
   }).join('');
   return `<div class="lstat-wrap"><table class="lstat" style="min-width:760px"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
 }
-const UNIT_HIST_OPTS=[['off_pass','Pass offense',false],['off_rush','Rush offense',false],
-                      ['def_pass','Pass defense',true],['def_rush','Run defense',true]];
+const UNIT_HIST_OPTS=[
+  ['off_pass','Pass offense',false,'Opponent-adjusted EPA per PASS play the offense generated — passing-game efficiency with the quality of the defenses faced removed. Higher = better; +0.15 is elite.'],
+  ['off_rush','Rush offense',false,'Opponent-adjusted EPA per RUSH play generated. Higher = better; note league-average rush EPA is slightly negative (passing is simply more efficient).'],
+  ['def_pass','Pass defense',true,'Opponent-adjusted EPA per pass play ALLOWED, with the quality of offenses faced removed. Shown as EPA allowed: negative = the defense takes points off the board; −0.10 or lower is elite.'],
+  ['def_rush','Run defense',true,'Opponent-adjusted EPA per rush play ALLOWED. Negative = elite run defense.']];
 let UNITH_SORT=null;                          // {season, dir}; null = latest season, best-first
 function unitHistSortClick(season){
   UNITH_SORT = (UNITH_SORT&&UNITH_SORT.season===season) ? {season,dir:-UNITH_SORT.dir} : {season,dir:1};
@@ -1181,9 +1186,10 @@ function unitHistTable(){
   teams.sort((a,b)=>{const va=(d.teams[a][sort.season]||{})[key], vb=(d.teams[b][sort.season]||{})[key];
     if(va==null&&vb==null) return 0; if(va==null) return 1; if(vb==null) return -1;
     return (lowerBetter?1:-1)*sort.dir*(va-vb);});
-  const head=`<tr><th class="tmh">Team</th>${d.seasons.map(s=>{
+  const unitTip=UNIT_HIST_OPTS.find(o=>o[0]===key)[3];
+  const head=`<tr><th class="tmh" title="${esc(unitTip)}">Team</th>${d.seasons.map(s=>{
     const on=s===sort.season;
-    return `<th class="sortable${on?' sorted':''}" title="Click to sort by ${s}" onclick="unitHistSortClick(${s})">${s}${on?` <span class="sortmk">${sort.dir===1?'▲':'▼'}</span>`:''}</th>`;
+    return `<th class="sortable${on?' sorted':''}" title="${esc(unitTip)} Click to rank teams by ${s}; click again to reverse." onclick="unitHistSortClick(${s})">${s}${on?` <span class="sortmk">${sort.dir===1?'▲':'▼'}</span>`:''}</th>`;
   }).join('')}</tr>`;
   const rows=teams.map(t=>{
     const cells=d.seasons.map(s=>{const v=(d.teams[t][s]||{})[key];
@@ -1217,7 +1223,7 @@ async function viewHistory(){
     <div class="pad"><div class="card">
       <h2 style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
         <span>Team unit EPA by season <span style="color:var(--muted);font-weight:400;font-size:12px">opponent-adjusted · all ${HIST_UNIT.seasons.length} seasons on file</span></span>
-        <span class="seg" id="unitHistSeg">${UNIT_HIST_OPTS.map(([k,l])=>`<button class="${k===HIST_UNIT_SEL?'on':''}" data-u="${k}" onclick="setUnitHist('${k}')">${l}</button>`).join('')}</span>
+        <span class="seg" id="unitHistSeg">${UNIT_HIST_OPTS.map(([k,l,,tip])=>`<button class="${k===HIST_UNIT_SEL?'on':''}" data-u="${k}" title="${esc(tip)}" onclick="setUnitHist('${k}')">${l}</button>`).join('')}</span>
       </h2>
       <div id="unitHistHost">${unitHistTable()}</div>
       <div class="epa-leg" style="margin-top:8px"><span>Offense: higher = better. Defense: shown as EPA allowed — negative = elite.
