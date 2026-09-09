@@ -102,20 +102,33 @@ def unit_injury_deltas(team: str) -> dict:
     """Unit z-score deltas from this team's Out list — only STARTERS / heavily-featured
     players count, and each is scaled by the injured player's 0-100 rating (losing an
     All-Pro >> losing a depth piece, which barely moves it since a similar player replaces him)."""
-    inj = _injuries()
+    from ml.projections import current_reports, reserve_ids
     d = {"z_off_pass": 0.0, "z_off_rush": 0.0, "z_def_pass": 0.0, "z_def_rush": 0.0}
-    if inj.empty or "team" not in inj.columns:
-        return d
-    t = inj[inj["team"] == team]
-    if t.empty:
-        return d
-    sw = t["season"].astype(int) * 100 + t["week"].astype(int)
-    out = t[(sw == sw.max()) & (t["report_status"] == "Out")]
-    if out.empty:
+    # (1) Out in the team's CURRENT-SEASON report (never a prior season's list) …
+    inj = current_reports(_injuries())
+    rows = []
+    if not inj.empty and "team" in inj.columns:
+        t = inj[(inj["team"] == team) & (inj["report_status"] == "Out")]
+        rows += [{"position": r.get("position"), "gsis_id": r.get("gsis_id"),
+                  "full_name": r.get("full_name")} for _, r in t.iterrows()]
+    # (2) … plus anyone on IR/PUP/exempt in the roster release who still sits on the
+    # published depth chart (teams often leave an IR'd starter at #1 for weeks).
+    res = reserve_ids(team)
+    if res:
+        try:
+            dc = pd.read_parquet(RAW / "depth_2026_current.parquet",
+                                 columns=["team", "gsis_id", "player_name", "pos_abb"])
+            dc = dc[(dc["team"] == team) & dc["gsis_id"].isin(res)]
+            seen = {r["gsis_id"] for r in rows}
+            rows += [{"position": r.pos_abb, "gsis_id": r.gsis_id, "full_name": r.player_name}
+                     for r in dc.itertuples() if r.gsis_id not in seen]
+        except Exception:
+            pass
+    if not rows:
         return d
     from ml.squad import _norm
     byg, bynm = _team_ratings(team)
-    for _, r in out.iterrows():
+    for r in rows:
         pos = str(r.get("position") or "").upper()
         if pos == "QB":                                    # QB handled by the points penalty
             continue

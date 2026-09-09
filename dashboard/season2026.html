@@ -281,6 +281,10 @@
   .st-Out{background:#3a1414;color:#f87171}
   .st-Doubtful{background:#3a2a12;color:#fbbf24}
   .st-Questionable{background:#20304a;color:#93c5fd}
+  .st-DNP{background:#2b1b1b;color:#fda4af}          /* practice-only: did not practice */
+  .st-LP{background:#2a2612;color:#fde68a}           /* practice-only: limited */
+  .st-IR,.st-PUP,.st-NFI,.st-EXE,.st-RES,.st-RET,.st-CUT{background:#241f3a;color:#c4b5fd}  /* reserve lists / released */
+  .pl .pn.inj-res{color:#a78bfa}
 
   /* schedule slate */
   .sched{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px}
@@ -859,7 +863,13 @@ async function viewTeam(team){
   const U=d.units||{};
   const INJ=(d.injuries&&d.injuries.by_id)||{};
   const _in=d.injuries||{}, _nInj=Object.keys(INJ).length;
-  const INJ_NOTE=_nInj?` <span class="st mini st-Out">O</span> Out · <span class="st mini st-Doubtful">D</span> Doubtful · <span class="st mini st-Questionable">Q</span> Questionable — latest report ${_in.season} wk${_in.week}.`:'';
+  // status → pill text / hover text; reserve-list statuses come from the roster release, not the report
+  const ST_PILL={Out:'O',Doubtful:'D',Questionable:'Q'};
+  const RES_ST={IR:1,PUP:1,NFI:1,EXE:1,RES:1,RET:1,CUT:1};
+  const ST_LONG={Out:'Out',Doubtful:'Doubtful',Questionable:'Questionable',DNP:'Did not practice (no game designation yet)',
+    LP:'Limited practice (no game designation yet)',IR:'Injured reserve',PUP:'Physically unable to perform list',
+    NFI:'Non-football injury list',EXE:'Commissioner exempt list',RES:'Reserve list',RET:'Reserve/retired',CUT:'Released (still on the published depth chart)'};
+  const INJ_NOTE=_nInj?` <span class="st mini st-Out">O</span> Out · <span class="st mini st-Doubtful">D</span> Doubtful · <span class="st mini st-Questionable">Q</span> Questionable · <span class="st mini st-DNP">DNP</span>/<span class="st mini st-LP">LP</span> practice only · <span class="st mini st-IR">IR</span>/<span class="st mini st-PUP">PUP</span> reserve list — ${_in.week?`report ${_in.season} wk${_in.week}`:`no ${_in.season||''} report published yet`}.`:'';
   app().innerHTML = `<div class="pad">
     <div class="viewhead">
       <div class="ttl">Team Profile <span>pick a team, or click one in Rankings</span></div>
@@ -933,8 +943,8 @@ async function viewTeam(team){
             const rtTtl=`title="Rating ${r??'—'} of 100 — percentile among ${g.label}s league-wide, from ${srcTxt}. 80+ elite · ~50 average starter · under 40 replacement level."`;
             const ttl=est?`title="projected — ${srcTxt}, not 2025 stats"`:'';
             // injury marker: Out → red name, Doubtful → yellow name; small status pill from the latest report
-            const iv=INJ[p.gsis]; const ic=iv?(iv.status==='Out'?'inj-out':iv.status==='Doubtful'?'inj-doubt':''):'';
-            const pill=iv?`<span class="st mini st-${esc(iv.status)}" title="${esc(iv.status)}${iv.injury?' — '+esc(iv.injury):''}">${esc((iv.status||'')[0])}</span>`:'';
+            const iv=INJ[p.gsis]; const ic=iv?(iv.status==='Out'?'inj-out':iv.status==='Doubtful'?'inj-doubt':RES_ST[iv.status]?'inj-res':''):'';
+            const pill=iv?`<span class="st mini st-${esc(iv.status)}" title="${esc(ST_LONG[iv.status]||iv.status)}${iv.injury?' — '+esc(iv.injury):''}">${esc(ST_PILL[iv.status]||iv.status)}</span>`:'';
             const pff=p.pff!=null?`<span class="pffb" title="PFF grade (imported)">${p.pff.toFixed(1)}</span>`:'';
             const pre=p.pre!=null?`<span class="preb" title="PFF 2026 preseason grade">P${p.pre.toFixed(0)}</span>`:'';
             return `<div class="pl ${p.rank===1?'starter':''}" ${ttl}><div class="dr">${tag}</div><div class="pn ${ic}" title="${esc(p.name)}">${p.name}</div>${pill}${pff}${pre}${bar}<div class="rt" ${rtTtl} style="color:${ratingColor(r)};${st};cursor:help">${r==null?'—':r}</div></div>`;
@@ -1076,7 +1086,7 @@ function formPanel(tm, fm){
     <div class="bxr"><span class="bn">Points against</span><span class="bs">${l.pa!=null?Number(l.pa).toFixed(1):'—'} <span style="color:var(--muted)">(${s.pa!=null?Number(s.pa).toFixed(1):'—'})</span></span></div></div>`;
 }
 function injPanel(tm, iv){
-  const hdr=`<div class="bxt"><div class="bh">${tm} <span style="color:var(--muted);font-weight:400">${iv&&iv.season?('injuries '+iv.season+' wk'+iv.week):''}</span></div>`;
+  const hdr=`<div class="bxt"><div class="bh">${tm} <span style="color:var(--muted);font-weight:400">${iv&&iv.season?(iv.week?('injuries '+iv.season+' wk'+iv.week):(iv.season+' · no report published yet — reserve lists only')):''}</span></div>`;
   if(!iv || !iv.players || !iv.players.length) return hdr+`<div class="loading">No active injury report.</div></div>`;
   return hdr+iv.players.map(p=>`<div class="inj"><span class="bn">${esc(p.name)} <span style="color:var(--muted)">${esc(p.position||'')}</span></span>
     <span><span class="st st-${esc(p.status)}">${esc(p.status)}</span> <span style="color:var(--muted);font-size:11px">${esc(p.injury)}</span></span></div>`).join('')+`</div>`;
@@ -1391,7 +1401,7 @@ async function viewMatchup(home, away, neutral){
   <div class="card"><h2>Recent form <span>${r.form[r.home]&&r.form[r.home].season||''}</span></h2><div class="box">${formPanel(r.away, r.form[r.away])}${formPanel(r.home, r.form[r.home])}</div></div>
   ${h2hPanel(r)}
   ${conditionsPanel(r)}
-  <div class="card"><h2>Latest injuries <span>Out/Doubtful players are removed from the projection &amp; spread</span></h2>
+  <div class="card"><h2>Latest injuries <span>Out/Doubtful and reserve-list (IR/PUP/exempt) players are removed from the projection &amp; spread · DNP/LP = practice participation only, no designation yet</span></h2>
     ${injImpactNote(r)}
     <div class="box">${injPanel(r.away, r.injuries[r.away])}${injPanel(r.home, r.injuries[r.home])}</div></div>
   <div class="card"><h2>Projected box score <span>expected stat lines · available players</span></h2><div id="mBox" class="box"><div class="loading">Projecting player stat lines…</div></div></div>`;

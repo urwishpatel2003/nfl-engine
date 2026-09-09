@@ -1023,57 +1023,96 @@ def api_team_trends():
 
 
 # ── latest injuries + full matchup ──────────────────────────────────
-_STATUS_RANK = {"Out": 0, "Doubtful": 1, "Questionable": 2}
+# Panel ordering: this week's game designations → practice-only notes (no designation yet,
+# but DNP / limited on the mid-week report is the earliest signal a status is coming) →
+# season-long reserve lists last (IR/PUP/… aren't week-to-week news).
+_STATUS_RANK = {"Out": 0, "Doubtful": 1, "Questionable": 2, "DNP": 3, "LP": 4,
+                "PUP": 5, "NFI": 5, "EXE": 5, "IR": 6, "RES": 6, "RET": 7, "CUT": 7}
+_NOT_ON_TEAM = ("CUT", "RET")      # released/retired: unavailable to the model, but not "injuries"
+_PRACTICE_SHORT = {"Did Not Participate In Practice": "DNP",
+                   "Limited Participation in Practice": "LP"}
+
+
+def _isna(v) -> bool:
+    return v is None or (isinstance(v, float) and pd.isna(v)) or (isinstance(v, str) and not v)
+
+
+def _team_report(team: str):
+    """(season, week, rows) of this team's CURRENT-SEASON report via ml.projections —
+    the one rule every layer shares, so the panel never shows a list the model isn't using."""
+    from ml.projections import current_reports
+    cur = current_reports(injuries_df())
+    if cur.empty:
+        return None, None, cur
+    t = cur[cur["team"] == team]
+    if t.empty:                    # no report yet this season → nothing (NOT last year's)
+        return int(cur["season"].max()), None, t
+    return int(t["season"].iloc[0]), int(t["week"].iloc[0]), t
+
+
+def _reserve_rows(team: str) -> list:
+    """Reserve-list players (IR/PUP/NFI/exempt) from the roster release, with name+position."""
+    from ml.projections import reserve_ids
+    res = reserve_ids(team)
+    if not res:
+        return []
+    r = pd.read_parquet(RAW / "rosters_2026.parquet",
+                        columns=["team", "player_id", "player_name", "position"])
+    r = r[(r["team"] == team) & r["player_id"].isin(res)].drop_duplicates("player_id")
+    return [{"gsis_id": str(x.player_id), "name": x.player_name, "position": x.position,
+             "status": res[str(x.player_id)], "injury": ""} for x in r.itertuples()]
 
 
 def latest_injuries(team: str) -> dict:
-    """Most-recent available injury report for a team (empty in the offseason)."""
-    inj = injuries_df()
-    if inj.empty or "team" not in inj.columns:
-        return {"season": None, "week": None, "players": []}
-    t = inj[inj["team"] == team]
-    if t.empty:
-        return {"season": None, "week": None, "players": []}
-    season = int(t["season"].max())
-    t = t[t["season"] == season]
-    week = int(t["week"].max())
-    t = t[t["week"] == week]
-    players = []
+    """This team's current-season injury report (empty before it publishes) + reserve lists.
+    Game designations (Out/Doubtful/Questionable) carry the reported injury; players with
+    no designation yet but DNP/limited practice are listed as DNP/LP so a Wednesday report
+    is still informative. Reserve-list players (IR/PUP/…) are appended from the roster."""
+    season, week, t = _team_report(team)
+    reserve = _reserve_rows(team)
+    res_by_id = {p["gsis_id"]: p["status"] for p in reserve}
+    players, seen = [], set()
     for _, r in t.iterrows():
-        st = r.get("report_status")
-        if not st or (isinstance(st, float) and pd.isna(st)):
-            continue
-        players.append({
-            "name": r.get("full_name"), "position": r.get("position"),
-            "status": st, "injury": r.get("report_primary_injury") or "",
-        })
-    players.sort(key=lambda x: _STATUS_RANK.get(x["status"], 3))
+        gid, st = str(r.get("gsis_id")), r.get("report_status")
+        if _isna(st):
+            # no game designation: the roster's reserve list (IR/PUP/exempt) outranks a
+            # practice note — an exempt-list player "limited in practice" still can't play
+            st = res_by_id.get(gid) or _PRACTICE_SHORT.get(str(r.get("practice_status") or ""))
+            if not st:
+                continue                                   # full practice, no designation
+            inj = r.get("practice_primary_injury")
+        else:
+            inj = r.get("report_primary_injury")
+        seen.add(gid)
+        players.append({"name": r.get("full_name"), "position": r.get("position"),
+                        "status": str(st), "injury": "" if _isna(inj) else str(inj)})
+    players += [p for p in reserve if p["gsis_id"] not in seen and p["status"] not in _NOT_ON_TEAM]
+    players.sort(key=lambda x: (_STATUS_RANK.get(x["status"], 9), str(x["name"])))
     return {"season": season, "week": week, "players": players}
 
 
 def team_injury_map(team: str) -> dict:
-    """Latest injury report for a team keyed by gsis_id — for the profile depth chart.
-    Id-keyed (not name) to stay coherent with the id-first depth-chart join. Empty in
-    the offseason before that season's game reports publish (nflverse has no file yet)."""
-    inj = injuries_df()
-    if inj.empty or "team" not in inj.columns or "gsis_id" not in inj.columns:
-        return {"season": None, "week": None, "by_id": {}}
-    t = inj[inj["team"] == team]
-    if t.empty:
-        return {"season": None, "week": None, "by_id": {}}
-    season = int(t["season"].max())
-    t = t[t["season"] == season]
-    week = int(t["week"].max())
-    t = t[t["week"] == week]
+    """Current-season report for a team keyed by gsis_id — for the profile depth chart.
+    Id-keyed (not name) to stay coherent with the id-first depth-chart join. Game
+    designations + practice-only DNP/LP + reserve-list labels; healthy players absent."""
+    season, week, t = _team_report(team)
+    reserve = _reserve_rows(team)
+    res_by_id = {p["gsis_id"]: p["status"] for p in reserve}
     by_id = {}
     for _, r in t.iterrows():
         gid, st = r.get("gsis_id"), r.get("report_status")
-        if not gid or (isinstance(gid, float) and pd.isna(gid)):
+        if _isna(gid):
             continue
-        if not st or (isinstance(st, float) and pd.isna(st)):
-            continue                                   # no designation → healthy, skip
-        by_id[str(gid)] = {"status": str(st),
-                           "injury": r.get("report_primary_injury") or ""}
+        if _isna(st):                                      # reserve list outranks a practice note
+            st = res_by_id.get(str(gid)) or _PRACTICE_SHORT.get(str(r.get("practice_status") or ""))
+            if not st:
+                continue                                   # no designation → healthy, skip
+            inj = r.get("practice_primary_injury")
+        else:
+            inj = r.get("report_primary_injury")
+        by_id[str(gid)] = {"status": str(st), "injury": "" if _isna(inj) else str(inj)}
+    for p in reserve:
+        by_id.setdefault(p["gsis_id"], {"status": p["status"], "injury": ""})
     return {"season": season, "week": week, "by_id": by_id}
 
 
@@ -1719,6 +1758,21 @@ def _daily_scheduler():
     from datetime import datetime, timezone
     hour = int(os.environ.get("REFRESH_HOUR", 8))
     season = int(os.environ.get("REFRESH_SEASON", 2026))
+    # Boot catch-up: a deploy lands whenever it lands; if the volume's last refresh is older
+    # than REFRESH_STALE_HOURS (default 6) pull now instead of waiting for tomorrow's slot.
+    # In-season that's what makes a game-day deploy carry the same-day injury report.
+    try:
+        from ml import refresh as R
+        last = (R.last_status() or {}).get("finished")
+        stale_h = float(os.environ.get("REFRESH_STALE_HOURS", 6))
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() / 3600 \
+            if last else 1e9
+        if age >= stale_h:
+            print(f"[boot] last refresh {age:.1f}h old (>= {stale_h}h) — refreshing now")
+            _t.sleep(15)                     # let gunicorn finish binding first
+            _start_refresh(season)
+    except Exception as e:
+        print(f"[boot] catch-up refresh check failed: {e}")
     while True:
         now = datetime.now(timezone.utc)
         target = now.replace(hour=hour, minute=0, second=0, microsecond=0)

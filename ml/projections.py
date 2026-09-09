@@ -33,20 +33,59 @@ _QBDEPTH_CACHE = None
 # players are assumed active (they suit up ~75% of the time).
 OUT_STATUSES = ("Out", "Doubtful")
 
+# nflverse roster `status` / `status_description_abbr` → short reserve-list label. Anyone
+# on one of these lists cannot suit up regardless of the injury report (which usually
+# doesn't even list them), so they're unavailable to every projection layer.
+RESERVE_STATUS = {"RES": "RES", "EXE": "EXE", "RET": "RET", "CUT": "CUT"}
+RESERVE_DESC = {"R01": "IR", "R48": "IR",          # Reserve/Injured (+ designated-to-return)
+                "R04": "PUP", "R05": "NFI", "R27": "NFI",
+                "E02": "EXE"}                      # Commissioner exempt list
+_STATUS_PRIORITY = {"ACT": 0, "DEV": 1}            # a player cut by A and signed by B keeps B
+
+
+def current_reports(inj: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Each team's most recent injury report WITHIN THE CURRENT SEASON — the newest season
+    present in injuries.parquet. It deliberately never falls back to a prior season: before a
+    team's first report of the year it just has no rows. (The old "latest week per team"
+    rule resurrected last January's Out list on week-1 Wednesday for every team whose
+    report hadn't published yet, quietly deleting healthy starters from the projection.)"""
+    if inj is None:
+        p = RAW / "injuries.parquet"
+        inj = pd.read_parquet(p) if p.exists() else pd.DataFrame()
+    if inj.empty or not {"season", "week", "team"} <= set(inj.columns):
+        return pd.DataFrame()
+    cur = inj[inj["season"] == inj["season"].max()].copy()
+    cur["week"] = cur["week"].astype(int)
+    return cur[cur["week"] == cur.groupby("team")["week"].transform("max")]
+
+
+def reserve_ids(team: str | None = None) -> dict:
+    """{gsis_id: label} for players on a reserve/exempt list in the current roster release
+    (IR, PUP, NFI, exempt, retired). Optional team filter."""
+    p = RAW / "rosters_2026.parquet"
+    if not p.exists():
+        return {}
+    r = pd.read_parquet(p, columns=["team", "player_id", "status", "status_description_abbr"])
+    r = r.dropna(subset=["player_id"])
+    r["_pri"] = r["status"].map(_STATUS_PRIORITY).fillna(9)
+    r = r.sort_values("_pri").drop_duplicates("player_id")        # ACT row wins across teams
+    r = r[r["status"].isin(RESERVE_STATUS)]
+    if team is not None:
+        r = r[r["team"] == team]
+    return {str(g): RESERVE_DESC.get(str(d), RESERVE_STATUS.get(str(s), "RES"))
+            for g, s, d in zip(r["player_id"], r["status"], r["status_description_abbr"])}
+
 
 def unavailable_ids(statuses=OUT_STATUSES) -> set:
-    """gsis_ids ruled out in each team's most-recent injury report (same report the
-    dashboard's injury panel shows). Empty in the offseason if no report exists."""
-    p = RAW / "injuries.parquet"
-    if not p.exists():
-        return set()
-    inj = pd.read_parquet(p)
-    if inj.empty or "gsis_id" not in inj.columns or "report_status" not in inj.columns:
-        return set()
-    inj = inj.dropna(subset=["gsis_id"]).copy()
-    inj["sw"] = inj["season"].astype(int) * 100 + inj["week"].astype(int)
-    inj = inj[inj["sw"] == inj.groupby("team")["sw"].transform("max")]   # latest week per team
-    return set(inj[inj["report_status"].isin(statuses)]["gsis_id"])
+    """gsis_ids that won't play: ruled Out/Doubtful in each team's current-season report
+    (same report the dashboard's injury panel shows) PLUS everyone on a reserve/exempt
+    list in the roster release. Only the reserve lists apply before reports publish."""
+    ids = set(reserve_ids())
+    inj = current_reports()
+    if not inj.empty and {"gsis_id", "report_status"} <= set(inj.columns):
+        inj = inj.dropna(subset=["gsis_id"])
+        ids |= set(inj[inj["report_status"].isin(statuses)]["gsis_id"].astype(str))
+    return ids
 
 
 def _depth_qbs() -> dict:
