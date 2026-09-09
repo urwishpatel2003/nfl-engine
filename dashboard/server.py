@@ -1186,6 +1186,8 @@ def _matchup_situational(home: str, away: str, season: int) -> dict:
         ranks.setdefault(dcol, _col_rank(sub, dcol, dbet))
 
     def val(team, col):
+        if col not in sub.columns:                    # a styles build missing a metric → blank cell, not a 500
+            return None
         v = sub.loc[sub["team"] == team, col]
         return float(v.iloc[0]) if len(v) and pd.notna(v.iloc[0]) else None
 

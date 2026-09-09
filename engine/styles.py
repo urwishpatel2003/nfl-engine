@@ -64,8 +64,16 @@ def _penalty_metrics(pbp: pd.DataFrame) -> pd.DataFrame:
     coefficient -0.123 (t=-0.34), sign-unstable across seasons (+0.26/-0.98/+0.48) — past
     discipline adds NO incremental margin signal once strength is controlled (its real-time
     cost is already embedded in scoring records). Do not wire these into predictions."""
+    pen_cols = ["off_penalties_pg", "off_penalty_yds_pg", "def_penalties_pg", "def_penalty_yds_pg"]
     if "penalty_team" not in pbp.columns:
-        return pd.DataFrame(columns=["season", "team"])
+        # STABLE SCHEMA: every (season, team) still gets the four columns, as NaN. Returning
+        # a bare frame here dropped the columns from team_styles entirely, and the dashboard's
+        # matchup/league-stats views crashed on a server whose PBP slim predated penalty_team.
+        out = pbp[pbp["posteam"].notna()][["season", "posteam"]].drop_duplicates() \
+            .rename(columns={"posteam": "team"}).reset_index(drop=True)
+        for c in pen_cols:
+            out[c] = np.nan
+        return out
     scrim = {"pass", "run", "no_play", "qb_kneel", "qb_spike"}
     d = pbp[(pbp["penalty"] == 1) & pbp["penalty_team"].notna()
             & pbp["play_type"].isin(scrim) & pbp["posteam"].notna() & pbp["defteam"].notna()].copy()

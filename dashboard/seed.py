@@ -39,6 +39,22 @@ def _refresh_managed(name: str) -> bool:
     return name in _REFRESH_NAMES or name.startswith("pbp_")
 
 
+def _schema_behind(image: Path, volume: Path) -> bool:
+    """True if the image's parquet carries columns the volume's copy lacks. A refresh-managed
+    file is normally left alone, but its SCHEMA comes from the code: when fetch_data.py adds
+    columns (penalty_team in 2026-08), the volume's old slim would otherwise stay behind
+    forever — and the server-side team_styles rebuild then silently drops those metrics."""
+    if image.suffix != ".parquet":
+        return False
+    try:
+        import pyarrow.parquet as pq
+        have = set(pq.read_schema(volume).names)
+        want = set(pq.read_schema(image).names)
+        return bool(want - have)
+    except Exception:
+        return False
+
+
 def main():
     if not SEED.exists():
         print("seed: no data_seed/ present — nothing to seed (dev or no volume)")
@@ -56,6 +72,9 @@ def main():
         elif _refresh_managed(p.name):
             if not dest.exists():
                 shutil.copy2(p, dest); copied += 1        # only fill a gap; keep refresh output
+            elif _schema_behind(p, dest):
+                shutil.copy2(p, dest); synced += 1        # schema upgrade: image slim has new columns
+                print(f"seed: schema upgrade {p.name} (image has columns the volume lacked)")
         else:
             shutil.copy2(p, dest); synced += 1            # curated git data always matches image
     summary = ("first-boot copied " + str(copied) if volume_empty
