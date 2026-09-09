@@ -509,8 +509,8 @@ const NAV = [
   {id:'rankings', label:'Rankings', views:['rankings','epa','stats','pff','history','team','trends','matchup'], items:[
     ['Power Rankings','#/rankings'],['Unit EPA Map','#/epa'],['League Stats','#/stats'],
     ['PFF vs Model','#/pff'],['History','#/history'],['Team Profile','#/team'],['Trends','#/trends'],['Matchup','#/matchup']]},
-  {id:'betting', label:'Betting', views:['schedule','record','props','season'], items:[
-    ['Schedule & Picks','#/schedule'],['Model Record','#/record'],['Player Props','#/props'],['Season & Futures','#/season']]},
+  {id:'betting', label:'Betting', views:['schedule','record','kalshi','props','season'], items:[
+    ['Schedule & Picks','#/schedule'],['Model Record','#/record'],['Kalshi','#/kalshi'],['Player Props','#/props'],['Season & Futures','#/season']]},
   {id:'fantasy', label:'Fantasy', views:['fantasy'], items:[
     ['Draft Board','#/fantasy?mode=board'],['Draft Path','#/fantasy?mode=path'],['Value vs ADP','#/fantasy?mode=values'],['Breakouts','#/fantasy?mode=breakouts']]},
 ];
@@ -532,6 +532,7 @@ function renderNav(view, mode){
 async function route(){
   const {view, arg, params} = parseHash();
   renderNav(view, params.get('mode'));
+  clearInterval(KAL_TIMER);                       // stop Kalshi polling when leaving that tab
   try{
     await ensureRankings();
     if(view==='rankings')      await viewRankings();
@@ -541,6 +542,7 @@ async function route(){
     else if(view==='history')  await viewHistory();
     else if(view==='schedule') await viewSchedule(params);
     else if(view==='record')   await viewRecord(params);
+    else if(view==='kalshi')   await viewKalshi();
     else if(view==='team')     await viewTeam(arg || TEAMS[0].team);
     else if(view==='trends')   await viewTrends(arg || (RANKINGS[0]&&RANKINGS[0].team));
     else if(view==='matchup')  await viewMatchup(params.get('home'), params.get('away'), params.get('neutral')==='1');
@@ -1950,6 +1952,126 @@ async function viewRecord(params){
     ${rows ? `<div class="tblwrap"><table class="tbl rec log"><thead><tr><th>Week</th><th>Game</th><th title="model line and total at lock time">Model</th><th title="side · line taken · cover prob">ATS pick</th><th title="Over/Under · line · model prob">Total pick</th><th title="model favorite · posted odds · model prob vs market no-vig prob">ML pick</th><th>Result</th></tr></thead><tbody>${rows}</tbody></table></div>`
          : `<div class="note">No picks locked yet for ${d.season}. Open <a href="#/schedule">Schedule &amp; Picks</a> before kickoff (or wait for the daily refresh) and the week's picks are written here automatically.</div>`}</div>`;
   body.innerHTML = intro + tiles + weeks + log;
+}
+
+// ── VIEW: Kalshi (ported from the tennis engine) ────────────────────
+// Sections answer different questions and are kept apart: Tickets = what the model would
+// back now; Positions = what is OPEN, marked to the bid; Orders = what was SENT (incl.
+// never-traded); Closed = what RESOLVED or was cashed out, the only real P/L.
+let KAL_TIMER = null;
+const kMoney = (v,d=2) => v==null?'—':(v<0?'-$':'$')+Math.abs(+v).toFixed(d);
+const kSigned = (v,d=2) => v==null?'—':(v>0?'+':'')+kMoney(v,d);
+const kCls = v => v>0?'g':(v<0?'b':'');
+const kNum = (v,d=2) => v==null?'—':Number(v).toFixed(d);
+const kTime = iso => { const d=new Date(iso); return isNaN(d)?'—':d.toLocaleString(undefined,{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); };
+const startsIn = iso => { const d=new Date(iso); if(isNaN(d)) return ''; const m=Math.round((d-Date.now())/60000);
+  if(m<0) return 'kicked off'; if(m<60) return `in ${m}m`; const h=Math.floor(m/60); return h<24?`in ${h}h ${m%60}m`:`in ${Math.floor(h/24)}d ${h%24}h`; };
+const kStat = (label,value,sub,klass,hero) => `<div class="rtile${hero?' hero':''}"><div class="rt-ttl">${label}</div><div class="rt-rec ${klass||''}" style="font-size:${hero?26:20}px">${value}</div>${sub?`<div class="rt-sub">${sub}</div>`:''}</div>`;
+const kErr = (d,k) => d.errors&&d.errors[k]?`<div class="note warn" style="margin-bottom:8px">${k}: ${esc(d.errors[k])}</div>`:'';
+async function kj(u){ const r=await fetch(u+(u.includes('?')?'&':'?')+'_='+Date.now(),{cache:'no-store'}); return r.json(); }
+
+async function viewKalshi(){
+  app().innerHTML = `<div class="pad">
+    <div class="viewhead"><div class="ttl">Kalshi <span>tickets sized to your balance · every limit re-checked server-side</span></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="kscope" class="pick"><option value="page">This model only</option><option value="nfl">All NFL (incl. your own)</option><option value="account">Everything on Kalshi</option></select>
+        <button id="krefresh" class="pick">Refresh</button></div></div>
+    <div class="note" id="kalstatus">loading…</div>
+    <div id="kacct"></div><div class="note" id="kscopenote" style="display:none"></div>
+    <div class="card"><h2>Tickets to place <span>this week's games · winner, spread strike and over markets · sorted by probability</span></h2>
+      <div class="note" style="margin-bottom:10px">Probabilities are the <b>market-blended</b> estimate (model + Vegas at the backtested weight), not the raw model — the raw model does not reliably beat NFL markets, and pricing Kalshi against it would show an "edge" on almost every game. Only YES contracts are priced (a bid on the team's own market or strike), so unders are not offered here. A ticket is not an order: placing one asks for confirmation, and the server re-checks the price, the book and the kickoff before anything is sent.</div>
+      <div id="kal" class="loading">loading…</div></div>
+    <div class="card"><h2>Performance <span>realised from fills and settlements · open positions marked at the bid</span></h2><div id="kperf" class="loading">loading…</div></div>
+    <div class="card"><h2>Open positions</h2><div id="kpos" class="loading">loading…</div></div>
+    <div class="card"><h2>Orders sent</h2><div id="kord" class="loading">loading…</div></div>
+    <div class="card"><h2>Closed trades</h2><div id="krec" class="loading">loading…</div></div></div>`;
+  refreshKalshi();
+  document.getElementById('kscope').onchange = ()=>loadKalshiReport(document.getElementById('kscope').value);
+  document.getElementById('krefresh').onclick = ()=>refreshKalshi('on request');
+  clearInterval(KAL_TIMER);
+  KAL_TIMER = setInterval(()=>{ if(document.getElementById('kacct')) loadKalshiReport(document.getElementById('kscope')?.value); else clearInterval(KAL_TIMER); }, 60000);
+}
+async function refreshKalshi(why){
+  const n = document.getElementById('kalstatus'); if(n) n.textContent = `Updating ${why||''}…`;
+  try{ await Promise.all([loadKalshi(), loadKalshiReport(document.getElementById('kscope')?.value)]);
+    const m = document.getElementById('kalstatus'); if(m) m.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+  }catch(e){ const m = document.getElementById('kalstatus'); if(m) m.textContent = `Update failed: ${e}`; }
+}
+async function loadKalshi(){
+  const el = document.getElementById('kal'); if(!el) return;
+  let d; try{ d = await kj('/api/kalshi/tickets'); }catch(e){ el.innerHTML=`<div class="note warn">${esc(String(e))}</div>`; return; }
+  if(d.available===false){ el.innerHTML = `<div class="note warn">Tickets unavailable — ${esc(d.reason||'unknown')}${/credentials/.test(d.reason||'')?'. Set KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY (the PEM text) on the Railway service; KALSHI_LIVE=1 for real money, KALSHI_ARM=1 to actually send.':''}</div>`; return; }
+  const b = d.budget||{};
+  const head = `<div class="note" style="margin-bottom:10px">${d.live?'<b class="b">LIVE — real money</b>':'<span class="muted">demo environment</span>'} · ${d.armed?'<b class="b">armed: a confirmed ticket WILL be sent</b>':'<span class="muted">dry run: confirming logs the order and sends nothing</span>'}<br>
+    bankroll ${kMoney(b.bankroll)} · at risk today ${kMoney(b.committed)} of ${kMoney(b.daily_cap)} · remaining ${kMoney(b.daily_remaining)}${b.released?` · ${kMoney(b.released)} released by settled bets`:''}${d.week?` · week ${d.week}`:''}</div>`;
+  const rows = d.tickets||[];
+  const skipped = (d.skipped||[]).slice().sort((a,b)=>(b.model_prob||0)-(a.model_prob||0));
+  const why = !skipped.length ? '' : `<h3 style="margin:16px 0 6px;font-size:13px">Not tradeable (${skipped.length})</h3>
+    <div class="note" style="margin-bottom:8px">One row per game and market type. A Kalshi price with no ticket means the blended probability did not clear the ask by the ${Math.round((d.min_edge||0)*100)}-point floor after fees; a blank price means there was nothing to buy.</div>
+    <div class="tblwrap"><table class="tbl rec"><thead><tr><th>Game</th><th>Market</th><th>Best side</th><th>Kickoff</th><th>Prob</th><th>Kalshi ask</th><th>Why not</th></tr></thead><tbody>
+    ${skipped.map(x=>`<tr><td><b>${esc(x.game)}</b></td><td>${esc(x.kind)}</td><td>${esc(x.backing||'—')}</td><td>${x.starts?kTime(x.starts)+' <span class="muted">'+startsIn(x.starts)+'</span>':'—'}</td><td>${x.model_prob!=null?fP(x.model_prob):'—'}</td><td>${x.price!=null?kNum(x.price):'—'}</td><td class="muted">${esc(x.reason||'')}</td></tr>`).join('')}</tbody></table></div>`;
+  if(!rows.length){ el.innerHTML = head + `<div class="note">No tickets this week${d.note?' — '+esc(d.note):''}.</div>` + why; return; }
+  el.innerHTML = head + `<div class="tblwrap"><table class="tbl rec"><thead><tr><th>Backing</th><th>Market</th><th>Kickoff</th><th title="market-blended probability (raw model in grey)">Prob</th><th>Price</th><th>Contracts</th><th>Stake</th><th>Fee</th><th>EV</th><th></th></tr></thead><tbody>
+    ${rows.map((t,i)=>`<tr><td><b>${esc(t.backing)}</b><br><span class="muted" style="font-size:10.5px">${esc(t.game)} · ${esc(t.ticker)}</span></td>
+      <td>${esc(t.kind)}</td><td>${kTime(t.starts)}<br><span class="muted">${startsIn(t.starts)}</span></td>
+      <td>${fP(t.model_prob)}${t.model_prob_raw!=null?` <span class="muted">(${fP(t.model_prob_raw)})</span>`:''}</td>
+      <td>${kNum(t.price)}</td><td>${t.contracts}${t.size_capped?`<br><span class="muted">book has ${Math.floor(t.offered)}</span>`:''}</td>
+      <td>${kMoney(t.stake)}</td><td class="muted">${kMoney(t.fee)}</td>
+      <td class="${kCls(t.ev)}"><b>${kSigned(t.ev)}</b><br><span class="muted">${kNum(t.ev_pct,1)}%</span></td>
+      <td>${t.already_placed?`<span class="muted">held${t.held?' '+kNum(t.held,0):''}</span><br><button class="pick" data-k="${i}">Add more…</button>`:`<button class="pick" data-k="${i}">Place…</button>`}</td></tr>`).join('')}
+    </tbody></table></div>` + why;
+  el.querySelectorAll('button[data-k]').forEach(btn=>{ btn.onclick = async ()=>{
+    const t = rows[+btn.dataset.k];
+    const ok = confirm((t.already_placed?`You ALREADY hold ${t.held?kNum(t.held,0)+' contracts on ':''}this contract.\nThis adds to that position — it is not a second bet the model asked for.\n\n`:'')
+      + `Place this order?\n\n${t.backing} — ${t.game} (${t.kind})\n${t.contracts} contracts at ${kNum(t.price)}\nCost ${kMoney(t.stake)} plus ${kMoney(t.fee)} fee\nExpected value ${kSigned(t.ev)}\n\n`
+      + (d.armed ? 'This WILL send a real order.' : 'Dry run: nothing will be sent.'));
+    if(!ok) return;
+    btn.disabled = true; btn.textContent = 'Placing…';
+    try{
+      const r = await fetch('/api/kalshi/submit',{method:'POST',headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({confirm:true, ticker:t.ticker, contracts:t.contracts, price:t.price, client_order_id:t.client_order_id, game:t.game, backing:t.backing, kind:t.kind})}).then(x=>x.json());
+      btn.textContent = r.ok ? (r.dry_run ? 'Dry run logged' : 'Placed') : 'Refused';
+      if(!r.ok) alert('Not placed: ' + (r.error||'unknown'));
+      if(!r.dry_run) await refreshKalshi('after placing');     // a fill moves the bankroll every other ticket was sized on
+    }catch(e){ btn.textContent='Failed'; alert(e); }
+  }; });
+}
+async function loadKalshiReport(scope){
+  let d; try{ d = await kj('/api/kalshi/report'+(scope?'?scope='+scope:'')); }catch(e){ const a=document.getElementById('kacct'); if(a) a.innerHTML=`<div class="note warn">${esc(String(e))}</div>`; return; }
+  if(d.available===false){ ['kacct','kperf','kord','kpos','krec'].forEach(id=>{ const x=document.getElementById(id); if(x) x.innerHTML=`<div class="note">${esc(d.reason||'unavailable')}</div>`; }); return; }
+  const b=d.budget||{}, c=d.caps||{}, r=d.record||{};
+  const acct=document.getElementById('kacct'); if(!acct) return;
+  acct.innerHTML = kErr(d,'balance') + `<div class="rtiles">
+    ${kStat('Balance', kMoney(d.balance), d.live?'live account':'demo account', '', true)}
+    ${kStat('Per ticket', kMoney((b.bankroll||0)*(c.ticket_pct||0)/100), c.ticket_pct+'% of bankroll')}
+    ${kStat('At risk today', kMoney(b.committed), kMoney(b.daily_remaining)+' left of '+kMoney(b.daily_cap)+(b.released?` · ${kMoney(b.released)} released`:''))}
+    ${kStat('Mode', d.armed?'ARMED':'Safe', d.armed?'confirmed tickets are sent':'tickets are logged only', d.armed?'b':'')}</div>`;
+  const sc=d.scope_counts||{}; const hidden=Object.values(sc).reduce((n,x)=>n+((x.account||0)-(x.shown||0)),0);
+  const what={page:'only the orders this page placed', nfl:'all NFL markets, including ones you traded yourself', account:'your entire Kalshi account, every sport'}[d.scope];
+  const sn=document.getElementById('kscopenote'); sn.style.display=''; sn.innerHTML = `Showing <b>${what}</b>.` + (d.scope==='page' ? (hidden?` <b>${hidden}</b> other account record(s) hidden.`:' Nothing else on the account to hide.') : ' <b>These are not this model\'s results.</b> Its own record is under "This model only".');
+  document.getElementById('kperf').innerHTML = kErr(d,'settlements') + `<div class="rtiles">
+    ${kStat('Total return', kSigned(r.total_return), 'realised + open mark', kCls(r.total_return), true)}
+    ${kStat('Realised', kSigned(r.realised_pl), r.settled?`${r.settled} closed${r.cashed_out?', '+r.cashed_out+' cashed out':''}${r.roi_pct!=null?' · '+r.roi_pct+'% ROI':''}`:'nothing closed yet', kCls(r.realised_pl), true)}
+    ${kStat('Open exposure', kMoney(r.open_exposure), `${r.open_positions||0} position(s) · mark ${kMoney(r.open_mark)}`)}
+    ${kStat('Unrealised', kSigned(r.open_unrealised), 'mark vs cost', kCls(r.open_unrealised))}
+    ${kStat('Record', r.settled?`${r.won}–${r.lost}`:'—', r.win_pct!=null?r.win_pct+'% win rate':'nothing closed')}
+    ${kStat('Fees', kMoney(r.fees), `${r.orders_filled||0}/${r.orders_sent||0} orders filled`)}</div>`
+    + ((d.by_sport||[]).length ? `<div class="tblwrap"><table class="tbl rec"><thead><tr><th>Market</th><th>Orders</th><th>Open</th><th>Exposure</th><th>Settled</th><th>Staked</th><th>Realised</th><th>ROI</th></tr></thead><tbody>
+      ${d.by_sport.map(x=>`<tr><td><b>${esc(x.sport)}</b></td><td>${x.filled}/${x.orders}</td><td>${x.open}</td><td>${kMoney(x.open_exposure)}</td><td>${x.settled}${x.settled?` <span class="muted">(${x.won}W)</span>`:''}</td><td>${kMoney(x.staked)}</td><td class="${kCls(x.realised_pl)}">${kSigned(x.realised_pl)}</td><td class="${kCls(x.roi_pct)}">${x.roi_pct!=null?x.roi_pct+'%':'—'}</td></tr>`).join('')}</tbody></table></div>` : '');
+  const ps=d.positions||[];
+  document.getElementById('kpos').innerHTML = kErr(d,'positions') + (!ps.length ? `<div class="note">Nothing open.</div>` :
+    `<div class="tblwrap"><table class="tbl rec"><thead><tr><th>Backing</th><th>Contracts</th><th>Cost</th><th>Bid</th><th>Mark</th><th>Unrealised</th></tr></thead><tbody>
+    ${ps.map(x=>`<tr><td><b>${esc(x.backing)}</b><br><span class="muted" style="font-size:10.5px">${esc(x.sport)} · ${esc(x.ticker)}</span></td><td>${kNum(x.contracts,0)}</td><td>${kMoney(x.traded)}</td><td>${kNum(x.bid)}</td><td>${kMoney(x.mark)}</td><td class="${kCls(x.unrealised)}"><b>${kSigned(x.unrealised)}</b></td></tr>`).join('')}</tbody></table></div>
+    <div class="note">Marked at the resting <b>bid</b> — what you could sell for now, not what you paid.</div>`);
+  const os=d.orders||[];
+  document.getElementById('kord').innerHTML = kErr(d,'orders') + (!os.length ? `<div class="note">No orders sent.</div>` :
+    `<div class="note" style="margin-bottom:8px"><b>${r.orders_sent}</b> sent · <b>${r.orders_filled}</b> filled · ${r.orders_unfilled} never traded</div>
+    <div class="tblwrap"><table class="tbl rec"><thead><tr><th>Backing</th><th>Price</th><th>Placed</th><th>Filled</th><th>Status</th><th>Fees</th><th>When</th></tr></thead><tbody>
+    ${os.map(o=>`<tr><td><b>${esc(o.backing)}</b><br><span class="muted" style="font-size:10.5px">${esc(o.sport)} · ${esc(o.ticker)}</span></td><td>${kNum(o.price)}</td><td>${kNum(o.placed,0)}</td><td class="${o.filled?'g':'muted'}">${kNum(o.filled,0)}</td><td class="${o.status==='executed'?'g':'muted'}">${esc(o.status||'—')}</td><td class="muted">${kMoney(o.fees)}</td><td class="muted">${kTime(o.created)}</td></tr>`).join('')}</tbody></table></div>`);
+  const ss=d.settlements||[];
+  document.getElementById('krec').innerHTML = kErr(d,'settlements') + (!ss.length ? `<div class="note">Nothing closed yet${ps.length?` — <b>${ps.length}</b> position(s) still open`:''}.</div>` :
+    `<div class="tblwrap"><table class="tbl rec"><thead><tr><th>Backed</th><th>How</th><th>Contracts</th><th>Cost</th><th>Returned</th><th>P/L</th><th>Closed</th></tr></thead><tbody>
+    ${ss.map(x=>`<tr><td><b>${esc(x.backing)}</b><br><span class="muted" style="font-size:10.5px">${esc(x.sport)} · ${esc(x.ticker)}</span></td><td class="muted">${esc(x.kind||'')}</td><td>${kNum(x.contracts,0)}</td><td>${kMoney(x.cost)}</td><td>${kMoney(x.revenue)}</td><td class="${kCls(x.pl)}"><b>${kSigned(x.pl)}</b></td><td class="muted">${kTime(x.at)}</td></tr>`).join('')}</tbody></table></div>`);
 }
 
 // ── VIEW: refresh ───────────────────────────────────────────────────

@@ -38,11 +38,18 @@ def _hist():
     return _MARGINS, _TOTALS
 
 
-def cover_prob(pred_margin: float, spread_line: float) -> dict:
+def cover_prob(pred_margin: float, spread_line: float, center: str = "mean") -> dict:
     """P(home covers), P(away covers), P(push) for the model's margin vs the line.
-    spread_line is home-perspective (positive = home favored), matching nflverse."""
+    spread_line is home-perspective (positive = home favored), matching nflverse.
+
+    center="mean" (default, the ATS layer's long-standing behaviour) shifts the empirical
+    margin distribution so its MEAN sits on the prediction. NFL margins are skewed, so the
+    median then sits ~1 pt above the prediction and a line AT the prediction reads as a
+    ~52% home cover. center="median" makes P(margin > prediction) exactly 50%, which is
+    what a point prediction should mean when real money is priced off it (ml/kalshi)."""
     m, _ = _hist()
-    sim = m + (pred_margin - float(m.mean()))          # empirical outcomes recentered on the model
+    ctr = float(np.median(m)) if center == "median" else float(m.mean())
+    sim = m + (pred_margin - ctr)                       # empirical outcomes recentered on the model
     home = float(np.mean(sim > spread_line))
     push = float(np.mean(np.abs(sim - spread_line) < 0.5)) if abs(spread_line - round(spread_line)) < 1e-6 else 0.0
     home = max(0.0, home - push / 2)
@@ -50,10 +57,11 @@ def cover_prob(pred_margin: float, spread_line: float) -> dict:
     return {"home_cover": round(home, 3), "away_cover": round(away, 3), "push": round(push, 3)}
 
 
-def total_prob(pred_total: float, total_line: float) -> dict:
-    """P(over), P(under), P(push) for the model's total vs the line."""
+def total_prob(pred_total: float, total_line: float, center: str = "mean") -> dict:
+    """P(over), P(under), P(push) for the model's total vs the line. `center` as cover_prob."""
     _, t = _hist()
-    sim = t + (pred_total - float(t.mean()))
+    ctr = float(np.median(t)) if center == "median" else float(t.mean())
+    sim = t + (pred_total - ctr)
     over = float(np.mean(sim > total_line))
     push = float(np.mean(np.abs(sim - total_line) < 0.5)) if abs(total_line - round(total_line)) < 1e-6 else 0.0
     over = max(0.0, over - push / 2)

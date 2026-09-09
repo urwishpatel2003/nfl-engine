@@ -1565,6 +1565,490 @@ def _slate(season: int, week: int) -> dict:
     return {"season": season, "week": week, "games": games, "odds_status": odds_status}
 
 
+# ── Kalshi (Betting > Kalshi) ────────────────────────────────────────
+# Ported from the tennis engine. Tickets are built from the current week's slate; the only
+# code that can spend money is ml/kalshi_order.py, reachable solely via /api/kalshi/submit
+# with confirm=true. Dry run unless KALSHI_ARM=1; demo API unless KALSHI_LIVE=1.
+
+# ticker -> our schedule's kickoff (UTC ISO), filled by the last ticket scan. Kalshi cannot
+# be asked this reliably, and the order guard refuses a ticket with no known kickoff.
+# In-process state: the Procfile pins gunicorn to one worker, which this relies on.
+TICKET_STARTS: dict[str, str] = {}
+KALSHI_MIN_EDGE = 0.03     # probability points over the ask before a ticket is even sized;
+                           # below this the "edge" is inside the model's own error bar
+
+
+@app.after_request
+def _never_cache_money(resp):
+    """Nothing under /api/kalshi may be cached: these endpoints price real orders against a
+    live balance, and a cached ticket list sizes a bet against a bankroll that no longer exists."""
+    if request.path.startswith("/api/kalshi"):
+        resp.headers["Cache-Control"] = "no-store, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+    return resp
+
+
+def _kalshi_probs(g: dict) -> dict:
+    """
+    The probabilities a ticket is priced from, for one slate game.
+
+    Uses the MARKET-BLENDED margin (ml/backtest_spreads.blend_weight — the weight that
+    minimised margin error out-of-sample), not the raw model, because the raw model does
+    not reliably beat NFL markets (CLAUDE.md). Pricing Kalshi against the pure model would
+    manufacture an "edge" on nearly every game. Totals blend the same way against the
+    Vegas total. Both raw and blended are returned so the page can show the gap.
+    """
+    from ml.spreads import cover_prob, total_prob
+    w = float(g.get("blend_weight") or 0.0)
+    m_raw = float(g["pred_margin"])
+    m = float(g["blend_margin"]) if g.get("blend_margin") is not None else m_raw
+    t_raw = float(g["pred_total"]) if g.get("pred_total") is not None else None
+    t = ((1 - w) * t_raw + w * float(g["vegas_total"])) if (t_raw is not None and g.get("vegas_total") is not None) else t_raw
+    wp = lambda mm: float(1 / (1 + np.exp(-mm / 13.5 * np.pi / np.sqrt(3))))
+    # MEDIAN-centred: a strike sitting exactly on the blended number must read 50%, not the
+    # ~52% the mean-centred ATS helper gives (NFL margins are skewed). That 2 pts is most of
+    # a Kalshi "edge" on a near-line strike, so it is removed here rather than bet on.
+    cp = lambda mm, line: cover_prob(mm, line, center="median")
+    tp = lambda tt, line: total_prob(tt, line, center="median")["over"]
+    return {"margin": m, "margin_raw": m_raw, "total": t, "total_raw": t_raw,
+            "home_win": wp(m), "home_win_raw": wp(m_raw),
+            "cover": lambda line: cp(m, line),                  # P(home margin > line)
+            "cover_raw": lambda line: cp(m_raw, line),
+            "over": (lambda line: tp(t, line)) if t is not None else None,
+            "over_raw": (lambda line: tp(t_raw, line)) if t_raw is not None else None}
+
+
+# Spread / total strikes are priced only within this many points of the VEGAS number (the
+# blended model number when no line is posted). The model's validated information is about
+# the CENTRE of the outcome distribution; a 20.5-point strike at 11c is a bet on the tail
+# shape of a recentred historical distribution, which the model has never been tested on —
+# and it is exactly where a naive Kelly sees the fattest "edge". Winner markets are unaffected.
+KALSHI_STRIKE_WINDOW = 3.5
+
+
+def _kalshi_tickets_for_game(g: dict, events: dict, bankroll: float, budget: dict,
+                             held: dict) -> tuple:
+    """(tickets, skipped) for one game across winner / spread / total markets.
+
+    At most ONE ticket per market type per game (the best net EV%), because the strikes of
+    one event are the same bet at different prices, not independent opportunities."""
+    from ml import kalshi, kalshi_match, kalshi_order, risk
+    from ml.ledger import kickoff_utc
+    tickets, skipped = [], []
+    ko = kickoff_utc(g.get("gameday"), g.get("gametime"))
+    starts = ko.isoformat() if ko else None
+    label_game = f"{g['away']} @ {g['home']}"
+    P = _kalshi_probs(g)
+
+    def note(kind, backing, reason, price=None, prob=None):
+        skipped.append({"game": label_game, "kind": kind, "backing": backing, "starts": starts,
+                        "model_prob": None if prob is None else round(prob, 4),
+                        "price": price, "reason": reason})
+
+    # candidate (kind, backing label, market, prob) — YES contracts only (a bid on the ticker)
+    cands = []
+    for kind in ("winner", "spread", "total"):
+        found = kalshi_match.find_event(g["home"], g["away"], g.get("gameday"), events.get(kind, {}))
+        if not found.get("ok"):
+            note(kind, None, found.get("reason"))
+            continue
+        if kind == "winner":
+            wm = kalshi_match.winner_markets(found)
+            if not wm:
+                note(kind, None, "event does not have exactly one contract per team")
+                continue
+            cands += [(kind, f"{g['home']} to win", wm["home"], P["home_win"], P["home_win_raw"]),
+                      (kind, f"{g['away']} to win", wm["away"], 1 - P["home_win"], 1 - P["home_win_raw"])]
+        elif kind == "spread":
+            centre = float(g["vegas_spread"]) if g.get("vegas_spread") is not None else P["margin"]
+            n_in = 0
+            for side, strike, m in kalshi_match.spread_markets(found):
+                team = g["home"] if side == "home" else g["away"]
+                # the strike expressed as a home-perspective line: home > strike, or home < -strike
+                line = strike if side == "home" else -strike
+                if abs(line - centre) > KALSHI_STRIKE_WINDOW:
+                    continue
+                n_in += 1
+                if side == "home":
+                    p, pr = P["cover"](strike)["home_cover"], P["cover_raw"](strike)["home_cover"]
+                else:                              # away wins by > strike ⇔ home margin < -strike
+                    p, pr = P["cover"](-strike)["away_cover"], P["cover_raw"](-strike)["away_cover"]
+                cands.append((kind, f"{team} wins by over {strike:g}", m, p, pr))
+            if not n_in:
+                note(kind, None, f"no strike within {KALSHI_STRIKE_WINDOW:g} pts of the line")
+        else:
+            if P["over"] is None:
+                note(kind, None, "no model total for this game")
+                continue
+            centre = float(g["vegas_total"]) if g.get("vegas_total") is not None else P["total"]
+            n_in = 0
+            for strike, m in kalshi_match.total_markets(found):
+                if abs(strike - centre) > KALSHI_STRIKE_WINDOW:
+                    continue
+                n_in += 1
+                cands.append((kind, f"Over {strike:g} points", m, P["over"](strike),
+                              P["over_raw"](strike) if P["over_raw"] else None))
+            if not n_in:
+                note(kind, None, f"no strike within {KALSHI_STRIKE_WINDOW:g} pts of the total")
+
+    if kalshi_order.started({}, starts=starts):
+        for kind in ("winner", "spread", "total"):
+            note(kind, None, "the game has already kicked off")
+        return [], skipped
+
+    best: dict[str, dict] = {}
+    best_reason: dict[str, tuple] = {}
+    for kind, backing, m, prob, prob_raw in cands:
+        price = kalshi_match.ask_price(m)
+        if price is None:
+            best_reason.setdefault(kind, (backing, "no offer resting on that contract", None, prob))
+            continue
+        if prob - price < KALSHI_MIN_EDGE:
+            best_reason.setdefault(kind, (backing, f"edge {100*(prob-price):+.1f} pts is under the {100*KALSHI_MIN_EDGE:.0f}-pt floor", price, prob))
+            continue
+        sized = kalshi.size_position(prob, price, bankroll, maker=risk.MAKER,
+                                     max_stake_pct=budget["ticket_pct"])
+        if sized["contracts"] < 1:
+            best_reason[kind] = (backing, sized.get("reason") or "sized to nothing", price, prob)
+            continue
+        offered = kalshi_match.ask_size(m)
+        capped = False
+        if offered is not None and sized["contracts"] > int(offered):
+            if int(offered) < 1:
+                best_reason[kind] = (backing, "nothing offered at the ask", price, prob)
+                continue
+            capped = True
+            sized = kalshi.size_position(prob, price, bankroll, maker=risk.MAKER,
+                                         max_stake_pct=min(budget["ticket_pct"],
+                                                           100.0 * int(offered) * price / max(bankroll, 1e-9)))
+            if sized["contracts"] < 1:
+                best_reason[kind] = (backing, "offered size too small to trade", price, prob)
+                continue
+        t = {"game": label_game, "kind": kind, "backing": backing, "ticker": m.get("ticker"),
+             "event": m.get("event_ticker"), "model_prob": round(prob, 4),
+             "model_prob_raw": None if prob_raw is None else round(prob_raw, 4),
+             "price": price, "contracts": sized["contracts"], "stake": sized["stake"],
+             "fee": sized["fee"], "ev": sized["ev"], "ev_pct": sized["ev_pct"],
+             "offered": offered, "size_capped": capped, "starts": starts,
+             "held": held.get(str(m.get("ticker"))),
+             "already_placed": str(m.get("ticker")) in held,
+             "client_order_id": kalshi_order.new_client_order_id()}
+        if kind not in best or t["ev_pct"] > best[kind]["ev_pct"]:
+            best[kind] = t
+    for kind, t in best.items():
+        tickets.append(t)
+    for kind, (backing, reason, price, prob) in best_reason.items():
+        if kind not in best:
+            note(kind, backing, reason, price, prob)
+    return tickets, skipped
+
+
+@app.route('/api/kalshi/tickets')
+def api_kalshi_tickets():
+    """Costed order tickets for the current week's games. Builds only — nothing here can
+    place an order; submission is a separate endpoint requiring explicit confirmation."""
+    from ml import kalshi, kalshi_match, kalshi_order, risk
+    if not kalshi.configured():
+        return jsonify({"available": False, "reason": "Kalshi credentials are not set", "tickets": []})
+    try:
+        bankroll = float(kalshi.balance().get("dollars") or 0.0)
+    except Exception as e:
+        return jsonify({"available": False, "reason": f"could not read balance: {str(e)[:120]}", "tickets": []})
+    budget = risk.budget(bankroll, kalshi_order.open_tickers())
+    try:
+        s = schedules_df()
+        season = int(s["season"].max())
+        week = _current_week(season)
+        if week is None:
+            return jsonify({"available": True, "tickets": [], "skipped": [], "budget": budget,
+                            "armed": kalshi_order.armed(), "live": kalshi.live_mode(),
+                            "note": "season complete"})
+        slate = _slate(season, week)
+    except Exception as e:
+        return jsonify({"available": False, "reason": f"slate failed: {str(e)[:160]}", "tickets": []})
+    try:
+        events = {k: kalshi_match.open_events(k) for k in ("winner", "spread", "total")}
+    except Exception as e:
+        return jsonify({"available": False, "reason": f"could not read Kalshi markets: {str(e)[:160]}", "tickets": []})
+
+    # What is ALREADY held. Positions reflect fills (authoritative); the ledger covers an
+    # order that was sent but has not filled yet.
+    held: dict[str, float] = {}
+    try:
+        for pos in kalshi.positions(limit=200):
+            c = kalshi.num(pos.get("position_fp")) or 0.0
+            if c:
+                held[str(pos.get("ticker"))] = c
+    except Exception:
+        pass
+    try:
+        for t in risk.placed_here()["tickers"]:
+            held.setdefault(str(t), 0.0)
+    except Exception:
+        pass
+
+    tickets, skipped = [], []
+    for g in slate["games"]:
+        if g.get("pred_margin") is None or g.get("final"):
+            continue
+        t, sk = _kalshi_tickets_for_game(g, events, bankroll, budget, held)
+        tickets += t
+        skipped += sk
+    for t in tickets:
+        if t.get("starts"):
+            TICKET_STARTS[str(t["ticker"])] = str(t["starts"])
+    # Sorted by the blended probability, highest first; EV alone sorts longshots to the top.
+    tickets.sort(key=lambda t: (-(t["model_prob"] or 0), -(t["ev"] or 0)))
+    return jsonify(_native({"available": True, "season": season, "week": week,
+                            "tickets": tickets, "skipped": skipped, "budget": budget,
+                            "armed": kalshi_order.armed(), "live": kalshi.live_mode(),
+                            "min_edge": KALSHI_MIN_EDGE, "n_events": {k: len(v) for k, v in events.items()}}))
+
+
+@app.route('/api/kalshi/report')
+def api_kalshi_report():
+    """Everything about the Kalshi side of the account, read-only: orders (sent), fills
+    (traded), positions (open, marked to the bid), and a realised ledger built from FILLS
+    plus settlements (a cash-out never settles). Scope defaults to what this page sent."""
+    from ml import kalshi, kalshi_match, kalshi_order, risk
+    if not kalshi.configured():
+        return jsonify({"available": False, "reason": "Kalshi credentials are not set"})
+    out = {"available": True, "live": kalshi.live_mode(), "armed": kalshi_order.armed(), "errors": {}}
+
+    def pull(name, fn, default):
+        try:
+            return fn()
+        except Exception as e:
+            out["errors"][name] = f"{type(e).__name__}: {str(e)[:120]}"
+            return default
+
+    bal = pull("balance", kalshi.balance, {})
+    bankroll = float(bal.get("dollars") or 0.0)
+    out["balance"] = bal.get("dollars")
+    out["budget"] = risk.budget(bankroll, kalshi_order.open_tickers())
+    out["caps"] = {"ticket_pct": risk.MAX_TICKET_PCT, "daily_pct": risk.MAX_DAILY_PCT,
+                   "maker": risk.MAKER, "kelly_fraction": kalshi.KELLY_FRACTION,
+                   "max_price_drift": kalshi_order.MAX_PRICE_DRIFT}
+    raw_orders = pull("orders", lambda: kalshi.orders(limit=200), [])
+    raw_fills = pull("fills", lambda: kalshi.fills(limit=200), [])
+    raw_pos = pull("positions", lambda: kalshi.positions(limit=200), [])
+    raw_settle = pull("settlements", lambda: kalshi.settlements(limit=200), [])
+
+    scope = str(request.args.get("scope", "page")).lower()
+    if scope not in ("page", "nfl", "account"):
+        scope = "page"
+    mine = pull("ledger", risk.placed_here, {"tickers": set(), "order_ids": set(), "labels": {}})
+    out["scope"] = scope
+    nfl_series = tuple(v + "-" for v in kalshi_match.SERIES.values())
+
+    def ours(rec: dict) -> bool:
+        if scope == "account":
+            return True
+        t = str(rec.get("ticker") or rec.get("market_ticker") or "")
+        if scope == "nfl":
+            return t.startswith(nfl_series)
+        coid = str(rec.get("client_order_id") or "")
+        return (coid in mine["order_ids"]) or (t in mine["tickers"])
+
+    out["scope_counts"] = {}
+    for label, rows in (("orders", raw_orders), ("fills", raw_fills), ("positions", raw_pos), ("settlements", raw_settle)):
+        out["scope_counts"][label] = {"account": len(rows), "shown": sum(1 for r in rows if ours(r))}
+    raw_orders = [r for r in raw_orders if ours(r)]
+    raw_fills = [r for r in raw_fills if ours(r)]
+    raw_pos = [r for r in raw_pos if ours(r)]
+    raw_settle = [r for r in raw_settle if ours(r)]
+
+    mkts: dict[str, dict] = {}
+
+    def market_of(ticker):
+        t = str(ticker or "")
+        if t and t not in mkts:
+            try:
+                mkts[t] = kalshi.market(t) or {}
+            except Exception:
+                mkts[t] = {}
+        return mkts.get(t, {})
+
+    def name_of(ticker):
+        t = str(ticker or "")
+        return mine["labels"].get(t) or str(market_of(t).get("yes_sub_title") or market_of(t).get("title") or t)
+
+    sport_of = kalshi_match.sport_of
+    seen = {str(r.get("ticker") or r.get("market_ticker") or "") for r in (raw_orders + raw_fills + raw_pos + raw_settle)}
+    for t in list(seen)[:60]:
+        name_of(t)
+    n = kalshi.num
+    out["orders"] = [{
+        "order_id": o.get("order_id"), "ticker": o.get("ticker"), "backing": name_of(o.get("ticker")),
+        "sport": sport_of(o.get("ticker")), "status": o.get("status"),
+        "side": o.get("book_side") or o.get("side"), "price": n(o.get("yes_price_dollars")),
+        "placed": n(o.get("initial_count_fp")), "filled": n(o.get("fill_count_fp")),
+        "remaining": n(o.get("remaining_count_fp")),
+        "fees": (n(o.get("taker_fees_dollars")) or 0.0) + (n(o.get("maker_fees_dollars")) or 0.0),
+        "created": o.get("created_time")} for o in raw_orders]
+    out["positions"] = [{
+        "ticker": p_.get("ticker"), "backing": name_of(p_.get("ticker")), "sport": sport_of(p_.get("ticker")),
+        "contracts": n(p_.get("position_fp")), "exposure": n(p_.get("market_exposure_dollars")),
+        "traded": n(p_.get("total_traded_dollars")), "realized": n(p_.get("realized_pnl_dollars")),
+        "fees": n(p_.get("fees_paid_dollars")),
+        "bid": n(market_of(p_.get("ticker")).get("yes_bid_dollars")),        # marked at the BID
+        "mark": round((n(p_.get("position_fp")) or 0.0) * (n(market_of(p_.get("ticker")).get("yes_bid_dollars")) or 0.0), 2),
+        "updated": p_.get("last_updated_ts")} for p_ in raw_pos if (n(p_.get("position_fp")) or 0) != 0]
+    for p_ in out["positions"]:
+        p_["unrealised"] = round((p_["mark"] or 0.0) - (p_["traded"] or 0.0), 2)
+
+    # realised ledger from FILLS (+ settlements for what was still held); cost never doubled
+    led: dict[str, dict] = {}
+
+    def row(t):
+        return led.setdefault(str(t), {"ticker": str(t), "bought": 0.0, "cost": 0.0, "sold": 0.0, "proceeds": 0.0,
+                                       "settled": 0.0, "revenue": 0.0, "fees": 0.0, "settle_cost": 0.0,
+                                       "settle_fee": 0.0, "at": None, "kind": set()})
+    for f in raw_fills:
+        t = f.get("ticker") or f.get("market_ticker")
+        if not t:
+            continue
+        r = row(t)
+        cnt, px = n(f.get("count_fp")) or 0.0, n(f.get("yes_price_dollars")) or 0.0
+        if str(f.get("book_side")) == "bid":
+            r["bought"] += cnt; r["cost"] += cnt * px
+        else:
+            r["sold"] += cnt; r["proceeds"] += cnt * px; r["kind"].add("cashed out")
+        r["fees"] += n(f.get("fee_cost")) or 0.0
+        at = f.get("created_time")
+        if at and (r["at"] is None or str(at) > str(r["at"])):
+            r["at"] = at
+    for s_ in raw_settle:
+        t = s_.get("ticker")
+        if not t:
+            continue
+        r = row(t)
+        r["revenue"] += (n(s_.get("revenue")) or 0.0) / 100.0          # CENTS
+        r["settled"] += (n(s_.get("yes_count_fp")) or 0.0) + (n(s_.get("no_count_fp")) or 0.0)
+        r["settle_cost"] += (n(s_.get("yes_total_cost_dollars")) or 0.0) + (n(s_.get("no_total_cost_dollars")) or 0.0)
+        r["settle_fee"] += n(s_.get("fee_cost")) or 0.0
+        r["kind"].add("settled")
+        at = s_.get("settled_time")
+        if at and (r["at"] is None or str(at) > str(r["at"])):
+            r["at"] = at
+    closed = []
+    for t, r in led.items():
+        if r["bought"] > 0:
+            avg = r["cost"] / r["bought"]
+        elif r["settled"] > 0 and r["settle_cost"] > 0 and r["sold"] <= 0:
+            avg = r["settle_cost"] / r["settled"]; r["bought"] = r["settled"]; r["cost"] = r["settle_cost"]
+        else:
+            avg = 0.0
+        remaining = max(0.0, r["bought"] - r["sold"])
+        settled_n = min(r["settled"], remaining)               # you can only settle what you still held
+        revenue = (r["revenue"] * (settled_n / r["settled"])) if r["settled"] > 0 else 0.0
+        closed_n = r["sold"] + settled_n
+        if closed_n <= 0:
+            continue
+        basis = avg * closed_n
+        returned = r["proceeds"] + revenue
+        fees = r["fees"] if r["fees"] > 0 else r["settle_fee"]
+        closed.append({"ticker": t, "backing": name_of(t), "sport": sport_of(t),
+                       "kind": (" + ".join(sorted(k for k in r["kind"] if k != "settled" or settled_n > 0)) or "cashed out"),
+                       "contracts": round(closed_n, 2), "cost": round(basis, 2), "revenue": round(returned, 2),
+                       "fee": round(fees, 2), "pl": round(returned - basis - fees, 2), "at": r["at"]})
+    closed.sort(key=lambda x: str(x.get("at") or ""), reverse=True)
+    out["settlements"] = closed
+    staked = sum(r["cost"] for r in closed)
+    realised = sum(r["pl"] for r in closed)
+    wins = sum(1 for r in closed if r["pl"] > 0)
+    out["record"] = {
+        "settled": len(closed), "won": wins, "lost": len(closed) - wins,
+        "cashed_out": sum(1 for r in closed if "cashed out" in r["kind"]),
+        "win_pct": round(100.0 * wins / len(closed), 1) if closed else None,
+        "staked": round(staked, 2), "realised_pl": round(realised, 2),
+        "fees": round(sum(r["fee"] for r in closed), 2),
+        "roi_pct": round(100.0 * realised / staked, 1) if staked else None,
+        "open_positions": len(out["positions"]),
+        "open_exposure": round(sum(p_["exposure"] or 0.0 for p_ in out["positions"]), 2),
+        "orders_sent": len(out["orders"]),
+        "orders_filled": sum(1 for o in out["orders"] if (o["filled"] or 0) > 0),
+        "orders_unfilled": sum(1 for o in out["orders"] if not (o["filled"] or 0)),
+        "open_mark": round(sum(p_["mark"] or 0.0 for p_ in out["positions"]), 2),
+        "open_unrealised": round(sum(p_["unrealised"] or 0.0 for p_ in out["positions"]), 2),
+        "avg_stake": round(staked / len(closed), 2) if closed else None,
+        "best": max((r["pl"] for r in closed), default=None),
+        "worst": min((r["pl"] for r in closed), default=None)}
+    out["record"]["total_return"] = round(out["record"]["realised_pl"] + out["record"]["open_unrealised"], 2)
+
+    sports: dict[str, dict] = {}
+
+    def bucket(name):
+        return sports.setdefault(name, {"sport": name, "orders": 0, "filled": 0, "open": 0, "open_exposure": 0.0,
+                                        "open_mark": 0.0, "settled": 0, "won": 0, "staked": 0.0,
+                                        "realised_pl": 0.0, "fees": 0.0})
+    for o in out["orders"]:
+        b = bucket(o["sport"]); b["orders"] += 1; b["filled"] += 1 if (o["filled"] or 0) > 0 else 0; b["fees"] += o["fees"] or 0.0
+    for p_ in out["positions"]:
+        b = bucket(p_["sport"]); b["open"] += 1; b["open_exposure"] += p_["exposure"] or 0.0; b["open_mark"] += p_["mark"] or 0.0
+    for r in closed:
+        b = bucket(r["sport"]); b["settled"] += 1; b["won"] += 1 if r["pl"] > 0 else 0; b["staked"] += r["cost"]; b["realised_pl"] += r["pl"]
+    for b in sports.values():
+        for k in ("open_exposure", "open_mark", "staked", "realised_pl", "fees"):
+            b[k] = round(b[k], 2)
+        b["roi_pct"] = round(100.0 * b["realised_pl"] / b["staked"], 1) if b["staked"] else None
+        b["win_pct"] = round(100.0 * b["won"] / b["settled"], 1) if b["settled"] else None
+    out["by_sport"] = sorted(sports.values(), key=lambda b: (-(b["settled"] + b["open"]), b["sport"]))
+    return jsonify(_native(out))
+
+
+@app.route('/api/kalshi/submit', methods=['POST'])
+def api_kalshi_submit():
+    """Place ONE order a person has just confirmed. Every limit is re-checked server-side;
+    the request must carry confirm=true. Dry run unless KALSHI_ARM=1."""
+    from ml import kalshi_order
+    body = request.get_json(silent=True) or {}
+    if body.get("confirm") is not True:
+        return jsonify({"ok": False, "error": "confirmation required"}), 400
+    try:
+        ticker = str(body["ticker"]); count = int(body["contracts"])
+        price = float(body["price"]); coid = str(body["client_order_id"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"ok": False, "error": "ticker, contracts, price and client_order_id are all required"}), 400
+    label = f"{body.get('backing') or ''} — {body.get('game') or ''}".strip(" —")
+    result = kalshi_order.create_order(ticker, count, price, coid,
+                                       starts=TICKET_STARTS.get(ticker), label=label or None)
+    if result.get("error"):
+        mkt = result.get("market") or {}
+        print(f"[kalshi] REFUSED {ticker} {count}@{price:.2f}: {result['error']}"
+              + (f" (ask now {mkt.get('ask')}, offered {mkt.get('offered')})"
+                 if mkt.get("ask") is not None or mkt.get("offered") is not None else ""), flush=True)
+        return jsonify({"ok": False, **result}), 400
+    if result.get("sent"):
+        print(f"[kalshi] SENT {ticker} {count}@{price:.2f} -> {json.dumps(result.get('response'))[:300]}", flush=True)
+    return jsonify({"ok": True, **result})
+
+
+def _kalshi_selftest() -> None:
+    """Boot report: do the credentials work, demo or LIVE, armed or not, balance and row
+    counts. Reads only; never prints the key; no code path here places an order."""
+    try:
+        from ml import kalshi, kalshi_order, risk
+    except Exception as e:
+        print(f"[kalshi] import failed: {e}", flush=True)
+        return
+    if not kalshi.configured():
+        print("[kalshi] credentials not set - Kalshi tab disabled", flush=True)
+        return
+    mode = "LIVE (real money)" if kalshi.live_mode() else "demo"
+    print(f"[kalshi] ARMED - confirmed tickets WILL be sent, cap {risk.MAX_TICKET_PCT}% per ticket"
+          if kalshi_order.armed() else "[kalshi] not armed - confirmed tickets are logged, not sent", flush=True)
+    try:
+        bal = kalshi.balance()
+        print(f"[kalshi] OK - {mode}, balance ${bal.get('dollars')}, ledger {risk._ledger_path()}", flush=True)
+    except kalshi.KalshiError as e:
+        hint = " - key rejected; a demo key cannot sign production requests or vice versa (KALSHI_LIVE)" if e.status == 401 else ""
+        print(f"[kalshi] FAILED ({mode}) - {e}{hint}", flush=True)
+    except Exception as e:
+        print(f"[kalshi] FAILED ({mode}) - {type(e).__name__}: {str(e)[:140]}", flush=True)
+
+
 @app.route('/api/record')
 def api_record():
     """The model's betting record: every pick frozen before kickoff (ml/ledger.py), graded
@@ -1849,6 +2333,8 @@ def _daily_scheduler():
         _start_refresh(season)
         _t.sleep(3600)   # avoid double-firing within the same hour
 
+
+_kalshi_selftest()
 
 if os.environ.get("REFRESH_DAILY") == "1":
     threading.Thread(target=_daily_scheduler, daemon=True).start()

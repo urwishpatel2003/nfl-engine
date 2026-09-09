@@ -33,7 +33,8 @@ SEED = ROOT / "data_seed"
 # until the next redeploy re-syncs the committed baseline.
 _REFRESH_NAMES = {"injuries.parquet", "schedules.parquet", "situational_stats.parquet",
                   "last_refresh.json", "season_2026.json",
-                  "picks_ledger.parquet"}      # the site's own pre-kickoff pick record — never clobber
+                  "picks_ledger.parquet",      # the site's own pre-kickoff pick record — never clobber
+                  "kalshi_exposure.jsonl"}     # confirmed Kalshi orders: a cap that forgets is not a cap
 
 
 def _refresh_managed(name: str) -> bool:

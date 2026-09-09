@@ -140,6 +140,28 @@ Refresh is exposed at `POST /api/refresh` (guarded by the `REFRESH_TOKEN` env va
 The dashboard (`dashboard/season2026.html`) is a hash-routed SPA: Rankings, Team profile
 (`/api/team_profile`), Trends (`/api/team_trends`), Matchup (`/api/matchup_full`), Refresh.
 
+## Kalshi (Betting > Kalshi tab)
+
+Ported from the tennis engine. Four modules under `ml/`, one boundary:
+- `kalshi.py` reads the account and prices/sizes (RSA-PSS auth over `ts+METHOD+/trade-api/v2/path`,
+  fee `ceil(0.07·C·P·(1−P))` per order, Kelly net of fees). Nothing in it can spend.
+- `kalshi_match.py` maps a scheduled game to Kalshi's `KXNFLGAME` / `KXNFLSPREAD` / `KXNFLTOTAL`
+  events. EXACT series only (dozens of sibling NFL series exist); both teams must sit in the
+  same event on the game's date; Kalshi codes differ from nflverse (`LAR` vs `LA`, see `TEAM_CODES`).
+- `kalshi_order.py` is the ONLY module that can place an order: one order per call, reachable only
+  from `POST /api/kalshi/submit` with `confirm=true`. Re-reads the market first (closed / empty
+  book / ask drifted > `KALSHI_MAX_PRICE_DRIFT` / kicked off → refuse). `client_order_id` is minted
+  once per ticket and reused on retry. **Dry run unless `KALSHI_ARM=1`; demo API unless `KALSHI_LIVE=1`.**
+- `risk.py` enforces `KALSHI_MAX_TICKET_PCT` (2%) and `KALSHI_MAX_DAILY_PCT` (20%) server-side; the
+  exposure ledger `data/processed/kalshi_exposure.jsonl` is refresh-managed on the volume and git-ignored.
+
+Tickets are priced from the MARKET-BLENDED probability (`_kalshi_probs` in `dashboard/server.py`),
+not the raw model, because the raw model does not beat NFL markets out-of-sample. YES contracts
+only (a bid on the team's own market/strike); at most one ticket per market type per game.
+Kickoff comes from our schedule (`ml/ledger.kickoff_utc`), never from Kalshi's timestamps.
+Credentials: `KALSHI_API_KEY_ID` + `KALSHI_PRIVATE_KEY` (PEM text) as Railway service variables —
+never in the repo, never handled through chat. Tests: `tests/test_kalshi*.py` (script-style).
+
 ## Conventions
 
 - Match the existing style: heavy docstrings at the top of each module describing inputs/outputs,

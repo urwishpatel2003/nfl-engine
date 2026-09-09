@@ -12,3 +12,6 @@ numpy>=1.26.0
 flask>=3.0.0
 gunicorn>=21.2.0   # production WSGI server (Railway/Linux); Flask dev server is local-only
 requests>=2.31.0   # ml/refresh.py downloads nflverse release files directly (pandas-safe, unlike nfl_data_py)
+# Kalshi auth signs requests with RSA-PSS; stdlib has no RSA. Used only by ml/kalshi.py
+# (the Betting > Kalshi tab); the data refresh path never imports it.
+cryptography>=42.0.0
