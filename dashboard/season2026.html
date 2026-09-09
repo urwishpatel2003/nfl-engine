@@ -286,6 +286,23 @@
   .st-IR,.st-PUP,.st-NFI,.st-EXE,.st-RES,.st-RET,.st-CUT{background:#241f3a;color:#c4b5fd}  /* reserve lists / released */
   .pl .pn.inj-res{color:#a78bfa}
 
+  /* model record */
+  .rtiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-bottom:14px}
+  .rtile{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .rt-ttl{font-size:12px;font-weight:700}
+  .rt-ttl span{display:block;color:var(--muted);font-weight:400;font-size:10.5px;margin-top:2px}
+  .rt-rec{font-size:26px;font-weight:700;margin:8px 0 2px;font-variant-numeric:tabular-nums}
+  .rt-rec.muted{font-size:12px;color:var(--muted);font-weight:400;margin-top:10px}
+  .rt-sub{font-size:11px;color:var(--muted)}
+  .g{color:var(--good)} .b{color:var(--bad)} .muted{color:var(--muted)}
+  .tblwrap{overflow-x:auto}
+  .tbl.rec td,.tbl.rec th{white-space:nowrap;font-size:12px}
+  .tbl.rec.log tbody tr{cursor:pointer} .tbl.rec.log tbody tr:hover td{background:var(--panel2)}
+  .tbl.rec.log tr.pending td{opacity:.75}
+  .rb{display:inline-block;min-width:16px;text-align:center;font-size:10px;font-weight:700;padding:1px 5px;border-radius:9px;margin-left:4px}
+  .rb.w{background:#14321f;color:#4ade80} .rb.l{background:#3a1414;color:#f87171} .rb.p{background:#2a2a2a;color:#cbd5e1} .rb.pend{background:transparent;color:var(--muted)}
+  .rk-mini{background:var(--accent);color:#fff;font-size:9.5px;font-weight:700;padding:0 5px;border-radius:8px;margin-left:4px}
+
   /* schedule slate */
   .sched{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px}
   .gcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;cursor:pointer}
@@ -492,8 +509,8 @@ const NAV = [
   {id:'rankings', label:'Rankings', views:['rankings','epa','stats','pff','history','team','trends','matchup'], items:[
     ['Power Rankings','#/rankings'],['Unit EPA Map','#/epa'],['League Stats','#/stats'],
     ['PFF vs Model','#/pff'],['History','#/history'],['Team Profile','#/team'],['Trends','#/trends'],['Matchup','#/matchup']]},
-  {id:'betting', label:'Betting', views:['schedule','props','season'], items:[
-    ['Schedule & Picks','#/schedule'],['Player Props','#/props'],['Season & Futures','#/season']]},
+  {id:'betting', label:'Betting', views:['schedule','record','props','season'], items:[
+    ['Schedule & Picks','#/schedule'],['Model Record','#/record'],['Player Props','#/props'],['Season & Futures','#/season']]},
   {id:'fantasy', label:'Fantasy', views:['fantasy'], items:[
     ['Draft Board','#/fantasy?mode=board'],['Draft Path','#/fantasy?mode=path'],['Value vs ADP','#/fantasy?mode=values'],['Breakouts','#/fantasy?mode=breakouts']]},
 ];
@@ -523,6 +540,7 @@ async function route(){
     else if(view==='pff')      await viewPffCompare();
     else if(view==='history')  await viewHistory();
     else if(view==='schedule') await viewSchedule(params);
+    else if(view==='record')   await viewRecord(params);
     else if(view==='team')     await viewTeam(arg || TEAMS[0].team);
     else if(view==='trends')   await viewTrends(arg || (RANKINGS[0]&&RANKINGS[0].team));
     else if(view==='matchup')  await viewMatchup(params.get('home'), params.get('away'), params.get('neutral')==='1');
@@ -1880,6 +1898,58 @@ async function viewSchedule(params){
         <span style="opacity:.85">${esc(b.note)}</span></div>`;
     }
   }catch(e){}
+}
+
+// ── VIEW: model record (picks frozen before kickoff, graded after) ──
+const fU = u => u==null ? '—' : (u>0?'+':'') + Number(u).toFixed(2) + 'u';
+const fP = p => p==null ? '—' : Math.round(p*100) + '%';
+function recTile(title, sub, t, be){
+  if(!t || !t.n) return `<div class="rtile"><div class="rt-ttl">${title}<span>${sub}</span></div><div class="rt-rec muted">no graded picks yet</div></div>`;
+  const good = t.pct!=null && t.pct >= be, cls = t.pct==null?'':(good?'g':'b');
+  return `<div class="rtile"><div class="rt-ttl">${title}<span>${sub}</span></div>
+    <div class="rt-rec ${cls}">${t.w}-${t.l}${t.p?'-'+t.p:''}</div>
+    <div class="rt-sub"><span class="${cls}">${fP(t.pct)}</span> win · <span class="${t.units>0?'g':t.units<0?'b':''}">${fU(t.units)}</span> · ROI ${t.roi==null?'—':(t.roi>0?'+':'')+Math.round(t.roi*100)+'%'}</div></div>`;
+}
+function resBadge(r){ return r==null?'<span class="rb pend">—</span>':`<span class="rb ${r==='W'?'w':r==='L'?'l':'p'}">${r}</span>`; }
+function fWL(t){ return !t||!t.n ? '—' : `${t.w}-${t.l}${t.p?'-'+t.p:''}`; }
+async function viewRecord(params){
+  const season = params.get('season') || '';
+  app().innerHTML = `<div class="pad"><div class="viewhead"><div class="ttl">Model Record <span>picks frozen before kickoff · graded on final scores</span></div></div>
+    <div id="recBody"><div class="loading">Grading the ledger…</div></div></div>`;
+  const d = await j('/api/record'+(season?'?season='+season:''));
+  const body = document.getElementById('recBody');
+  if(d.error){ body.innerHTML = `<div class="note warn">${esc(d.error)}</div>`; return; }
+  const S = d.summary||{}, be = d.rules.breakeven_110;
+  const intro = `<div class="note" style="margin-bottom:12px">Every game's pick is written to a ledger the last time the slate is computed <b>before kickoff</b> (each Schedule visit and the daily refresh re-lock it; nothing is written once a game starts). Finished games are graded against the final score, so this is the record of what was actually on the board — not a re-prediction with hindsight.
+    ATS and totals are priced at −110 (break-even ${fP(be)}); moneyline uses the posted price. <b>${d.n_locked}</b> picks locked · <b>${d.n_final}</b> graded · <b>${d.n_pending}</b> pending.</div>`;
+  const tiles = `<div class="rtiles">
+    ${recTile('ATS · all games','model side vs the spread, every game', S.ats_all, be)}
+    ${recTile('ATS · top-5 picks','≥2.5-pt edge, ranked by cover prob', S.ats_top, be)}
+    ${recTile('Totals · all games','Over/Under, model vs the line', S.ou_all, be)}
+    ${recTile('Totals · confident',`model prob ≥ ${fP(d.rules.total_conf)}`, S.ou_conf, be)}
+    ${recTile('Moneyline · all games','model favorite at the posted price', S.ml_all, 0.5)}
+    ${recTile('Moneyline · value',`model prob ≥ market +${Math.round(d.rules.ml_value*100)} pts`, S.ml_value, 0.5)}
+  </div>`;
+  const weeks = (d.weeks||[]).length ? `<div class="card"><h2>Week by week <span>W-L(-P) · units at −110 (ML at posted odds)</span></h2>
+    <div class="tblwrap"><table class="tbl rec"><thead><tr><th>Week</th><th>Games</th><th>Final</th><th title="all games ATS">ATS</th><th>ATS u</th><th title="top-5 picks ATS">Top-5</th><th>O/U</th><th>O/U u</th><th>ML</th><th>ML u</th></tr></thead><tbody>
+    ${d.weeks.map(w=>`<tr><td>Wk ${w.week}</td><td>${w.games}</td><td>${w.final}</td><td>${fWL(w.ats)}</td><td class="${w.ats&&w.ats.units>0?'g':w.ats&&w.ats.units<0?'b':''}">${w.ats?fU(w.ats.units):'—'}</td><td>${fWL(w.ats_top)}</td><td>${fWL(w.ou)}</td><td class="${w.ou&&w.ou.units>0?'g':w.ou&&w.ou.units<0?'b':''}">${w.ou?fU(w.ou.units):'—'}</td><td>${fWL(w.ml)}</td><td class="${w.ml&&w.ml.units>0?'g':w.ml&&w.ml.units<0?'b':''}">${w.ml?fU(w.ml.units):'—'}</td></tr>`).join('')}
+    </tbody></table></div></div>` : '';
+  const pickNum = g => g.vegas_spread==null?'':(g.ats_pick===g.home?-g.vegas_spread:g.vegas_spread);
+  const fLine = n => n===''||n==null ? '' : (Math.abs(n)<0.05?'PK':(n>0?'+':'')+n);
+  const fOdds = o => o==null?'':(o>0?'+':'')+Math.round(o);
+  const rows = (d.games||[]).slice().reverse().map(g=>{
+    const st = g.status==='final' ? `${g.away} ${g.away_score} — ${g.home_score} ${g.home}` : g.status==='live' ? '<span style="color:var(--good)">● in progress</span>' : `<span class="muted">${esc((g.kickoff_utc||'').slice(0,16).replace('T',' '))} UTC</span>`;
+    return `<tr class="${g.status}" onclick="go('#/matchup?home=${g.home}&away=${g.away}')">
+      <td>Wk ${g.week}</td><td><b>${g.away} @ ${g.home}</b>${g.pick_rank?` <span class="rk-mini" title="top-5 pick #${g.pick_rank}">#${g.pick_rank}</span>`:''}</td>
+      <td>${g.pred_margin!=null?`${g.pred_margin>=0?g.home:g.away} −${Math.abs(g.pred_margin).toFixed(1)} · ${Number(g.pred_total).toFixed(1)}`:'—'}</td>
+      <td>${g.ats_pick?`${g.ats_pick} ${fLine(pickNum(g))} <span class="muted">${fP(g.cover_prob)}</span>`:'—'} ${resBadge(g.ats)}</td>
+      <td>${g.total_pick?`${g.total_pick} ${g.vegas_total??''} <span class="muted">${fP(g.total_prob)}</span>`:'—'} ${resBadge(g.ou)}</td>
+      <td>${g.ml_pick?`${g.ml_pick} ${fOdds(g.ml_odds)} <span class="muted">${fP(g.ml_prob)}${g.ml_implied!=null?' vs '+fP(g.ml_implied):''}</span>`:'—'} ${resBadge(g.ml)}</td>
+      <td>${st}</td></tr>`; }).join('');
+  const log = `<div class="card"><h2>Pick log <span>newest first · click a game for the matchup breakdown</span></h2>
+    ${rows ? `<div class="tblwrap"><table class="tbl rec log"><thead><tr><th>Week</th><th>Game</th><th title="model line and total at lock time">Model</th><th title="side · line taken · cover prob">ATS pick</th><th title="Over/Under · line · model prob">Total pick</th><th title="model favorite · posted odds · model prob vs market no-vig prob">ML pick</th><th>Result</th></tr></thead><tbody>${rows}</tbody></table></div>`
+         : `<div class="note">No picks locked yet for ${d.season}. Open <a href="#/schedule">Schedule &amp; Picks</a> before kickoff (or wait for the daily refresh) and the week's picks are written here automatically.</div>`}</div>`;
+  body.innerHTML = intro + tiles + weeks + log;
 }
 
 // ── VIEW: refresh ───────────────────────────────────────────────────

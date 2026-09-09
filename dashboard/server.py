@@ -1447,23 +1447,74 @@ def _finalize_slate(base_games):
     return games, odds_status
 
 
+def _reg_weeks(season: int):
+    """(regular-season frame, sorted week list) for a season."""
+    s = schedules_df()
+    d = s[s["season"] == season].copy()
+    if "game_type" in d.columns:                     # regular season for the weekly view
+        d = d[d["game_type"].fillna("REG").str.upper().eq("REG")]
+    return d, sorted(int(x) for x in d["week"].dropna().unique())
+
+
+def _current_week(season: int):
+    """The first regular-season week with an unplayed game (None once the season is done)."""
+    d, weeks = _reg_weeks(season)
+    for w in weeks:
+        if d[(d["week"] == w) & d["home_score"].isna()].shape[0]:
+            return w
+    return None
+
+
+def _lock_picks(season: int, week: int, games: list) -> None:
+    """Freeze this slate's picks for games that haven't kicked off (ml/ledger.py). Only the
+    current season is a live record; browsing old seasons must not write history."""
+    try:
+        from ml.ledger import record
+        record(season, week, games)
+    except Exception as e:
+        print(f"[ledger] lock failed {season} wk{week}: {e}")
+
+
+def lock_current_week() -> str:
+    """Compute + freeze the current week's slate. Called after every data refresh so a pick is
+    on the record before kickoff even if nobody opened the Schedule page that day."""
+    try:
+        s = schedules_df()
+        season = int(s["season"].max())
+        week = _current_week(season)
+        if week is None:
+            return "season complete"
+        _SCHED_PRED.pop((season, week), None)         # refresh changed rosters/injuries → re-predict
+        slate = _slate(season, week)
+        _lock_picks(season, week, slate["games"])
+        return f"locked {season} wk{week}"
+    except Exception as e:
+        return f"error: {str(e)[:120]}"
+
+
 @app.route('/api/schedule')
 def api_schedule():
     """A week's slate: every game with the model's roster+injury-adjusted prediction
     (and the Vegas line / final score when available). Auto-pairs home/away from the schedule."""
-    from ml.projections import unavailable_ids
     s = schedules_df()
     if s.empty:
         return jsonify({"error": "no schedule data"}), 404
     seasons = sorted(int(x) for x in s["season"].dropna().unique())
     season = int(request.args.get('season', seasons[-1]))
-    d = s[s["season"] == season].copy()
-    if "game_type" in d.columns:                     # regular season for the weekly view
-        d = d[d["game_type"].fillna("REG").str.upper().eq("REG")]
-    weeks = sorted(int(x) for x in d["week"].dropna().unique())
+    d, weeks = _reg_weeks(season)
     if not weeks:
         return jsonify(_native({"season": season, "week": None, "seasons": seasons, "weeks": [], "games": []}))
     week = int(request.args.get('week', weeks[0]))
+    out = _slate(season, week)
+    if season == seasons[-1]:
+        _lock_picks(season, week, out["games"])       # the live season writes the record
+    return jsonify(_native({**out, "seasons": seasons, "weeks": weeks}))
+
+
+def _slate(season: int, week: int) -> dict:
+    """Predictions (cached) + fresh lines/picks for one week."""
+    from ml.projections import unavailable_ids
+    d, _ = _reg_weeks(season)
     if (season, week) not in _SCHED_PRED:            # cache only the EXPENSIVE predictions (no lines/picks)
         dw = d[d["week"] == week]
         sort_cols = [c for c in ["gameday", "gametime"] if c in dw.columns]
@@ -1487,6 +1538,7 @@ def api_schedule():
                 "home_logo": hm.get("team_logo_espn", ""), "away_logo": am.get("team_logo_espn", ""),
                 "home_color": hm.get("team_color") or "#334155", "away_color": am.get("team_color") or "#334155",
                 "vegas_spread": safe_json(g.get("spread_line")), "vegas_total": safe_json(g.get("total_line")),
+                "home_ml": safe_json(g.get("home_moneyline")), "away_ml": safe_json(g.get("away_moneyline")),
                 "home_score": safe_json(g.get("home_score")), "away_score": safe_json(g.get("away_score")),
                 "final": bool(played),
                 "neutral": ctx["neutral"], "stadium": ctx["stadium"], "context_notes": ctx["notes"],
@@ -1510,8 +1562,17 @@ def api_schedule():
 
     # live Vegas lines + picks are applied fresh each request (cheap; predictions stay cached)
     games, odds_status = _finalize_slate(_SCHED_PRED[(season, week)])
-    return jsonify(_native({"season": season, "week": week, "seasons": seasons, "weeks": weeks,
-                            "games": games, "odds_status": odds_status}))
+    return {"season": season, "week": week, "games": games, "odds_status": odds_status}
+
+
+@app.route('/api/record')
+def api_record():
+    """The model's betting record: every pick frozen before kickoff (ml/ledger.py), graded
+    against final scores — ATS, totals and moneyline, all picks and the conviction subsets."""
+    from ml.ledger import grade
+    s = schedules_df()
+    season = int(request.args.get('season', s["season"].max() if len(s) else 2026))
+    return jsonify(_native(grade(season)))
 
 
 @app.route('/api/backtest')
@@ -1714,6 +1775,7 @@ def _run_refresh(season: int):
         _REFRESH_STATE["log"].append(f"FATAL {e}")
     finally:
         clear_caches()
+        log(f"picks ledger: {lock_current_week()}")   # freeze this week's picks on fresh data
         _REFRESH_STATE["running"] = False
 
 

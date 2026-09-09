@@ -32,7 +32,8 @@ SEED = ROOT / "data_seed"
 # stale labels forever. A live refresh still rebuilds it at runtime; that output simply persists
 # until the next redeploy re-syncs the committed baseline.
 _REFRESH_NAMES = {"injuries.parquet", "schedules.parquet", "situational_stats.parquet",
-                  "last_refresh.json", "season_2026.json"}
+                  "last_refresh.json", "season_2026.json",
+                  "picks_ledger.parquet"}      # the site's own pre-kickoff pick record — never clobber
 
 
 def _refresh_managed(name: str) -> bool:
