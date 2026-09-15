@@ -269,19 +269,48 @@ _DEF_COLS = [
 ]
 
 
-def _scoring_avgs(season: int) -> dict:
-    """{team: (points_for_avg, points_against_avg)} from final scores in schedules."""
+def _scoring_avgs(season: int, blend: bool = True) -> dict:
+    """{team: (points_for_avg, points_against_avg)} from final scores in schedules.
+
+    blend=True applies the same in-season shrinkage as every other column (ml/current.py):
+    an in-progress season's per-game points are blended toward last season's by games
+    played. Without this the Pts/G column read a 36-point week-1 game as a full-season
+    number beside EPA columns that had been shrunk — two rules in one table."""
     s = schedules_df()
     if not len(s):
         return {}
-    sc = s[(s["season"] == season) & s["home_score"].notna() & (s["week"] <= 18)]
-    pf, pa = {}, {}
-    for _, g in sc.iterrows():
-        for team, scored, allowed in ((g["home_team"], g["home_score"], g["away_score"]),
-                                      (g["away_team"], g["away_score"], g["home_score"])):
-            pf.setdefault(team, []).append(scored)
-            pa.setdefault(team, []).append(allowed)
-    return {t: (float(np.mean(pf[t])), float(np.mean(pa.get(t, [0])))) for t in pf}
+
+    def _avg(season_):
+        sc = s[(s["season"] == season_) & s["home_score"].notna() & (s["week"] <= 18)]
+        pf, pa = {}, {}
+        for _, g in sc.iterrows():
+            for team, scored, allowed in ((g["home_team"], g["home_score"], g["away_score"]),
+                                          (g["away_team"], g["away_score"], g["home_score"])):
+                pf.setdefault(team, []).append(scored)
+                pa.setdefault(team, []).append(allowed)
+        return {t: (float(np.mean(pf[t])), float(np.mean(pa.get(t, [0])))) for t in pf}
+
+    cur = _avg(season)
+    if not blend:
+        return cur
+    try:
+        from ml.current import state, weights
+        st, w = state(), weights()
+        if season != st["season"] or not st["in_progress"] or st["prior"] is None or not len(w):
+            return cur
+        pri = _avg(st["prior"])
+        out = {}
+        for t in set(cur) | set(pri):
+            c, p, wt = cur.get(t), pri.get(t), float(w.get(t, 0.0))
+            if c is None:
+                out[t] = p
+            elif p is None:
+                out[t] = c
+            else:
+                out[t] = (wt * c[0] + (1 - wt) * p[0], wt * c[1] + (1 - wt) * p[1])
+        return out
+    except Exception:
+        return cur
 
 
 def _stat_side(df: pd.DataFrame, cols: list, meta: dict, scoring: dict, is_def: bool) -> dict:
@@ -337,7 +366,7 @@ def api_league_stats():
     if sub.empty:
         return jsonify({"error": f"no stats for {season}"}), 404
     meta = team_meta()
-    scoring = _scoring_avgs(season)
+    scoring = _scoring_avgs(season, blend=not raw)
     st = season_state()
     payload = {
         "season": season, "raw": raw,

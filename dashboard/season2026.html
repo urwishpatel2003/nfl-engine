@@ -575,7 +575,8 @@ function rankCard(d){
   </div>`;
 }
 // ── EPA quadrant scatter (Rankings page) ────────────────────────────
-let UNITEPA=null, EPA_MODE='off';
+let UNITEPA=null, EPA_MODE='off', EPA_SRC='current', UNITEPA_BY={};    // src: rolling blend vs season-to-date
+function setEpaSrc(s){ EPA_SRC=s; UNITEPA=null; viewEpaMap(); }
 const fEpa=v=>(v>=0?'+':'')+Number(v).toFixed(2);
 function epaScatter(){
   const teams=((UNITEPA&&UNITEPA.teams)||[]).filter(t=>t.off_pass!=null);
@@ -642,6 +643,8 @@ function setEpaMode(mode){
 }
 // ── League stat leaderboard (Rankings page) ─────────────────────────
 let LEAGUESTATS=null, STAT_SIDE='off', STAT_SORT=[{key:'epa',dir:1}];   // dir 1 = best-first (rank asc)
+let STAT_MODE='rolling', LEAGUESTATS_BY={};                             // rolling (blended) vs raw season-to-date
+function setStatMode(m){ STAT_MODE=m; viewLeagueStats(); }
 const rankHue=r=>Math.round((33-r)/32*100*1.2);                      // #1 → green hue, #32 → red hue
 function rankCol(r,a){                                                // solid text color, or tint/border with alpha
   if(r==null) return a==null?'var(--muted)':'transparent';
@@ -722,15 +725,20 @@ async function viewRankings(){
 }
 // ── VIEW: Unit EPA Map (own tab) ────────────────────────────────────
 async function viewEpaMap(){
-  if(!UNITEPA){ try{ UNITEPA=await j('/api/unit_epa?season=current'); }catch(e){ UNITEPA={teams:[]}; } }
-  const es=UNITEPA.state, eLbl=es&&es.in_progress?`${es.season} through week ${es.weeks_played} · ${Math.round(es.blend_w*100)}% this season / ${100-Math.round(es.blend_w*100)}% ${es.prior}`:`${UNITEPA.season||''}`;
+  if(!UNITEPA_BY.current){ try{ UNITEPA_BY.current=await j('/api/unit_epa?season=current'); }catch(e){ UNITEPA_BY.current={teams:[]}; } }
+  const cs=UNITEPA_BY.current.state, inProg=!!(cs&&cs.in_progress);
+  if(EPA_SRC==='raw' && inProg && !UNITEPA_BY.raw){ try{ UNITEPA_BY.raw=await j('/api/unit_epa?season='+cs.season); }catch(e){ UNITEPA_BY.raw={teams:[]}; } }
+  UNITEPA = (EPA_SRC==='raw' && inProg) ? UNITEPA_BY.raw : UNITEPA_BY.current;
+  const es=cs, eLbl=inProg?(EPA_SRC==='raw'?`${es.season} season to date · through week ${es.weeks_played} · unshrunk`:`${es.season} through week ${es.weeks_played} · ${Math.round(es.blend_w*100)}% this season / ${100-Math.round(es.blend_w*100)}% ${es.prior}`):`${UNITEPA.season||''}`;
   app().innerHTML = `
     <div class="note"><b>Unit EPA Map</b> — opponent-adjusted EPA/play split into pass vs rush for each side of the ball.
-      ${es&&es.in_progress?`<b>Rolling:</b> ${es.season} results are shrunk toward ${es.prior} by games played (w = g/(g+6) — week 1 counts ~14%, week 6 ~50%), so one game moves a team but does not define it.`:''}
+      ${inProg?(EPA_SRC==='raw'?`<b>Season to date:</b> only ${es.season} games, no shrinkage — the opponent adjustment has one game of schedule to work with, so read it as "what happened", not "how good they are".`
+                              :`<b>Rolling:</b> ${es.season} results are shrunk toward ${es.prior} by games played (w = g/(g+6) — week 1 counts ~14%, week 6 ~50%), so one game moves a team but does not define it. Switch to <b>Season to date</b> for the unshrunk numbers.`):''}
       Up-and-right = strong in both phases. Toggle Offense / Defense.</div>
     <div class="pad"><div class="card">
       <h2 style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
         <span>Unit EPA Map <span style="color:var(--muted);font-weight:400;font-size:12px">${eLbl} · opponent-adjusted · pass vs rush</span></span>
+        ${inProg?`<span class="seg" id="epa-src"><button class="${EPA_SRC==='current'?'on':''}" onclick="setEpaSrc('current')">Rolling</button><button class="${EPA_SRC==='raw'?'on':''}" onclick="setEpaSrc('raw')">Season to date</button></span>`:''}
         <span class="seg" id="epa-seg"><button class="${EPA_MODE==='off'?'on':''}" data-m="off" onclick="setEpaMode('off')">Offense</button><button class="${EPA_MODE==='def'?'on':''}" data-m="def" onclick="setEpaMode('def')">Defense</button></span>
       </h2>
       <div class="epa-wrap"><div id="epa-chart">${epaScatter()}</div><div class="epa-tip"></div></div>
@@ -744,17 +752,23 @@ async function viewEpaMap(){
 }
 // ── VIEW: League Stat Leaderboard (own tab) ─────────────────────────
 async function viewLeagueStats(){
-  if(!LEAGUESTATS){ try{ LEAGUESTATS=await j('/api/league_stats'); }catch(e){ LEAGUESTATS=null; } }
+  // two sources: rolling (this season shrunk toward last) or season-to-date only (raw)
+  if(!LEAGUESTATS_BY[STAT_MODE]){ try{ LEAGUESTATS_BY[STAT_MODE]=await j('/api/league_stats'+(STAT_MODE==='raw'?'?raw=1':'')); }catch(e){ LEAGUESTATS_BY[STAT_MODE]=null; } }
+  LEAGUESTATS=LEAGUESTATS_BY[STAT_MODE];
   const statSeason=(LEAGUESTATS&&LEAGUESTATS.season)||2025, ss=LEAGUESTATS&&LEAGUESTATS.state;
-  const sLbl=ss&&ss.in_progress?`${statSeason} through week ${ss.weeks_played} · ${Math.round(ss.blend_w*100)}% this season / ${100-Math.round(ss.blend_w*100)}% ${ss.prior}`:`${statSeason}`;
+  const inProg=!!(ss&&ss.in_progress);
+  const sLbl=inProg?(STAT_MODE==='raw'?`${statSeason} season to date · through week ${ss.weeks_played} · unshrunk`:`${statSeason} through week ${ss.weeks_played} · ${Math.round(ss.blend_w*100)}% this season / ${100-Math.round(ss.blend_w*100)}% ${ss.prior}`):`${statSeason}`;
   app().innerHTML = `
     <div class="note"><b>League Stat Leaderboard</b> — each team's on-field results, ranked #1–32 per metric.
-      ${ss&&ss.in_progress?`<b>Rolling:</b> ${statSeason} numbers are shrunk toward ${ss.prior} by games played (w = g/(g+6)) so a single game can't rank a team #1 or #32; the weight grows every week.`:''}
+      ${inProg?(STAT_MODE==='raw'?`<b>Season to date:</b> only ${statSeason} games, no shrinkage — after ${ss.weeks_played} week${ss.weeks_played>1?'s':''} a single game can put a team #1 or #32. The Rolling view is what the model uses.`
+                                 :`<b>Rolling:</b> ${statSeason} numbers are shrunk toward ${ss.prior} by games played (w = g/(g+6)) so a single game can't rank a team #1 or #32; the weight grows every week. Switch to <b>Season to date</b> for the unshrunk ${statSeason} numbers.`):''}
       Flip between Offense and Defense; click any column to sort.</div>
     <div class="pad"><div class="card">
       <h2 style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
         <span>League Stat Leaderboard <span style="color:var(--muted);font-weight:400;font-size:12px">${sLbl} · per-team results, ranked #1–32</span></span>
-        <span class="seg" id="stat-seg"><button class="${STAT_SIDE==='off'?'on':''}" data-m="off" onclick="setStatSide('off')">Offense</button><button class="${STAT_SIDE==='def'?'on':''}" data-m="def" onclick="setStatSide('def')">Defense</button></span>
+        <span style="display:flex;gap:8px;flex-wrap:wrap">
+        ${inProg?`<span class="seg" id="stat-mode"><button class="${STAT_MODE==='rolling'?'on':''}" onclick="setStatMode('rolling')" title="this season blended toward last season by games played">Rolling</button><button class="${STAT_MODE==='raw'?'on':''}" onclick="setStatMode('raw')" title="only this season's games, unshrunk">Season to date</button></span>`:''}
+        <span class="seg" id="stat-seg"><button class="${STAT_SIDE==='off'?'on':''}" data-m="off" onclick="setStatSide('off')">Offense</button><button class="${STAT_SIDE==='def'?'on':''}" data-m="def" onclick="setStatSide('def')">Defense</button></span></span>
       </h2>
       <div id="lstat-host">${leagueStatsTable()}</div>
       <div class="epa-leg"><span><b>Click a column to sort</b> · shift-click to add a tiebreaker · each cell shows value + league rank ·
