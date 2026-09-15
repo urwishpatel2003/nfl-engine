@@ -5,14 +5,24 @@ One week of games is 1/17 of a season. Ranking, labelling or pricing 32 teams of
 game produces noise dressed as insight, but ignoring the games that HAVE been played is
 wrong too. This module defines the single blending rule every in-season view uses:
 
-    w = g / (g + K_GAMES)           g = games this team has played, K_GAMES = 6
+    w = g / (g + K_GAMES)           g = games this team has played, K_GAMES = 4
     current = w * this_season + (1 - w) * last_season
 
-    week 1 → 14% current · week 3 → 33% · week 6 → 50% · week 12 → 67% · week 17 → 74%
+    week 1 → 20% current · week 3 → 43% · week 4 → 50% · week 6 → 60% · week 12 → 75% · week 17 → 81%
 
-That is the same idea DVOA uses (preseason projection weighted down as games accumulate);
-K = 6 is the point where a season-to-date sample earns as much trust as the prior. It is a
-prior, not a tuned constant — nothing here was fit to results.
+That is the same idea DVOA uses (preseason projection weighted down as games accumulate).
+K is "how many games of evidence last season is worth", and it was MEASURED, not guessed:
+walk-forward 2021-25 (1,359 games), blending season-to-date point differential with the
+prior season's and predicting the next game's margin —
+
+    K            1       2       3       4       5       6       8      15   prior only
+    MAE all   10.87   10.63   10.52   10.47   10.47   10.47   10.51   10.68   11.53
+    wk 11-18  10.13   10.12   10.14   10.17   10.21   10.25   10.35   10.68   12.13
+
+K = 4-6 are indistinguishable overall (0.01 pts); last season alone is clearly worse, so it
+must stay in; and late in the year the optimum falls to K ≈ 2 as the prior goes stale.
+K = 4 sits at the optimum's edge, beats K = 6 from week 11 on, and reaches a 75/25 split by
+week 12. Re-run the measurement before moving it again; do not set a fixed split.
 
 Three consumers, one rule:
   blended_styles(styles)      team_styles rows for the current season, blended per metric,
@@ -33,7 +43,7 @@ import pandas as pd
 RAW = Path(__file__).parent.parent / "data" / "raw"
 PROC = Path(__file__).parent.parent / "data" / "processed"
 
-K_GAMES = 6          # games at which season-to-date earns 50% weight vs last season
+K_GAMES = 4          # games at which season-to-date earns 50% weight vs last season (measured, see above)
 PLAYS_PER_GAME = 63  # EPA/play → points/game scale for the performance rating (≈ scrimmage plays)
 _CACHE: dict = {}
 

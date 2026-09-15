@@ -715,7 +715,7 @@ async function viewRankings(){
   });
   const pw=data.length?Math.round((data[0].perf_w||0)*100):0, wk=data.length?(data[0].weeks_played||0):0;
   app().innerHTML = `
-    <div class="note">${wk?`<b>2026 rolling ranking · through week ${wk}</b> — roster talent (QB by multi-year EPA, skill / OL / pass-rush / coverage + coaching) blended with this season's <b>opponent-adjusted results</b>: rating = (1−w)·talent + w·performance with w = g/(g+6) per team (≈${pw}% results now, 50% by week 6). Hover a rating to see both parts.`
+    <div class="note">${wk?`<b>2026 rolling ranking · through week ${wk}</b> — roster talent (QB by multi-year EPA, skill / OL / pass-rush / coverage + coaching) blended with this season's <b>opponent-adjusted results</b>: rating = (1−w)·talent + w·performance with w = g/(g+4) per team (≈${pw}% results now, 50% by week 4, 75% by week 12 — the 4 was measured on 2021-25, see ml/current.py). Hover a rating to see both parts.`
       :`<b>2026 roster-talent ranking</b> — each team rated by the players on its current roster (QB by multi-year EPA, skill / OL / pass-rush / coverage) + coaching, <b>not</b> last year's results.`}
       <b>Proj wins</b> = expected 2026 wins; <b>OFF / DEF</b> = where the roster ranks on each side of the ball.
       Click a team for the full profile.</div>
@@ -733,7 +733,7 @@ async function viewEpaMap(){
   app().innerHTML = `
     <div class="note"><b>Unit EPA Map</b> — opponent-adjusted EPA/play split into pass vs rush for each side of the ball.
       ${inProg?(EPA_SRC==='raw'?`<b>Season to date:</b> only ${es.season} games, no shrinkage — the opponent adjustment has one game of schedule to work with, so read it as "what happened", not "how good they are".`
-                              :`<b>Rolling:</b> ${es.season} results are shrunk toward ${es.prior} by games played (w = g/(g+6) — week 1 counts ~14%, week 6 ~50%), so one game moves a team but does not define it. Switch to <b>Season to date</b> for the unshrunk numbers.`):''}
+                              :`<b>Rolling:</b> ${es.season} results are shrunk toward ${es.prior} by games played (w = g/(g+4) — week 1 counts 20%, week 4 50%, week 12 75%; last season is worth about four games of evidence, measured on 2021-25), so one game moves a team but does not define it. Switch to <b>Season to date</b> for the unshrunk numbers.`):''}
       Up-and-right = strong in both phases. Toggle Offense / Defense.</div>
     <div class="pad"><div class="card">
       <h2 style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
@@ -761,7 +761,7 @@ async function viewLeagueStats(){
   app().innerHTML = `
     <div class="note"><b>League Stat Leaderboard</b> — each team's on-field results, ranked #1–32 per metric.
       ${inProg?(STAT_MODE==='raw'?`<b>Season to date:</b> only ${statSeason} games, no shrinkage — after ${ss.weeks_played} week${ss.weeks_played>1?'s':''} a single game can put a team #1 or #32. The Rolling view is what the model uses.`
-                                 :`<b>Rolling:</b> ${statSeason} numbers are shrunk toward ${ss.prior} by games played (w = g/(g+6)) so a single game can't rank a team #1 or #32; the weight grows every week. Switch to <b>Season to date</b> for the unshrunk ${statSeason} numbers.`):''}
+                                 :`<b>Rolling:</b> ${statSeason} numbers are shrunk toward ${ss.prior} by games played (w = g/(g+4): week 1 = 20%, week 4 = 50%, week 12 = 75%) so a single game can't rank a team #1 or #32; the weight grows every week. Switch to <b>Season to date</b> for the unshrunk ${statSeason} numbers.`):''}
       Flip between Offense and Defense; click any column to sort.</div>
     <div class="pad"><div class="card">
       <h2 style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
