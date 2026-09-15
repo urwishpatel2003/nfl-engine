@@ -128,6 +128,27 @@ def api_power_rankings():
                          + WEIGHTS["cover"] * bd["cover"])
             bd["off_rank"] = bd["off"].rank(ascending=False, method="min").astype(int)
             bd["def_rank"] = bd["def"].rank(ascending=False, method="min").astype(int)
+            # IN-SEASON: fold this season's results in. rating = (1−w)·roster talent + w·performance,
+            # performance = opponent-adjusted net EPA/play on the same points scale, w = g/(g+6)
+            # per team (ml/current.py). Week 1 moves a team ~14% of the way toward its result;
+            # by midseason the results carry more than the roster projection — the roster is the
+            # prior, the games are the evidence.
+            bd["rating_talent"] = bd["rating"]
+            bd["perf_w"] = 0.0
+            try:
+                from ml.current import performance_rating, state as _cstate
+                perf, pw_ = performance_rating()
+                if len(perf):
+                    w = bd["team"].map(pw_).fillna(0.0)
+                    pr = bd["team"].map(perf)
+                    bd["rating_perf"] = pr
+                    bd["rating"] = ((1 - w) * bd["rating"] + w * pr.fillna(bd["rating"])).round(1)
+                    bd["perf_w"] = w.round(3)
+                    bd["weeks_played"] = _cstate()["weeks_played"]
+                    bd = bd.sort_values("rating", ascending=False).reset_index(drop=True)
+                    bd["rank"] = bd.index + 1
+            except Exception as e:
+                print(f"[rankings] performance blend skipped: {e}", flush=True)
             try:                                          # anchor the abstract rating to projected wins
                 from ml.season import team_win_totals
                 pw = team_win_totals().set_index("team")["proj_wins"]
@@ -150,6 +171,10 @@ def api_power_rankings():
             "off_rank": int(row["off_rank"]) if has("off_rank") else None,
             "def_rank": int(row["def_rank"]) if has("def_rank") else None,
             "proj_wins": (float(row["proj_wins"]) if has("proj_wins") and pd.notna(row["proj_wins"]) else None),
+            "rating_talent": float(row["rating_talent"]) if has("rating_talent") else None,
+            "rating_perf": (float(row["rating_perf"]) if has("rating_perf") and pd.notna(row["rating_perf"]) else None),
+            "perf_w": float(row["perf_w"]) if has("perf_w") else 0.0,
+            "weeks_played": int(row["weeks_played"]) if has("weeks_played") else 0,
             "name": m.get("team_name", row["team"]),
             "color": m.get("team_color") or "#334155",
             "logo": m.get("team_logo_espn", ""),
@@ -167,11 +192,18 @@ def api_unit_epa():
     powers the quadrant scatter on the Rankings page. Latest completed season (2025 by default), since
     EPA needs games played. Convention: off_* higher = better offense; def_* is EPA ALLOWED so lower =
     better defense (the frontend negates it so 'up-right = elite in both phases' reads the same way)."""
-    season = int(request.args.get('season', 2025))
-    if season in _UNIT_EPA_CACHE:
-        return jsonify(_UNIT_EPA_CACHE[season])
+    arg = request.args.get('season', 'current')
+    if arg in _UNIT_EPA_CACHE:
+        return jsonify(_UNIT_EPA_CACHE[arg])
     from ml.adjust import adjusted_unit_epa
-    adj = adjusted_unit_epa(season)
+    st = season_state()
+    if arg == 'current':          # in-season: this season shrunk toward last season by games played
+        from ml.current import adjusted_units
+        adj = adjusted_units()
+        season = st["season"]
+    else:
+        season = int(arg)
+        adj = adjusted_unit_epa(season)
     meta = team_meta()
     recs = []
     for team, u in adj.items():
@@ -182,8 +214,9 @@ def api_unit_epa():
             "off_pass": u.get("off_pass"), "off_rush": u.get("off_rush"),
             "def_pass": u.get("def_pass"), "def_rush": u.get("def_rush"),
         })
-    payload = {"season": season, "teams": recs}
-    _UNIT_EPA_CACHE[season] = payload
+    payload = {"season": season, "mode": arg, "teams": recs,
+               "state": st if (arg == 'current' and st["in_progress"]) else None}
+    _UNIT_EPA_CACHE[arg] = payload
     return jsonify(payload)
 
 
@@ -295,20 +328,24 @@ def api_league_stats():
     Rankings page. Latest completed season by default — these are actual on-field results, so
     they need games played (unlike the roster-talent power ranking)."""
     season = int(request.args.get('season', latest_style_season()))
-    if season in _LEAGUE_STATS_CACHE:
-        return jsonify(_LEAGUE_STATS_CACHE[season])
-    s = styles_df()
+    raw = request.args.get('raw') == '1'             # season-to-date only, no shrink toward last season
+    key = (season, raw)
+    if key in _LEAGUE_STATS_CACHE:
+        return jsonify(_LEAGUE_STATS_CACHE[key])
+    s = styles_df(raw=raw)
     sub = s[s["season"] == season]
     if sub.empty:
         return jsonify({"error": f"no stats for {season}"}), 404
     meta = team_meta()
     scoring = _scoring_avgs(season)
+    st = season_state()
     payload = {
-        "season": season,
+        "season": season, "raw": raw,
+        "state": st if season == st["season"] else {"season": season, "in_progress": False, "weeks_played": 0, "blend_w": 0.0, "prior": None},
         "offense": _stat_side(sub, _OFF_COLS, meta, scoring, is_def=False),
         "defense": _stat_side(sub, _DEF_COLS, meta, scoring, is_def=True),
     }
-    _LEAGUE_STATS_CACHE[season] = payload
+    _LEAGUE_STATS_CACHE[key] = payload
     return jsonify(payload)
 
 
@@ -769,11 +806,38 @@ _SCHED = None
 _PBP_CACHE = {}
 
 
-def styles_df() -> pd.DataFrame:
-    global _STYLES
+_STYLES_RAW = None
+
+
+def styles_df(raw: bool = False) -> pd.DataFrame:
+    """team_styles with the IN-PROGRESS season's rows blended toward last season by games
+    played (ml/current.py) — the one rule every in-season view shares, so League Stats,
+    profiles, labels and the matchup grid never rank 32 teams off a single game.
+    raw=True returns the built table untouched (season-to-date only)."""
+    global _STYLES, _STYLES_RAW
+    if _STYLES_RAW is None:
+        _STYLES_RAW = pd.read_parquet(PROC / "team_styles.parquet")
+    if raw:
+        return _STYLES_RAW
     if _STYLES is None:
-        _STYLES = pd.read_parquet(PROC / "team_styles.parquet")
+        try:
+            from ml.current import blended_styles
+            _STYLES = blended_styles(_STYLES_RAW)
+        except Exception as e:
+            print(f"[styles] blend failed, serving raw: {e}", flush=True)
+            _STYLES = _STYLES_RAW
     return _STYLES
+
+
+def season_state() -> dict:
+    """Current-season progress for view captions: {season, prior, weeks_played, blend_w, in_progress}."""
+    try:
+        from ml.current import state, league_weight
+        st = state()
+        return {"season": st["season"], "prior": st["prior"], "weeks_played": st["weeks_played"],
+                "in_progress": st["in_progress"], "blend_w": league_weight() if st["in_progress"] else 0.0}
+    except Exception:
+        return {"season": latest_style_season(), "prior": None, "weeks_played": 0, "in_progress": False, "blend_w": 0.0}
 
 
 def injuries_df() -> pd.DataFrame:
@@ -2241,7 +2305,11 @@ def clear_caches():
         ml.backtest_spreads._BLEND_W = None           # recompute optimal blend after refresh
     except Exception:
         pass
-    for modname in ("ml.matchup_context", "ml.coaching", "ml.fantasy", "ml.odds", "ml.season"):
+    global _STYLES_RAW
+    _STYLES_RAW = None
+    _UNIT_EPA_CACHE.clear()
+    _LEAGUE_STATS_CACHE.clear()
+    for modname in ("ml.matchup_context", "ml.coaching", "ml.fantasy", "ml.odds", "ml.season", "ml.current"):
         try:
             import importlib
             importlib.import_module(modname).clear()

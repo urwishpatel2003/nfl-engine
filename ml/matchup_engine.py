@@ -118,9 +118,12 @@ def team_units() -> pd.DataFrame:
     pa, ru = plays[plays.play_type == "pass"], plays[plays.play_type == "run"]
 
     u = pd.DataFrame(index=sorted(set(plays.posteam.dropna())))
-    # opponent-adjusted unit EPA (schedule-adjusted); falls back to raw means if unavailable
-    from ml.adjust import adjusted_unit_epa
-    adj = adjusted_unit_epa(2025)
+    # opponent-adjusted unit EPA (schedule-adjusted); falls back to raw means if unavailable.
+    # IN-SEASON this is the CURRENT view (ml/current.py): this season's adjusted units shrunk
+    # toward last season's by games played, so week-1 results nudge the units without
+    # replacing a full season of evidence with one game.
+    from ml.current import adjusted_units, weights as _cur_w, state as _cur_state
+    adj = adjusted_units()
     _raw = {"off_pass": pa.groupby("posteam")["epa"].mean(),
             "off_rush": ru.groupby("posteam")["epa"].mean(),
             "def_pass": pa.groupby("defteam")["epa"].mean(),      # allowed (lower=better)
@@ -132,13 +135,34 @@ def team_units() -> pd.DataFrame:
     u["pace"] = plays.groupby("posteam").size() / gpg
     u["pass_rate"] = pa.groupby("posteam").size() / plays.groupby("posteam").size()
 
-    # points for / against per game (from final scores)
-    s = pd.read_parquet(RAW / "schedules.parquet")
-    s = s[(s.season == 2025) & (s.game_type.str.upper() == "REG") & s.home_score.notna()]
-    h = s.rename(columns={"home_team": "t", "home_score": "pf", "away_score": "pa"})[["t", "pf", "pa"]]
-    a = s.rename(columns={"away_team": "t", "away_score": "pf", "home_score": "pa"})[["t", "pf", "pa"]]
-    pts = pd.concat([h, a]).groupby("t").mean()
+    # points for / against per game (from final scores) — last season, then blended with
+    # this season's games by the same per-team weight
+    cw = _cur_w()
+    cst = _cur_state()
+
+    def _pts(season):
+        s = pd.read_parquet(RAW / "schedules.parquet")
+        s = s[(s.season == season) & (s.game_type.str.upper() == "REG") & s.home_score.notna()]
+        h = s.rename(columns={"home_team": "t", "home_score": "pf", "away_score": "pa"})[["t", "pf", "pa"]]
+        a = s.rename(columns={"away_team": "t", "away_score": "pf", "home_score": "pa"})[["t", "pf", "pa"]]
+        return pd.concat([h, a]).groupby("t").mean()
+    pts = _pts(2025)
     u["pf"] = pts["pf"]; u["pa"] = pts["pa"]
+    if len(cw) and cst["season"] != 2025:
+        now = _pts(cst["season"]).reindex(u.index)
+        w = cw.reindex(u.index).fillna(0.0)
+        u["pf"] = w * now["pf"].fillna(u["pf"]) + (1 - w) * u["pf"]
+        u["pa"] = w * now["pa"].fillna(u["pa"]) + (1 - w) * u["pa"]
+        try:                                   # pace / pass rate from this season's plays, same blend
+            pc = pd.read_parquet(RAW / f"pbp_{cst['season']}.parquet")
+            pc = pc[pc["play_type"].isin(["pass", "run"]) & pc["epa"].notna() & (pc["week"] <= 18)]
+            g2 = pc.groupby("posteam")["game_id"].nunique()
+            pace2 = (pc.groupby("posteam").size() / g2).reindex(u.index)
+            pr2 = (pc[pc.play_type == "pass"].groupby("posteam").size() / pc.groupby("posteam").size()).reindex(u.index)
+            u["pace"] = w * pace2.fillna(u["pace"]) + (1 - w) * u["pace"]
+            u["pass_rate"] = w * pr2.fillna(u["pass_rate"]) + (1 - w) * u["pass_rate"]
+        except Exception:
+            pass
 
     # special teams: FG make rate + return net, expressed as points/game vs average
     fg = p[p["play_type"] == "field_goal"]
@@ -167,6 +191,13 @@ def team_units() -> pd.DataFrame:
     con = _continuity().reindex(u.index).fillna(0.6)
     w_off = (W25_MAX * con["cont_off"]).clip(0, W25_MAX)
     w_def = (W25_MAX * con["cont_def"]).clip(0, W25_MAX)
+    # IN-SEASON: the performance side now contains this season's games, so its weight vs the
+    # roster projection grows with games played — never below the continuity-based preseason
+    # weight, and up to 0.8 by late season (the roster prior never fully disappears).
+    if len(cw):
+        wp = (cw.reindex(u.index).fillna(0.0) / 1.0).clip(0, 0.8)
+        w_off = pd.concat([w_off, wp], axis=1).max(axis=1)
+        w_def = pd.concat([w_def, wp], axis=1).max(axis=1)
 
     u["z_off_pass"] = (1 - w_off) * tal["t_off_pass"] + w_off * u["z25_off_pass"]
     u["z_off_rush"] = (1 - w_off) * tal["t_off_rush"] + w_off * u["z25_off_rush"]

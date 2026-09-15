@@ -561,7 +561,8 @@ function odClass(rk){ return rk==null?'':(rk<=8?'g':(rk>=25?'b':'')); }
 function rankCard(d){
   const of=d.off_rank, df=d.def_rank;
   const ofw=of!=null?Math.round((33-of)/32*100):0, dfw=df!=null?Math.round((33-df)/32*100):0;
-  return `<div class="pr-card" title="rating ${f1(d.rating)}" style="border-top-color:${d.color}" onclick="go('#/team/${d.team}')">
+  const rtTip = d.perf_w ? `rating ${f1(d.rating)} = ${Math.round((1-d.perf_w)*100)}% roster talent ${f1(d.rating_talent)} + ${Math.round(d.perf_w*100)}% results ${d.rating_perf!=null?f1(d.rating_perf):'—'} (through week ${d.weeks_played})` : `rating ${f1(d.rating)}`;
+  return `<div class="pr-card" title="${rtTip}" style="border-top-color:${d.color}" onclick="go('#/team/${d.team}')">
     <span class="pc-rank-badge">#${d.rank}</span>
     <img class="pc-logo-lg" src="${d.logo}" onerror="this.style.visibility='hidden'">
     <div class="pc-team">${esc(d.name||d.team)}</div>
@@ -709,24 +710,27 @@ async function viewRankings(){
     if(!teams.length) return;
     body += `<div class="tierhdr">${label} <span>#${lo}–${hi}</span></div><div class="pr-grid">${teams.map(rankCard).join('')}</div>`;
   });
+  const pw=data.length?Math.round((data[0].perf_w||0)*100):0, wk=data.length?(data[0].weeks_played||0):0;
   app().innerHTML = `
-    <div class="note"><b>2026 roster-talent ranking</b> — each team rated by the players on its current roster
-      (QB by multi-year EPA, skill / OL / pass-rush / coverage) + coaching, <b>not</b> last year's results.
+    <div class="note">${wk?`<b>2026 rolling ranking · through week ${wk}</b> — roster talent (QB by multi-year EPA, skill / OL / pass-rush / coverage + coaching) blended with this season's <b>opponent-adjusted results</b>: rating = (1−w)·talent + w·performance with w = g/(g+6) per team (≈${pw}% results now, 50% by week 6). Hover a rating to see both parts.`
+      :`<b>2026 roster-talent ranking</b> — each team rated by the players on its current roster (QB by multi-year EPA, skill / OL / pass-rush / coverage) + coaching, <b>not</b> last year's results.`}
       <b>Proj wins</b> = expected 2026 wins; <b>OFF / DEF</b> = where the roster ranks on each side of the ball.
       Click a team for the full profile.</div>
-    <div class="pad"><div class="card"><h2>Power Rankings <span>2026 · roster talent, grouped by tier</span></h2>
+    <div class="pad"><div class="card"><h2>Power Rankings <span>2026 · ${wk?`roster talent + results through week ${wk}`:'roster talent'}, grouped by tier</span></h2>
       ${body}
     </div></div>`;
 }
 // ── VIEW: Unit EPA Map (own tab) ────────────────────────────────────
 async function viewEpaMap(){
-  if(!UNITEPA){ try{ UNITEPA=await j('/api/unit_epa?season=2025'); }catch(e){ UNITEPA={teams:[]}; } }
+  if(!UNITEPA){ try{ UNITEPA=await j('/api/unit_epa?season=current'); }catch(e){ UNITEPA={teams:[]}; } }
+  const es=UNITEPA.state, eLbl=es&&es.in_progress?`${es.season} through week ${es.weeks_played} · ${Math.round(es.blend_w*100)}% this season / ${100-Math.round(es.blend_w*100)}% ${es.prior}`:`${UNITEPA.season||''}`;
   app().innerHTML = `
-    <div class="note"><b>Unit EPA Map</b> — opponent-adjusted EPA/play from 2025, split into pass vs rush for
-      each side of the ball. Up-and-right = strong in both phases. Toggle Offense / Defense.</div>
+    <div class="note"><b>Unit EPA Map</b> — opponent-adjusted EPA/play split into pass vs rush for each side of the ball.
+      ${es&&es.in_progress?`<b>Rolling:</b> ${es.season} results are shrunk toward ${es.prior} by games played (w = g/(g+6) — week 1 counts ~14%, week 6 ~50%), so one game moves a team but does not define it.`:''}
+      Up-and-right = strong in both phases. Toggle Offense / Defense.</div>
     <div class="pad"><div class="card">
       <h2 style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-        <span>Unit EPA Map <span style="color:var(--muted);font-weight:400;font-size:12px">2025 · opponent-adjusted · pass vs rush</span></span>
+        <span>Unit EPA Map <span style="color:var(--muted);font-weight:400;font-size:12px">${eLbl} · opponent-adjusted · pass vs rush</span></span>
         <span class="seg" id="epa-seg"><button class="${EPA_MODE==='off'?'on':''}" data-m="off" onclick="setEpaMode('off')">Offense</button><button class="${EPA_MODE==='def'?'on':''}" data-m="def" onclick="setEpaMode('def')">Defense</button></span>
       </h2>
       <div class="epa-wrap"><div id="epa-chart">${epaScatter()}</div><div class="epa-tip"></div></div>
@@ -740,14 +744,16 @@ async function viewEpaMap(){
 }
 // ── VIEW: League Stat Leaderboard (own tab) ─────────────────────────
 async function viewLeagueStats(){
-  if(!LEAGUESTATS){ try{ LEAGUESTATS=await j('/api/league_stats?season=2025'); }catch(e){ LEAGUESTATS=null; } }
-  const statSeason=(LEAGUESTATS&&LEAGUESTATS.season)||2025;
+  if(!LEAGUESTATS){ try{ LEAGUESTATS=await j('/api/league_stats'); }catch(e){ LEAGUESTATS=null; } }
+  const statSeason=(LEAGUESTATS&&LEAGUESTATS.season)||2025, ss=LEAGUESTATS&&LEAGUESTATS.state;
+  const sLbl=ss&&ss.in_progress?`${statSeason} through week ${ss.weeks_played} · ${Math.round(ss.blend_w*100)}% this season / ${100-Math.round(ss.blend_w*100)}% ${ss.prior}`:`${statSeason}`;
   app().innerHTML = `
-    <div class="note"><b>League Stat Leaderboard</b> — each team's actual ${statSeason} on-field results, ranked #1–32
-      per metric. Flip between Offense and Defense; click any column to sort.</div>
+    <div class="note"><b>League Stat Leaderboard</b> — each team's on-field results, ranked #1–32 per metric.
+      ${ss&&ss.in_progress?`<b>Rolling:</b> ${statSeason} numbers are shrunk toward ${ss.prior} by games played (w = g/(g+6)) so a single game can't rank a team #1 or #32; the weight grows every week.`:''}
+      Flip between Offense and Defense; click any column to sort.</div>
     <div class="pad"><div class="card">
       <h2 style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-        <span>League Stat Leaderboard <span style="color:var(--muted);font-weight:400;font-size:12px">${statSeason} · per-team results, ranked #1–32</span></span>
+        <span>League Stat Leaderboard <span style="color:var(--muted);font-weight:400;font-size:12px">${sLbl} · per-team results, ranked #1–32</span></span>
         <span class="seg" id="stat-seg"><button class="${STAT_SIDE==='off'?'on':''}" data-m="off" onclick="setStatSide('off')">Offense</button><button class="${STAT_SIDE==='def'?'on':''}" data-m="def" onclick="setStatSide('def')">Defense</button></span>
       </h2>
       <div id="lstat-host">${leagueStatsTable()}</div>
@@ -1245,7 +1251,7 @@ async function viewHistory(){
       for a brutal schedule. Rolling: when ${HIST_UNIT.seasons[HIST_UNIT.seasons.length-1]+1} play-by-play starts
       landing, the current season appears automatically and updates weekly.</div>
     <div class="pad"><div class="card">
-      <h2>QB seasons <span>last ${HIST_QB.seasons.length} seasons · opponent-adjusted EPA/play · min 150 dropbacks per season cell</span></h2>
+      <h2>QB seasons <span>${HIST_QB.in_progress?`last ${HIST_QB.seasons.length-1} seasons + ${HIST_QB.in_progress} in progress (week ${HIST_QB.weeks_played}) · min 150 dropbacks per completed season, ${Math.min(150,25*(HIST_QB.weeks_played||1))} so far this season`:`last ${HIST_QB.seasons.length} seasons · min 150 dropbacks per season cell`} · opponent-adjusted EPA/play</span></h2>
       <div id="qbHistHost">${qbHistTable()}</div>
       <div class="epa-leg" style="margin-top:8px"><span><b>Click any column to sort</b> (click again to reverse) · hover a season cell for raw EPA + dropbacks ·
         Wgt adj = dropback-weighted, recency-tilted window average · CPOE/rate stats from the latest qualifying season</span></div>
@@ -1944,8 +1950,8 @@ async function viewRecord(params){
       <div class="rtile"><div class="rt-ttl">Straight-up winners<span>model · market favorite</span></div><div class="rt-rec ${A.winner_acc>=A.market_winner_acc?'g':'b'}" style="font-size:22px">${fP(A.winner_acc)} <span class="muted" style="font-size:13px">vs ${fP(A.market_winner_acc)}</span></div></div>
     </div></div>`;
   const weeks = (d.weeks||[]).length ? `<div class="card"><h2>Week by week <span>W-L(-P) · units at −110 (ML at posted odds)</span></h2>
-    <div class="tblwrap"><table class="tbl rec"><thead><tr><th>Week</th><th>Games</th><th>Final</th><th title="all games ATS">ATS</th><th>ATS u</th><th title="top-5 picks ATS">Top-5</th><th>O/U</th><th>O/U u</th><th>ML</th><th>ML u</th></tr></thead><tbody>
-    ${d.weeks.map(w=>`<tr><td>Wk ${w.week}</td><td>${w.games}</td><td>${w.final}</td><td>${fWL(w.ats)}</td><td class="${w.ats&&w.ats.units>0?'g':w.ats&&w.ats.units<0?'b':''}">${w.ats?fU(w.ats.units):'—'}</td><td>${fWL(w.ats_top)}</td><td>${fWL(w.ou)}</td><td class="${w.ou&&w.ou.units>0?'g':w.ou&&w.ou.units<0?'b':''}">${w.ou?fU(w.ou.units):'—'}</td><td>${fWL(w.ml)}</td><td class="${w.ml&&w.ml.units>0?'g':w.ml&&w.ml.units<0?'b':''}">${w.ml?fU(w.ml.units):'—'}</td></tr>`).join('')}
+    <div class="tblwrap"><table class="tbl rec"><thead><tr><th>Week</th><th>Games</th><th>Final</th><th title="model side vs the spread, every game">ATS all</th><th title="units on every game at −110">ATS all u</th><th title="the ≥2.5-pt-edge picks only">Top-5</th><th title="units on the top-5 picks only at −110">Top-5 u</th><th>O/U</th><th>O/U u</th><th>ML</th><th>ML u</th></tr></thead><tbody>
+    ${d.weeks.map(w=>`<tr><td>Wk ${w.week}</td><td>${w.games}</td><td>${w.final}</td><td>${fWL(w.ats)}</td><td class="${w.ats&&w.ats.units>0?'g':w.ats&&w.ats.units<0?'b':''}">${w.ats?fU(w.ats.units):'—'}</td><td>${fWL(w.ats_top)}</td><td class="${w.ats_top&&w.ats_top.units>0?'g':w.ats_top&&w.ats_top.units<0?'b':''}">${w.ats_top&&w.ats_top.n?fU(w.ats_top.units):'—'}</td><td>${fWL(w.ou)}</td><td class="${w.ou&&w.ou.units>0?'g':w.ou&&w.ou.units<0?'b':''}">${w.ou?fU(w.ou.units):'—'}</td><td>${fWL(w.ml)}</td><td class="${w.ml&&w.ml.units>0?'g':w.ml&&w.ml.units<0?'b':''}">${w.ml?fU(w.ml.units):'—'}</td></tr>`).join('')}
     </tbody></table></div></div>` : '';
   const pickNum = g => g.vegas_spread==null?'':(g.ats_pick===g.home?-g.vegas_spread:g.vegas_spread);
   const fLine = n => n===''||n==null ? '' : (Math.abs(n)<0.05?'PK':(n>0?'+':'')+n);

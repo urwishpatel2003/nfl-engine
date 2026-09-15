@@ -47,10 +47,22 @@ def qb_seasons(n: int = 3) -> dict:
     if _QB_CACHE is not None:
         return _QB_CACHE
     from ml.adjust import adjusted_unit_epa
-    seasons = _pbp_seasons()[-n:]
+    all_seasons = _pbp_seasons()
+    # the newest season is IN PROGRESS until its schedule is complete: keep the last n
+    # COMPLETED seasons as the window and add the current one as a growing extra column
+    try:
+        from ml.current import state as _cstate
+        cst = _cstate()
+        in_prog = cst["in_progress"] and cst["season"] == all_seasons[-1]
+    except Exception:
+        cst, in_prog = {"weeks_played": 0}, False
+    seasons = (all_seasons[:-1][-n:] + [all_seasons[-1]]) if in_prog else all_seasons[-n:]
     per = {}                                           # (gsis, season) -> stats
     names = {}
     for season in seasons:
+        # a season in progress qualifies at ~25 dropbacks per week played (150 once 6+ weeks in)
+        min_db = min(MIN_DROPBACKS, 25 * max(1, int(cst.get("weeks_played") or 1))) \
+            if (in_prog and season == all_seasons[-1]) else MIN_DROPBACKS
         p = pd.read_parquet(RAW / f"pbp_{season}.parquet")
         p = p[(p["week"] <= 18) & p["epa"].notna() & p["defteam"].notna()]
         adj = adjusted_unit_epa(season)
@@ -79,7 +91,7 @@ def qb_seasons(n: int = 3) -> dict:
         nm = drop.dropna(subset=["passer_player_name"]) \
             .groupby("passer_player_id")["passer_player_name"].last()
         names.update(nm.to_dict())
-        for gsis, r in stats[stats["db"] >= MIN_DROPBACKS].iterrows():
+        for gsis, r in stats[stats["db"] >= min_db].iterrows():
             per[(gsis, season)] = {k: round(float(r[k]), 4) for k in
                                    ("db", "epa", "adj_epa", "success", "cpoe",
                                     "td_pct", "int_pct", "sack_pct")}
@@ -112,7 +124,8 @@ def qb_seasons(n: int = 3) -> dict:
             num += st["adj_epa"] * st["db"] * w[s]
             den += st["db"] * w[s]
         q["adj_epa_w"] = round(num / den, 4) if den else None
-    _QB_CACHE = {"seasons": seasons,
+    _QB_CACHE = {"seasons": seasons, "in_progress": all_seasons[-1] if in_prog else None,
+                 "weeks_played": int(cst.get("weeks_played") or 0) if in_prog else None,
                  "qbs": sorted(qbs.values(), key=lambda x: -(x["adj_epa_w"] or -9))}
     return _QB_CACHE
 
