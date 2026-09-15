@@ -1849,8 +1849,9 @@ function schCard(g){
     ? `<div class="gc-row"><span>Total pick</span><b>${g.total_pick} ${g.vegas_total??''} · ${Math.round(g.total_prob*100)}%</b></div>` : '';
   const blendRow = g.blend_margin!=null
     ? `<div class="gc-row"><span>Best est · model+market</span><b>${g.blend_margin>=0?g.home:g.away} -${Math.abs(g.blend_margin).toFixed(1)}</b></div>` : '';
-  return `<div class="gcard${top?' top':''}" onclick="go('#/matchup?home=${g.home}&away=${g.away}')">
+  return `<div class="gcard${top?' top':''}" onclick="go('#/matchup?home=${g.home}&away=${g.away}')" ${g.locked?`title="pick locked before kickoff (${esc((g.locked_at||'').slice(0,16).replace('T',' '))} UTC) — as graded on the Model Record"`:''}>
     ${top?`<div class="gc-badge">🔥 Top Pick #${top}</div>`:''}
+    ${g.locked&&!g.neutral?`<div class="gc-badge" style="left:auto;right:12px;background:#334155">🔒 locked</div>`:''}
     ${g.neutral?`<div class="gc-badge" style="left:auto;right:12px;background:#0e7490">🌍 Neutral</div>`:''}
     <div class="gc-tms">
       <div class="gc-tm"><img src="${g.away_logo}" onerror="this.style.visibility='hidden'"><div class="gc-ab">${g.away}</div><div class="gc-sc">${pred?g.pred_away.toFixed(0):'–'}</div></div>
@@ -1894,8 +1895,10 @@ async function viewSchedule(params){
   const body=document.getElementById('schBody');
   if(!d.games||!d.games.length){ body.innerHTML=`<div class="note warn">No games found for this week.</div>`; return; }
   const picks = d.games.filter(g=>g.pick_rank).sort((a,b)=>a.pick_rank-b.pick_rank);
+  const nLocked = d.games.filter(g=>g.locked).length;
   const strip = picks.length ? `<div class="card" style="padding:14px">
-      <h2 style="margin:0 0 10px">🔥 Top 5 picks <span>real edge (≥2.5 pts vs the line), ranked by cover probability</span></h2>
+      <h2 style="margin:0 0 10px">🔥 Top 5 picks <span>real edge (≥2.5 pts vs the line), ranked by cover probability${nLocked?' · 🔒 as locked before kickoff':''}</span></h2>
+      ${nLocked?`<div class="note" style="margin:0 0 10px">Games that have kicked off show the pick that was <b>on the board before kickoff</b> (the same rows the Model Record grades), not a re-prediction with today's model — the model moves as results, injuries and lines come in, so re-predicting a finished game would be hindsight.</div>`:''}
       <div class="toppicks">${picks.map(g=>{
         const pn = g.vegas_spread==null?null:(g.ats_pick===g.home?-g.vegas_spread:g.vegas_spread);
         const ps = pn==null?g.ats_pick:Math.abs(pn)<0.05?`${g.ats_pick} PK`:`${g.ats_pick} ${pn>0?'+':''}${pn}`;

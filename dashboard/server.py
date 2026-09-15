@@ -1613,7 +1613,49 @@ def api_schedule():
     out = _slate(season, week)
     if season == seasons[-1]:
         _lock_picks(season, week, out["games"])       # the live season writes the record
+        _overlay_locked(season, out["games"])         # finished games show the pick that was on the board
     return jsonify(_native({**out, "seasons": seasons, "weeks": weeks}))
+
+
+_LOCK_FIELDS = ("pred_home", "pred_away", "pred_margin", "pred_total", "home_win_prob",
+                "vegas_spread", "vegas_total", "line_source", "ats_pick", "edge", "cover_prob",
+                "pick_rank", "total_pick", "total_prob")
+
+
+def _overlay_locked(season: int, games: list) -> None:
+    """For games that have KICKED OFF, replace the live re-prediction with the ledger's
+    pre-kickoff row (ml/ledger.py). The model moves every day — results feed the blend,
+    injuries change, lines close — so re-predicting a finished game is hindsight, and it
+    made the Schedule's week-1 top-5 disagree with the Model Record. The record is the
+    truth for anything already played; the live model only prices what hasn't started."""
+    try:
+        from ml.ledger import load, kickoff_utc
+        from datetime import datetime, timezone
+        led = load()
+        led = led[led["season"] == season] if len(led) else led
+        if not len(led):
+            return
+        rows = led.set_index("game_id")
+        now = datetime.now(timezone.utc)
+        for g in games:
+            gid = g.get("game_id")
+            ko = kickoff_utc(g.get("gameday"), g.get("gametime"))
+            started = g.get("final") or (ko is not None and now >= ko)
+            if not started or gid not in rows.index:
+                continue
+            r = rows.loc[gid]
+            for k in _LOCK_FIELDS:
+                v = r.get(k)
+                g[k] = None if (v is None or (isinstance(v, float) and np.isnan(v))) else v
+            g["blend_margin"] = None                     # not part of the locked record
+            g["locked"] = True
+            g["locked_at"] = r.get("locked_at")
+        # top-5 for a started week = the LOCKED ranks; drop any live rank on unlocked games
+        for g in games:
+            if not g.get("locked") and any(x.get("locked") for x in games):
+                g["pick_rank"] = None if g.get("final") else g.get("pick_rank")
+    except Exception as e:
+        print(f"[ledger] overlay failed: {e}", flush=True)
 
 
 def _slate(season: int, week: int) -> dict:
