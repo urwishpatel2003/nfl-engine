@@ -237,8 +237,30 @@ def grade(season: int) -> dict:
                           "ats_top": _tally(f[f["pick_rank"].notna()], "ats", "ats_units") if len(f) else None,
                           "ou": _tally(f, "ou", "ou_units") if len(f) else None,
                           "ml": _tally(f, "ml", "ml_units") if len(f) else None})
+    # Was the model wrong, or was the market wrong too? Mean absolute error of the locked
+    # model number vs the closing line it was priced against, on the same games. A bad
+    # week where the market missed by as much is variance; a bad week where the market
+    # was close and the model was not is signal.
+    accuracy = None
+    if len(fin):
+        f = fin[fin["pred_margin"].notna() & fin["vegas_spread"].notna()]
+        ft = fin[fin["pred_total"].notna() & fin["vegas_total"].notna()]
+        act_m = f["home_score"] - f["away_score"]
+        act_t = ft["home_score"] + ft["away_score"]
+        accuracy = {
+            "n": int(len(f)),
+            "margin_mae_model": round(float((act_m - f["pred_margin"]).abs().mean()), 2) if len(f) else None,
+            "margin_mae_market": round(float((act_m - f["vegas_spread"]).abs().mean()), 2) if len(f) else None,
+            "total_mae_model": round(float((act_t - ft["pred_total"]).abs().mean()), 2) if len(ft) else None,
+            "total_mae_market": round(float((act_t - ft["vegas_total"]).abs().mean()), 2) if len(ft) else None,
+            "avg_total_actual": round(float(act_t.mean()), 1) if len(ft) else None,
+            "avg_total_model": round(float(ft["pred_total"].mean()), 1) if len(ft) else None,
+            "avg_total_market": round(float(ft["vegas_total"].mean()), 1) if len(ft) else None,
+            "winner_acc": round(float(((f["pred_margin"] > 0) == (act_m > 0)).mean()), 3) if len(f) else None,
+            "market_winner_acc": round(float(((f["vegas_spread"] > 0) == (act_m > 0)).mean()), 3) if len(f) else None,
+        }
     return {"season": season, "n_locked": len(gdf), "n_final": len(fin),
             "n_pending": int((gdf["status"] != "final").sum()) if len(gdf) else 0,
-            "summary": summary, "weeks": weeks, "games": games,
+            "summary": summary, "weeks": weeks, "games": games, "accuracy": accuracy,
             "rules": {"juice": JUICE, "total_conf": TOTAL_CONF, "ml_value": ML_VALUE,
                       "breakeven_110": round(110 / 210, 3)}}

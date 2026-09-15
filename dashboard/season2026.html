@@ -1354,6 +1354,8 @@ function boxTeam(tm, t){
   const pn=x=>`<td class="pl">${esc(x.name)}${x.pos?`<span class="pos">${esc(x.pos)}</span>`:''}</td>`;
   const td=v=>`<td class="${v>=1?'big':''}">${dv(v)}</td>`;
   let h=`<div class="bxt"><div class="bh"><img src="${m.logo||''}" onerror="this.style.display='none'">${esc(m.team_name||tm)}</div>`;
+  // who the projection left out and why (Out / Doubtful / IR / PUP …) — their usage was redistributed
+  if(t.excluded&&t.excluded.length) h+=`<div class="bxs" style="margin:2px 0 8px;font-size:11px;color:var(--muted)">Excluded (usage redistributed): ${t.excluded.map(x=>`<span title="${esc(x.status)}">${esc(x.name)} <span class="st mini st-${esc(x.status)}">${esc(x.status)}</span></span>`).join(', ')}</div>`;
   if(q){
     h+=`<table class="bxtbl"><thead><tr><th>Passing</th><th>C/ATT</th><th>Yds</th><th>TD</th><th>INT</th></tr></thead>
       <tbody><tr><td class="pl">${esc(q.name)}</td><td>${iv(q.cmp)}/${iv(q.pass_att)}</td><td class="big">${iv(q.pass_yds)}</td>${td(q.pass_td)}<td>${dv(q.int)}</td></tr></tbody></table>`;
@@ -1932,6 +1934,15 @@ async function viewRecord(params){
     ${recTile('Moneyline · all games','model favorite at the posted price', S.ml_all, 0.5)}
     ${recTile('Moneyline · value',`model prob ≥ market +${Math.round(d.rules.ml_value*100)} pts`, S.ml_value, 0.5)}
   </div>`;
+  const A = d.accuracy;
+  const acc = !A || !A.n ? '' : `<div class="card"><h2>Model vs market accuracy <span>same graded games · mean absolute error of the locked number vs the closing line</span></h2>
+    <div class="note" style="margin-bottom:10px">Reads the week honestly: a losing week where the market missed by as much is variance; a losing week where the market was close and the model was not is signal. Totals are the model's weakest output — the average total row shows whether the whole league scored more (or less) than anyone priced.</div>
+    <div class="rtiles">
+      <div class="rtile"><div class="rt-ttl">Margin error<span>points per game, lower is better</span></div><div class="rt-rec ${A.margin_mae_model<=A.margin_mae_market?'g':'b'}" style="font-size:22px">${A.margin_mae_model} <span class="muted" style="font-size:13px">vs market ${A.margin_mae_market}</span></div></div>
+      <div class="rtile"><div class="rt-ttl">Total error<span>points per game, lower is better</span></div><div class="rt-rec ${A.total_mae_model<=A.total_mae_market?'g':'b'}" style="font-size:22px">${A.total_mae_model} <span class="muted" style="font-size:13px">vs market ${A.total_mae_market}</span></div></div>
+      <div class="rtile"><div class="rt-ttl">Average total<span>actual · model · market</span></div><div class="rt-rec" style="font-size:22px">${A.avg_total_actual} <span class="muted" style="font-size:13px">· ${A.avg_total_model} · ${A.avg_total_market}</span></div></div>
+      <div class="rtile"><div class="rt-ttl">Straight-up winners<span>model · market favorite</span></div><div class="rt-rec ${A.winner_acc>=A.market_winner_acc?'g':'b'}" style="font-size:22px">${fP(A.winner_acc)} <span class="muted" style="font-size:13px">vs ${fP(A.market_winner_acc)}</span></div></div>
+    </div></div>`;
   const weeks = (d.weeks||[]).length ? `<div class="card"><h2>Week by week <span>W-L(-P) · units at −110 (ML at posted odds)</span></h2>
     <div class="tblwrap"><table class="tbl rec"><thead><tr><th>Week</th><th>Games</th><th>Final</th><th title="all games ATS">ATS</th><th>ATS u</th><th title="top-5 picks ATS">Top-5</th><th>O/U</th><th>O/U u</th><th>ML</th><th>ML u</th></tr></thead><tbody>
     ${d.weeks.map(w=>`<tr><td>Wk ${w.week}</td><td>${w.games}</td><td>${w.final}</td><td>${fWL(w.ats)}</td><td class="${w.ats&&w.ats.units>0?'g':w.ats&&w.ats.units<0?'b':''}">${w.ats?fU(w.ats.units):'—'}</td><td>${fWL(w.ats_top)}</td><td>${fWL(w.ou)}</td><td class="${w.ou&&w.ou.units>0?'g':w.ou&&w.ou.units<0?'b':''}">${w.ou?fU(w.ou.units):'—'}</td><td>${fWL(w.ml)}</td><td class="${w.ml&&w.ml.units>0?'g':w.ml&&w.ml.units<0?'b':''}">${w.ml?fU(w.ml.units):'—'}</td></tr>`).join('')}
@@ -1951,7 +1962,7 @@ async function viewRecord(params){
   const log = `<div class="card"><h2>Pick log <span>newest first · click a game for the matchup breakdown</span></h2>
     ${rows ? `<div class="tblwrap"><table class="tbl rec log"><thead><tr><th>Week</th><th>Game</th><th title="model line and total at lock time">Model</th><th title="side · line taken · cover prob">ATS pick</th><th title="Over/Under · line · model prob">Total pick</th><th title="model favorite · posted odds · model prob vs market no-vig prob">ML pick</th><th>Result</th></tr></thead><tbody>${rows}</tbody></table></div>`
          : `<div class="note">No picks locked yet for ${d.season}. Open <a href="#/schedule">Schedule &amp; Picks</a> before kickoff (or wait for the daily refresh) and the week's picks are written here automatically.</div>`}</div>`;
-  body.innerHTML = intro + tiles + weeks + log;
+  body.innerHTML = intro + tiles + acc + weeks + log;
 }
 
 // ── VIEW: Kalshi (ported from the tennis engine) ────────────────────

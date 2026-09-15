@@ -76,16 +76,24 @@ def reserve_ids(team: str | None = None) -> dict:
             for g, s, d in zip(r["player_id"], r["status"], r["status_description_abbr"])}
 
 
-def unavailable_ids(statuses=OUT_STATUSES) -> set:
-    """gsis_ids that won't play: ruled Out/Doubtful in each team's current-season report
-    (same report the dashboard's injury panel shows) PLUS everyone on a reserve/exempt
-    list in the roster release. Only the reserve lists apply before reports publish."""
-    ids = set(reserve_ids())
+def unavailable_map(statuses=OUT_STATUSES) -> dict:
+    """{gsis_id: label} of players who won't play: ruled Out/Doubtful in each team's
+    current-season report (same report the dashboard's injury panel shows) PLUS everyone on
+    a reserve/exempt list in the roster release. The label is the reason ('Out', 'IR', …)
+    so a projection can say WHO it left out and why."""
+    ids = dict(reserve_ids())
     inj = current_reports()
     if not inj.empty and {"gsis_id", "report_status"} <= set(inj.columns):
         inj = inj.dropna(subset=["gsis_id"])
-        ids |= set(inj[inj["report_status"].isin(statuses)]["gsis_id"].astype(str))
+        for g, st in zip(inj["gsis_id"].astype(str), inj["report_status"]):
+            if st in statuses:
+                ids[g] = str(st)                       # a game designation outranks a reserve tag
     return ids
+
+
+def unavailable_ids(statuses=OUT_STATUSES) -> set:
+    """The keys of unavailable_map(): every gsis_id excluded from projections."""
+    return set(unavailable_map(statuses))
 
 
 def _depth_qbs() -> dict:
@@ -332,9 +340,20 @@ def project_matchup(home: str, away: str, neutral: bool = False) -> dict:
     u = team_units()
     tv = team_volume()
     prof = player_profiles()
-    unavail = unavailable_ids()
+    umap = unavailable_map()
+    unavail = set(umap)
     points = {home: pred["pred_home_score"], away: pred["pred_away_score"]}
     margin = {home: pred["pred_margin"], away: -pred["pred_margin"]}
+
+    def excluded(team) -> list:
+        """Who the projection left out and why — skill players with real 2025 usage only,
+        so the note names the absences that actually moved the box score."""
+        ex = prof[(prof.team == team) & prof.player_id.isin(unavail)
+                  & ((prof.position == "QB") | (prof.tgt_pg > 0.5) | (prof.carry_pg > 1))].copy()
+        ex["use"] = ex["tgt_pg"].fillna(0) + ex["carry_pg"].fillna(0)
+        return [{"name": r.player_name, "pos": r.position, "status": umap.get(str(r.player_id), "Out")}
+                for r in ex.sort_values("use", ascending=False).itertuples()
+                if umap.get(str(r.player_id)) not in ("CUT", "RET")]   # not on the team ≠ injured
 
     teams = {}
     for team, opp in [(home, away), (away, home)]:
@@ -348,6 +367,7 @@ def project_matchup(home: str, away: str, neutral: bool = False) -> dict:
         pass_factor = float(np.clip(1 + 0.14 * u.loc[opp, "z_def_pass"], 0.75, 1.30)) if opp in u.index else 1.0
         rush_factor = float(np.clip(1 + 0.14 * u.loc[opp, "z_def_rush"], 0.75, 1.30)) if opp in u.index else 1.0
         teams[team] = _distribute(team, team_pa, team_ra, off_tds, prof, pass_factor, rush_factor, unavail)
+        teams[team]["excluded"] = excluded(team)
 
     return {"home": home, "away": away, "pred": pred, "teams": teams}
 

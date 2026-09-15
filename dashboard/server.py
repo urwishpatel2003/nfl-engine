@@ -590,11 +590,23 @@ def api_matchup_players():
     away = (request.args.get('away') or '').upper()
     if not home or not away or home == away:
         return jsonify({"error": "two different teams required"}), 400
-    key = (home, away)
+    # Keyed on the AVAILABILITY inputs too: a box score projected before Thursday's injury
+    # report must not keep serving a ruled-out starter until the next full cache clear.
+    key = (home, away, _avail_sig())
     if key not in _PROJ_CACHE:
         from ml.projections import project_matchup
+        _PROJ_CACHE.clear()                            # inputs moved → every cached box is stale
         _PROJ_CACHE[key] = project_matchup(home, away)
     return jsonify(_native(_PROJ_CACHE[key]))
+
+
+def _avail_sig() -> tuple:
+    """mtimes of the files that decide who is available (injury report + roster release)."""
+    sig = []
+    for name in ("injuries.parquet", "rosters_2026.parquet", "depth_2026_current.parquet"):
+        p = RAW / name
+        sig.append(int(p.stat().st_mtime) if p.exists() else 0)
+    return tuple(sig)
 
 
 def _native(obj):
@@ -2246,31 +2258,32 @@ def clear_caches():
             pass
 
 
-def _run_refresh(season: int):
+def _run_refresh(season: int, light: bool = False):
     from ml import refresh as R
 
     def log(msg, level="INFO"):
         _REFRESH_STATE["log"].append(str(msg))
         del _REFRESH_STATE["log"][:-40]
+        print(f"[refresh] {msg}", flush=True)         # also to stdout so `railway logs` shows it
 
     try:
-        R.run(season, log=log)
+        R.run(season, log=log, light=light)
     except Exception as e:
-        _REFRESH_STATE["log"].append(f"FATAL {e}")
+        log(f"FATAL {e}", "WARN")
     finally:
         clear_caches()
         log(f"picks ledger: {lock_current_week()}")   # freeze this week's picks on fresh data
         _REFRESH_STATE["running"] = False
 
 
-def _start_refresh(season: int) -> bool:
+def _start_refresh(season: int, light: bool = False) -> bool:
     """Start a refresh thread if none is running. Returns False if already running."""
     with _REFRESH_LOCK:
         if _REFRESH_STATE["running"]:
             return False
         _REFRESH_STATE["running"] = True
         _REFRESH_STATE["log"] = []
-    threading.Thread(target=_run_refresh, args=(season,), daemon=True).start()
+    threading.Thread(target=_run_refresh, args=(season, light), daemon=True).start()
     return True
 
 
@@ -2284,9 +2297,10 @@ def api_refresh():
     if supplied != token:
         return jsonify({"error": "invalid token"}), 401
     season = int(request.args.get("season", os.environ.get("REFRESH_SEASON", 2026)))
-    if not _start_refresh(season):
+    light = request.args.get("light") == "1"          # availability-only pull (seconds)
+    if not _start_refresh(season, light):
         return jsonify({"error": "refresh already running"}), 409
-    return jsonify({"started": True, "season": season})
+    return jsonify({"started": True, "season": season, "light": light})
 
 
 @app.route('/api/refresh/status')
@@ -2321,6 +2335,11 @@ def _daily_scheduler():
             _start_refresh(season)
     except Exception as e:
         print(f"[boot] catch-up refresh check failed: {e}")
+    # Between the daily full refresh, LIGHT availability pulls (injuries + depth charts +
+    # roster release, seconds of work) every REFRESH_LIGHT_HOURS (default 4). Injury reports
+    # publish Wed–Fri afternoons ET and IR moves happen any day; a once-a-day pull left the
+    # matchup box scores projecting players who had been ruled out hours earlier.
+    light_h = float(os.environ.get("REFRESH_LIGHT_HOURS", 4))
     while True:
         now = datetime.now(timezone.utc)
         target = now.replace(hour=hour, minute=0, second=0, microsecond=0)
@@ -2329,9 +2348,13 @@ def _daily_scheduler():
             secs = (target - now).total_seconds() + 86400
         else:
             secs = (target - now).total_seconds()
-        _t.sleep(max(60, secs))
-        _start_refresh(season)
-        _t.sleep(3600)   # avoid double-firing within the same hour
+        nap = min(secs, light_h * 3600) if light_h > 0 else secs
+        _t.sleep(max(60, nap))
+        if nap >= secs - 1:                          # reached the daily slot → full refresh
+            _start_refresh(season)
+            _t.sleep(3600)                           # avoid double-firing within the same hour
+        else:
+            _start_refresh(season, light=True)
 
 
 _kalshi_selftest()

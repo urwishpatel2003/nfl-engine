@@ -131,10 +131,16 @@ def _merge_by_season(name: str, df: pd.DataFrame, season: int) -> int:
     return len(df)
 
 
-def download_nflverse(season: int, log=_default_log) -> dict:
-    """Download the current-season release files. Returns per-file status dict."""
+LIGHT_FILES = ("injuries", "depth_charts", "schedules")   # + rosters_{season}: availability feeds
+                                                          # (schedules = final scores → the pick record grades itself)
+
+
+def download_nflverse(season: int, log=_default_log, only: tuple | None = None) -> dict:
+    """Download the current-season release files (or just `only`). Returns per-file status."""
     results = {}
     for name, urls in _candidate_urls(season).items():
+        if only is not None and name not in only:
+            continue
         try:
             df = _fetch_first(urls)
             if name.startswith("pbp_"):
@@ -222,6 +228,21 @@ def pull_pff(log=_default_log) -> str:
 
 
 # ── light rebuild (no network, idempotent) ───────────────────────────
+def rebuild_roster(log=_default_log) -> dict:
+    """2026 roster: rebuild week-0 assignments from the just-refreshed live depth charts so
+    squad ratings/depth pages track cuts, trades and signings. refresh=False keeps this
+    network-free and (critically) avoids the nfl_data_py import that breaks the server env."""
+    sys.path.insert(0, str(ROOT))
+    try:
+        from roster_update import build_2026_roster
+        build_2026_roster(refresh=False)
+        log("  2026 roster rebuilt from live depth charts")
+        return {"roster_2026": "ok"}
+    except Exception as e:
+        log(f"  2026 roster rebuild FAILED — {e}", "WARN")
+        return {"roster_2026": f"error: {str(e)[:200]}"}
+
+
 def rebuild_light(log=_default_log) -> dict:
     """Recompute situational_stats (from PBP) + team_styles (all PBP seasons)."""
     out = {}
@@ -246,17 +267,7 @@ def rebuild_light(log=_default_log) -> dict:
         out["team_styles"] = f"error: {str(e)[:200]}"
         log(f"  team_styles FAILED — {e}", "WARN")
 
-    # 2026 roster: rebuild week-0 assignments from the just-refreshed live depth charts so
-    # squad ratings/depth pages track cuts, trades and signings. refresh=False keeps this
-    # network-free and (critically) avoids the nfl_data_py import that breaks the server env.
-    try:
-        from roster_update import build_2026_roster
-        build_2026_roster(refresh=False)
-        out["roster_2026"] = "ok"
-        log("  2026 roster rebuilt from live depth charts")
-    except Exception as e:
-        out["roster_2026"] = f"error: {str(e)[:200]}"
-        log(f"  2026 roster rebuild FAILED — {e}", "WARN")
+    out.update(rebuild_roster(log))
 
     # Season projections: precomputed + stored (win totals fold in completed games from the
     # refreshed schedule; player totals pick up refreshed styles/SOS). This is the weekly update.
@@ -275,21 +286,30 @@ def rebuild_light(log=_default_log) -> dict:
 
 
 # ── orchestration ────────────────────────────────────────────────────
-def run(season: int, log=_default_log, skip_download: bool = False) -> dict:
-    """Full refresh: download current season, then rebuild the light tables."""
+def run(season: int, log=_default_log, skip_download: bool = False, light: bool = False) -> dict:
+    """Full refresh: download current season, then rebuild the light tables.
+
+    light=True is the in-season AVAILABILITY pull: injuries + depth charts + roster release
+    only, then the 2026 roster rebuild — seconds, not minutes — so the server can run it
+    several times a day. Injury reports land Wed–Fri afternoons and IR moves any day; a
+    single 09:00 UTC pull left the matchup box scores a day behind them."""
     t0 = time.time()
     started = _now()
-    log(f"Refresh start — season {season}")
+    log(f"Refresh start — season {season}{' (light: availability only)' if light else ''}")
 
-    files = {} if skip_download else download_nflverse(season, log)
-    files["pff_sync"] = {"status": pull_pff(log)}
-    rebuild = rebuild_light(log)
+    if light:
+        files = download_nflverse(season, log, only=LIGHT_FILES + (f"rosters_{season}",))
+        rebuild = rebuild_roster(log)
+    else:
+        files = {} if skip_download else download_nflverse(season, log)
+        files["pff_sync"] = {"status": pull_pff(log)}
+        rebuild = rebuild_light(log)
 
     ok = (skip_download or any("rows" in v for v in files.values())) and \
          all(not str(v).startswith("error") for v in rebuild.values())
     status = {
         "season": season, "started": started, "finished": _now(), "time": _now(),
-        "elapsed_sec": round(time.time() - t0, 1),
+        "elapsed_sec": round(time.time() - t0, 1), "light": bool(light),
         "files": files, "rebuild": rebuild, "ok": bool(ok),
     }
     try:
@@ -315,8 +335,10 @@ def main():
     ap.add_argument("--season", type=int, default=2026)
     ap.add_argument("--skip-download", action="store_true",
                     help="only rebuild situational_stats + team_styles from existing PBP")
+    ap.add_argument("--light", action="store_true",
+                    help="availability only: injuries + depth charts + roster release, then the roster rebuild")
     args = ap.parse_args()
-    st = run(args.season, skip_download=args.skip_download)
+    st = run(args.season, skip_download=args.skip_download, light=args.light)
     print("\n" + json.dumps(st, indent=2))
 
 
