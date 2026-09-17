@@ -1609,7 +1609,10 @@ def api_schedule():
     d, weeks = _reg_weeks(season)
     if not weeks:
         return jsonify(_native({"season": season, "week": None, "seasons": seasons, "weeks": [], "games": []}))
-    week = int(request.args.get('week', weeks[0]))
+    # default week: the CURRENT week (first with an unplayed game) for the live season, so the
+    # page opens on this weekend's slate instead of week 1; a finished season opens on week 1
+    default_week = (_current_week(season) if season == seasons[-1] else None) or weeks[0]
+    week = int(request.args.get('week', default_week))
     out = _slate(season, week)
     if season == seasons[-1]:
         _lock_picks(season, week, out["games"])       # the live season writes the record

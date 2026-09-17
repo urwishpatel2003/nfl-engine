@@ -1890,7 +1890,7 @@ async function viewSchedule(params){
   const ss=document.getElementById('schSeason'), sw=document.getElementById('schWeek');
   ss.innerHTML = (d.seasons||[]).map(s=>`<option value="${s}" ${s==d.season?'selected':''}>${s} season</option>`).join('');
   sw.innerHTML = (d.weeks||[]).map(w=>`<option value="${w}" ${w==d.week?'selected':''}>Week ${w}</option>`).join('');
-  ss.onchange=()=>go(`#/schedule?season=${ss.value}&week=1`);
+  ss.onchange=()=>go(`#/schedule?season=${ss.value}`);       // server picks the current week for the live season
   sw.onchange=()=>go(`#/schedule?season=${ss.value}&week=${sw.value}`);
   const body=document.getElementById('schBody');
   if(!d.games||!d.games.length){ body.innerHTML=`<div class="note warn">No games found for this week.</div>`; return; }
