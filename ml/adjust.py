@@ -25,9 +25,21 @@ RAW = Path(__file__).parent.parent / "data" / "raw"
 
 _ADJ_CACHE = {}
 
+# Ridge prior on each rating, in PLAYS: a team's rating is its residual mean over (n + λ)
+# plays, i.e. shrunk toward 0 as if λ league-average plays had been observed. Two jobs:
+#   1. IDENTIFIABILITY early in a season. After week 1 every team has faced exactly one
+#      opponent, so off[t] and def[opp] enter the same game and cannot be told apart. The
+#      unregularised alternating fit put the whole deviation on the offense and left every
+#      defense at exactly 0.0 (all 32 logos stacked on the EPA map's centre). With a
+#      symmetric ridge the fixed point splits an unidentifiable deviation evenly — "we
+#      cannot tell who caused it, so credit both halves" — which is the honest answer.
+#   2. Mild shrinkage of a full season (~600 pass plays → ~6%), so extremes are tempered.
+LAMBDA_PLAYS = 40
+
 
 def adjusted_unit_epa(season: int, iters: int = 15) -> dict:
-    """{team: {off_pass, off_rush, def_pass, def_rush}} opponent-adjusted EPA/play."""
+    """{team: {off_pass, off_rush, def_pass, def_rush}} opponent-adjusted EPA/play
+    (ridge-regularised alternating least squares, see LAMBDA_PLAYS)."""
     if season in _ADJ_CACHE:
         return _ADJ_CACHE[season]
     p = RAW / f"pbp_{season}.parquet"
@@ -46,14 +58,14 @@ def adjusted_unit_epa(season: int, iters: int = 15) -> dict:
         teams = sorted(set(off_g) | set(def_g))
         o = {t: 0.0 for t in teams}
         de = {t: 0.0 for t in teams}
-        for _ in range(iters):
+        for _ in range(max(iters, 30)):                      # ridge converges a little slower
             for t, g in off_g.items():                       # offense given current defenses
-                o[t] = float((g["epa"] - lg - g["defteam"].map(de)).mean())
+                o[t] = float((g["epa"] - lg - g["defteam"].map(de)).sum() / (len(g) + LAMBDA_PLAYS))
             mo = float(np.mean(list(o.values())))
             for t in o:
                 o[t] -= mo
             for t, g in def_g.items():                       # defense given current offenses
-                de[t] = float((g["epa"] - lg - g["posteam"].map(o)).mean())
+                de[t] = float((g["epa"] - lg - g["posteam"].map(o)).sum() / (len(g) + LAMBDA_PLAYS))
             md = float(np.mean(list(de.values())))
             for t in de:
                 de[t] -= md
