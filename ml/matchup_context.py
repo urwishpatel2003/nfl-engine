@@ -136,8 +136,10 @@ def unit_injury_deltas(team: str) -> dict:
         if not rec or rec.get("rating") is None:
             continue
         rating, rank = rec["rating"], rec.get("rank")
-        # starter (rank 1 of the slot) OR a heavily-featured, well-rated #2
-        starter = (rank == 1) or (rank == 2 and rating >= 68)
+        # starter (rank 1 of the slot) OR a heavily-featured, well-rated #2 OR an elite player
+        # buried on the chart — teams push IR/PUP players down the depth chart (Kerby Joseph,
+        # rated 98, listed FS3 while on PUP), so for a ruled-out player rank alone under-counts.
+        starter = (rank == 1) or (rank == 2 and rating >= 68) or (rating >= 80)
         if not starter:
             continue
         q = max(0.0, min(1.2, (rating - 45) / 45.0))       # quality above replacement

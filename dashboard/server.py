@@ -2389,7 +2389,7 @@ def clear_caches():
     for mod, attr in [("ml.matchup_engine", "_UNITS"), ("ml.squad", "_PCT_CACHE"),
                       ("ml.squad", "_META_CACHE"), ("ml.squad", "_SKILL_CACHE"),
                       ("ml.squad", "_PBP_AGG"), ("ml.projections", "_PROFILE_CACHE"),
-                      ("ml.projections", "_QBDEPTH_CACHE")]:
+                      ("ml.projections", "_QBDEPTH_CACHE"), ("ml.projections", "_RANK_CACHE")]:
         try:
             import importlib
             setattr(importlib.import_module(mod), attr, None)

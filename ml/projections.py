@@ -108,6 +108,22 @@ def _depth_qbs() -> dict:
     return _QBDEPTH_CACHE
 
 
+_RANK_CACHE = None
+
+
+def _depth_rank() -> dict:
+    """{gsis_id: best pos_rank on the current depth chart} (1 = starter)."""
+    global _RANK_CACHE
+    if _RANK_CACHE is None:
+        try:
+            dc = pd.read_parquet(RAW / "depth_2026_current.parquet", columns=["gsis_id", "pos_rank"])
+            dc["pos_rank"] = pd.to_numeric(dc["pos_rank"], errors="coerce")
+            _RANK_CACHE = dc.dropna().groupby("gsis_id")["pos_rank"].min().astype(int).to_dict()
+        except Exception:
+            _RANK_CACHE = {}
+    return _RANK_CACHE
+
+
 def _available_qb(team: str, unavail: set):
     """First depth-chart QB who isn't ruled out (falls back to QB1 if all are)."""
     qs = _depth_qbs().get(team, [])
@@ -322,9 +338,13 @@ def injury_impact(team: str, unavail: set = None) -> dict:
         d = max(0.0, (s - b) / 100.0 * 7.0)                # elite→replacement ≈ up to 7 pts
         if d > 0.1:
             pen += d; who.append(f"{qs[0][1]} (QB)")
-    # skill starters out → net loss after a ~65% replacement recovers most of the share
+    # skill starters out → net loss after a ~65% replacement recovers most of the share.
+    # Only the top two on the CURRENT depth chart count: usage is last season's and travels
+    # with the player, so a back who carried 9/g elsewhere and now sits 4th on this chart
+    # (Pacheco, IR, on DET's chart at RB4) was charging DET for a share it never planned on.
+    rank = _depth_rank()
     for _, p in r[r.player_id.isin(unavail)].iterrows():
-        if p.position in ("RB", "WR", "TE"):
+        if p.position in ("RB", "WR", "TE") and (rank.get(p.player_id) or 9) <= 2:
             share = float(p.get("target_share", 0) or 0) + float(p.get("carry_share", 0) or 0)
             loss = min(2.0, share * 6.0 * 0.35)
             if loss > 0.2:
