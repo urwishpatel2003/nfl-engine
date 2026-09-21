@@ -11,8 +11,11 @@ record(season, week, games)
       ATS   : ats_pick / edge / cover_prob / pick_rank (top-5 flag)
       Total : total_pick (Over/Under) / total_prob
       ML    : ml_pick (model's straight-up favorite) / ml_prob / posted odds / no-vig implied
-    A game is re-locked on every slate computation until its kickoff, so the stored row is the
-    LAST pick before the game started. Nothing is ever written once the game has kicked off.
+    Until the week's LOCK TIME (Thursday 2pm ET, see week_lock_time) a game is re-written on
+    every slate computation — the board is provisional while lines and injury reports are
+    still arriving. From the lock time on the whole week is frozen: rows are never
+    overwritten, so the top-5 a reader sees is the top-5 that gets graded. Nothing is ever
+    written once a game has kicked off.
 
 grade(season)
     Join the ledger with schedules (final scores) and grade every pick: W / L / P (push),
@@ -38,7 +41,7 @@ JUICE = -110                     # standard price assumed for ATS / totals
 TOTAL_CONF = 0.57                # "confident total" threshold on the model's over/under prob
 ML_VALUE = 0.05                  # model win prob must beat the no-vig market price by 5 pts
 
-COLS = ["game_id", "season", "week", "home", "away", "kickoff_utc", "locked_at",
+COLS = ["game_id", "season", "week", "home", "away", "kickoff_utc", "locked_at", "frozen", "week_locked_at",
         "pred_home", "pred_away", "pred_margin", "pred_total", "home_win_prob",
         "vegas_spread", "vegas_total", "home_ml", "away_ml", "line_source",
         "ats_pick", "edge", "cover_prob", "pick_rank",
@@ -92,19 +95,59 @@ def units(odds, won: bool) -> float:
 def load() -> pd.DataFrame:
     if LEDGER.exists():
         try:
-            return pd.read_parquet(LEDGER)
+            df = pd.read_parquet(LEDGER)
+            for c in COLS:                              # ledgers written before a column existed
+                if c not in df.columns:
+                    df[c] = False if c == "frozen" else None
+            return df
         except Exception:
             pass
     return pd.DataFrame(columns=COLS)
 
 
+def week_lock_time(games: list) -> datetime | None:
+    """When a week's board freezes: THURSDAY 18:00 UTC (2pm ET) of the game week, or two
+    hours before the week's earliest kickoff if that comes first (week 1 opened on a
+    Wednesday). One fixed moment per week, so the top-5 a reader sees on Thursday is the
+    top-5 that gets graded — the board must not move during the week."""
+    kos = [kickoff_utc(g.get("gameday"), g.get("gametime")) for g in games]
+    kos = [k for k in kos if k is not None]
+    if not kos:
+        return None
+    first = min(kos)
+    thu = first - timedelta(days=(first.weekday() - 3) % 7)          # the Thursday on/before the first game...
+    thu = thu.replace(hour=18, minute=0, second=0, microsecond=0)
+    if thu > first - timedelta(hours=2):                            # ...but never inside the first game
+        thu = first - timedelta(hours=2)
+    return thu
+
+
 def record(season: int, week: int, games: list, now: datetime | None = None) -> int:
-    """Upsert the not-yet-kicked-off games of a computed slate. Returns rows written."""
+    """Upsert a computed slate into the ledger. Returns rows written.
+
+    Before the week's lock time every not-yet-kicked-off game is re-written on each call
+    (lines and injuries are still moving, the board is provisional). From the lock time
+    on, the week is FROZEN: existing rows are never overwritten; only a game missing from
+    the ledger is added, once. A game that has kicked off is never written either way."""
     now = now or datetime.now(timezone.utc)
+    lock_at = week_lock_time(games)
+    frozen = bool(lock_at is not None and now >= lock_at)
+    old = load()
+    if frozen and len(old):
+        wk = (old["season"] == int(season)) & (old["week"] == int(week))
+        if wk.any() and not old.loc[wk, "frozen"].fillna(False).astype(bool).all():
+            old.loc[wk, "frozen"] = True                      # first post-lock call: stamp the board
+            old.loc[wk, "week_locked_at"] = lock_at.isoformat()
+            old.to_parquet(LEDGER, index=False)
+        keep = set(old.loc[wk, "game_id"])
+    else:
+        keep = set()
     rows = []
     for g in games:
         if g.get("pred_margin") is None or not g.get("game_id"):
             continue
+        if g["game_id"] in keep:
+            continue                                   # frozen board: never overwrite
         ko = kickoff_utc(g.get("gameday"), g.get("gametime"))
         if ko is None or now >= ko or g.get("final"):
             continue                                   # kicked off → the book is closed
@@ -121,6 +164,7 @@ def record(season: int, week: int, games: list, now: datetime | None = None) -> 
             "game_id": g["game_id"], "season": int(season), "week": int(week),
             "home": g["home"], "away": g["away"],
             "kickoff_utc": ko.isoformat(), "locked_at": now.isoformat(),
+            "frozen": frozen, "week_locked_at": lock_at.isoformat() if lock_at else None,
             "pred_home": g.get("pred_home"), "pred_away": g.get("pred_away"),
             "pred_margin": g.get("pred_margin"), "pred_total": g.get("pred_total"),
             "home_win_prob": hp,
@@ -135,7 +179,6 @@ def record(season: int, week: int, games: list, now: datetime | None = None) -> 
     if not rows:
         return 0
     new = pd.DataFrame(rows, columns=COLS)
-    old = load()
     if len(old):
         old = old[~old["game_id"].isin(new["game_id"])]
     out = pd.concat([old, new], ignore_index=True)

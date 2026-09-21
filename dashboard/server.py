@@ -1626,13 +1626,13 @@ _LOCK_FIELDS = ("pred_home", "pred_away", "pred_margin", "pred_total", "home_win
 
 
 def _overlay_locked(season: int, games: list) -> None:
-    """For games that have KICKED OFF, replace the live re-prediction with the ledger's
-    pre-kickoff row (ml/ledger.py). The model moves every day — results feed the blend,
-    injuries change, lines close — so re-predicting a finished game is hindsight, and it
-    made the Schedule's week-1 top-5 disagree with the Model Record. The record is the
-    truth for anything already played; the live model only prices what hasn't started."""
+    """Replace the live re-prediction with the ledger row (ml/ledger.py) for every game that
+    is FROZEN (the week passed its lock time) or has KICKED OFF. The model moves every day
+    — results feed the blend, injuries change, lines close — so the board a reader sees
+    after Thursday 2pm ET must be the board that gets graded, not a re-prediction. Before
+    the lock time the live model prices the slate and the ledger is provisional."""
     try:
-        from ml.ledger import load, kickoff_utc
+        from ml.ledger import load, kickoff_utc, week_lock_time
         from datetime import datetime, timezone
         led = load()
         led = led[led["season"] == season] if len(led) else led
@@ -1640,11 +1640,15 @@ def _overlay_locked(season: int, games: list) -> None:
             return
         rows = led.set_index("game_id")
         now = datetime.now(timezone.utc)
+        lock_at = week_lock_time(games)
+        week_frozen = bool(lock_at is not None and now >= lock_at)
         for g in games:
+            g["week_lock_at"] = lock_at.isoformat() if lock_at else None
+            g["week_frozen"] = week_frozen
             gid = g.get("game_id")
             ko = kickoff_utc(g.get("gameday"), g.get("gametime"))
             started = g.get("final") or (ko is not None and now >= ko)
-            if not started or gid not in rows.index:
+            if not (started or week_frozen) or gid not in rows.index:
                 continue
             r = rows.loc[gid]
             for k in _LOCK_FIELDS:
@@ -1653,10 +1657,21 @@ def _overlay_locked(season: int, games: list) -> None:
             g["blend_margin"] = None                     # not part of the locked record
             g["locked"] = True
             g["locked_at"] = r.get("locked_at")
-        # top-5 for a started week = the LOCKED ranks; drop any live rank on unlocked games
-        for g in games:
-            if not g.get("locked") and any(x.get("locked") for x in games):
-                g["pick_rank"] = None if g.get("final") else g.get("pick_rank")
+        # ONE top-5 per week. Locked games keep the rank they were locked with; the live games
+        # are then ranked into whatever slots remain. Ranking the live games over the whole
+        # slate (the old way) let a locked #2 and a live #2 coexist, or a locked #3 with no #1
+        # — mid-week the strip showed duplicates or gaps and read as "not five picks".
+        if any(x.get("locked") for x in games):
+            taken = {int(g["pick_rank"]) for g in games if g.get("locked") and g.get("pick_rank")}
+            free = [r for r in range(1, 6) if r not in taken]
+            live = [g for g in games if not g.get("locked") and g.get("cover_prob") is not None
+                    and abs(g.get("edge") or 0) >= 2.5]
+            live.sort(key=lambda g: -g["cover_prob"])
+            for g in games:
+                if not g.get("locked"):
+                    g["pick_rank"] = None
+            for g, r in zip(live, free):
+                g["pick_rank"] = r
     except Exception as e:
         print(f"[ledger] overlay failed: {e}", flush=True)
 
