@@ -134,9 +134,19 @@ def _available_qb(team: str, unavail: set):
 
 
 # ── 1. player box-score aggregation from PBP ────────────────────────
-def _player_box_2025() -> pd.DataFrame:
-    """Aggregate 2025 regular-season box-score totals per player from play-by-play."""
-    p = pd.read_parquet(RAW / "pbp_2025.parquet")
+_BOX_CACHE: dict = {}
+
+
+def _player_box(season: int):
+    """Aggregate one season's regular-season box-score totals per player from play-by-play.
+    Returns (box, team_pa, team_ra); an empty triple if the season has no PBP yet."""
+    if season in _BOX_CACHE:
+        return _BOX_CACHE[season]
+    path = RAW / f"pbp_{season}.parquet"
+    if not path.exists():
+        empty = pd.DataFrame(columns=["player_id", "games"])
+        return empty, pd.DataFrame(columns=["posteam", "team_pa", "team_g"]), pd.DataFrame(columns=["posteam", "team_ra"])
+    p = pd.read_parquet(path)
     p = p[(p["week"] <= 18) & p["play_type"].isin(["pass", "run"])].copy()
     p["ret_td"] = p.get("return_touchdown", 0)
     p["is_td"] = (p["touchdown"] == 1) & (p["ret_td"] != 1)
@@ -176,7 +186,82 @@ def _player_box_2025() -> pd.DataFrame:
 
     box = passing.merge(rushing, on="player_id", how="outer").merge(receiving, on="player_id", how="outer")
     box["games"] = box[["g_pass", "g_rush", "g_rec"]].max(axis=1)
-    return box.fillna(0), team_pa, team_ra
+    _BOX_CACHE[season] = (box.fillna(0), team_pa, team_ra)
+    return _BOX_CACHE[season]
+
+
+_VOL = ["pass_att", "carries", "targets"]
+_TOT = ["pass_att", "cmp", "pass_yds", "pass_td", "interc", "carries", "rush_yds", "rush_td",
+        "targets", "rec", "rec_yds", "rec_td", "air"]
+
+
+def _combined_box():
+    """Last season + this season's box totals per player.
+
+    EFFICIENCY counts (completions, yards, TDs…) are simply summed across both seasons —
+    more attempts is more evidence, and the shrinkage in player_profiles handles the size.
+    VOLUME per game is blended toward this season's per-game rate by the player's own games
+    played, w = g/(g+4) (the same rule ml/current.py uses for teams): a role changes with a
+    new team or a new depth chart, and two starts already say more about a player's usage
+    than last year's mop-up snaps. Returns (box, games_prior, games_cur)."""
+    from ml.current import state, K_GAMES
+    st = state()
+    cur, prior = st["season"], st["prior"] or (st["season"] - 1)
+    b1, _, _ = _player_box(prior)
+    b2, _, _ = _player_box(cur) if st["in_progress"] else (pd.DataFrame(columns=["player_id", "games"]), None, None)
+    b1 = b1.set_index("player_id"); b2 = b2.set_index("player_id") if len(b2) else b2
+    ids = b1.index.union(b2.index) if len(b2) else b1.index
+    out = pd.DataFrame(index=ids)
+    for c in _TOT:
+        out[c] = b1[c].reindex(ids).fillna(0) + (b2[c].reindex(ids).fillna(0) if len(b2) and c in b2.columns else 0)
+    g1 = b1["games"].reindex(ids).fillna(0)
+    # THIS season's per-game usage is over the TEAM's games, not the player's: a player who
+    # has not appeared while his team played two games is being used zero times a game, and
+    # that is evidence (last season stays per player-game so an injury year is not a zero).
+    try:
+        team_of = pd.read_parquet(RAW / "rosters_2026.parquet", columns=["player_id", "team"]) \
+            .dropna(subset=["player_id"]).drop_duplicates("player_id").set_index("player_id")["team"]
+        tg = team_of.reindex(ids).map(st["games"]).fillna(0).astype(float)
+    except Exception:
+        tg = pd.Series(0.0, index=ids)
+    g2 = tg if st["in_progress"] else pd.Series(0.0, index=ids)
+    # ROLE PRIOR: what a player in this depth-chart slot typically gets per game — last
+    # season's league distribution at his position, by rank (WR1 ≈ 70th percentile of WR
+    # targets/game, WR2 ≈ 45th, WR3 ≈ 25th, deeper ≈ 10th). Every season's per-game rate is
+    # shrunk toward it by games played, so one 7-target game does not make a newcomer the
+    # team's WR1, and a 17-game veteran barely moves.
+    try:
+        rost = pd.read_parquet(RAW / "rosters_2026.parquet", columns=["player_id", "position"]) \
+            .dropna(subset=["player_id"]).drop_duplicates("player_id").set_index("player_id")["position"]
+    except Exception:
+        rost = pd.Series(dtype=object)
+    rank = pd.Series(_depth_rank()).reindex(ids).fillna(4).clip(1, 4).astype(int)
+    pos = rost.reindex(ids).fillna("")
+    # base = everyone with 4+ games (an 8-game floor kept only real contributors and made the
+    # WR2/WR3 priors read like starters); depth-chart slots repeat rank 1 (LWR/RWR/SWR), so
+    # rank 2 is already a backup and gets a backup's prior
+    base = b1[b1["games"] >= 4]
+    base_pos = rost.reindex(base.index).fillna("")
+    q_of_rank = {1: 0.65, 2: 0.30, 3: 0.15, 4: 0.05}
+    w1, w2 = g1 / (g1 + K_GAMES), g2 / (g2 + K_GAMES)
+    for c in _VOL:
+        prior = pd.Series(0.0, index=ids)
+        bpg = base[c] / base["games"].clip(lower=1)
+        for p_ in ("QB", "RB", "WR", "TE", "FB"):
+            sub = bpg[base_pos == p_]
+            if not len(sub):
+                continue
+            for r_, q_ in q_of_rank.items():
+                m = (pos == p_) & (rank == r_)
+                if m.any():
+                    prior[m] = float(sub.quantile(q_))
+        pg1 = (b1[c].reindex(ids).fillna(0) / g1.clip(lower=1)).where(g1 > 0, 0.0)
+        pg2 = (b2[c].reindex(ids).fillna(0) / g2.clip(lower=1)).where(g2 > 0, 0.0) if len(b2) and c in b2.columns else pd.Series(0.0, index=ids)
+        last = w1 * pg1 + (1 - w1) * prior            # last season, shrunk toward the role prior
+        out[c + "_pg"] = (w2 * pg2 + (1 - w2) * last).values
+    out["games"] = g1 + (b2["games"].reindex(ids).fillna(0) if len(b2) else 0)
+    out["games_cur"] = b2["games"].reindex(ids).fillna(0) if len(b2) else 0
+    return out.reset_index().rename(columns={"index": "player_id"})
 
 
 # ── 2. per-game profiles + usage shares ─────────────────────────────
@@ -185,16 +270,15 @@ def player_profiles() -> pd.DataFrame:
     global _PROFILE_CACHE
     if _PROFILE_CACHE is not None:
         return _PROFILE_CACHE
-    box, team_pa, team_ra = _player_box_2025()
+    box = _combined_box()
 
     # attach current team + position + name from the 2026 roster / depth chart
     rost = pd.read_parquet(RAW / "rosters_2026.parquet")[["player_id", "player_name", "team", "position"]]
     df = box.merge(rost, on="player_id", how="inner")
     df = df[df["games"] > 0].copy()
 
-    g = df["games"].clip(lower=1)
-    # per-game volume
-    df["att_pg"] = df["pass_att"] / g
+    # per-game volume: blended last-season / this-season rates from _combined_box
+    df["att_pg"] = df["pass_att_pg"]
     # Per-attempt EFFICIENCY is shrunk toward a replacement-level prior by sample size:
     #     rate = (n·observed + K·prior) / (n + K)
     # Without this a backup's mop-up line became a starter's projection — Malik Willis, 38
@@ -212,19 +296,21 @@ def player_profiles() -> pd.DataFrame:
     df["ypa"] = shrink(df["pass_yds"], pa_, ROOKIE_QB["ypa"], K_PASS_ATT)
     df["ptd_pa"] = shrink(df["pass_td"], pa_, ROOKIE_QB["ptd_pa"], K_PASS_ATT)
     df["int_pa"] = shrink(df["interc"], pa_, ROOKIE_QB["int_pa"], K_PASS_ATT)
-    df["carry_pg"] = df["carries"] / g
+    df["carry_pg"] = df["carries_pg"]
     df["ypc"] = shrink(df["rush_yds"], ca_, SKILL_PRIOR["ypc"], K_CARRIES)
     df["rtd_carry"] = shrink(df["rush_td"], ca_, SKILL_PRIOR["rtd_carry"], K_CARRIES)
-    df["tgt_pg"] = df["targets"] / g
+    df["tgt_pg"] = df["targets_pg"]
     df["catch_pct"] = shrink(df["rec"], tg_, SKILL_PRIOR["catch_pct"], K_TARGETS)
     df["ypt"] = shrink(df["rec_yds"], tg_, SKILL_PRIOR["ypt"], K_TARGETS)
     df["rectd_tgt"] = shrink(df["rec_td"], tg_, SKILL_PRIOR["rectd_tgt"], K_TARGETS)
 
-    # team shares (of season attempts)
-    df = df.merge(team_pa[["posteam", "team_pa", "team_g"]], left_on="team", right_on="posteam", how="left")
-    df = df.merge(team_ra, left_on="team", right_on="posteam", how="left", suffixes=("", "_r"))
-    df["target_share"] = np.where(df["team_pa"] > 0, df["targets"] / df["team_pa"], 0)
-    df["carry_share"] = np.where(df["team_ra"] > 0, df["carries"] / df["team_ra"], 0)
+    # team shares: the player's blended per-game volume over his CURRENT team's blended
+    # per-game volume (a share of last year's old team means nothing for this year's plan)
+    tv = team_volume()
+    df["team_pa_pg"] = df["team"].map(lambda t: tv["by_team"].get(t, {}).get("pa_pg", tv["lg_pa"]))
+    df["team_ra_pg"] = df["team"].map(lambda t: tv["by_team"].get(t, {}).get("ra_pg", tv["lg_ra"]))
+    df["target_share"] = np.where(df["team_pa_pg"] > 0, df["tgt_pg"] / df["team_pa_pg"], 0)
+    df["carry_share"] = np.where(df["team_ra_pg"] > 0, df["carry_pg"] / df["team_ra_pg"], 0)
     num = df.select_dtypes("number").columns          # float32 -> float64 for clean rounding
     df[num] = df[num].astype("float64")
     _PROFILE_CACHE = df
@@ -232,16 +318,35 @@ def player_profiles() -> pd.DataFrame:
 
 
 # ── 3. team volume (pace) ───────────────────────────────────────────
+_TV_CACHE = None
+
+
 def team_volume() -> dict:
-    """League-average and per-team pass/rush attempts per game (2025)."""
-    _, team_pa, team_ra = _player_box_2025()
-    t = team_pa.merge(team_ra, on="posteam", how="outer").fillna(0)
-    t["pa_pg"] = t["team_pa"] / t["team_g"].clip(lower=1)
-    t["ra_pg"] = t["team_ra"] / t["team_g"].clip(lower=1)
-    return {
-        "by_team": t.set_index("posteam")[["pa_pg", "ra_pg"]].to_dict("index"),
-        "lg_pa": float(t["pa_pg"].mean()), "lg_ra": float(t["ra_pg"].mean()),
-    }
+    """League-average and per-team pass/rush attempts per game: last season blended toward
+    this season by each team's games played (ml/current.py weights)."""
+    global _TV_CACHE
+    if _TV_CACHE is not None:
+        return _TV_CACHE
+    from ml.current import state, weights
+    st = state()
+    prior = st["prior"] or (st["season"] - 1)
+
+    def _vol(season):
+        _, team_pa, team_ra = _player_box(season)
+        t = team_pa.merge(team_ra, on="posteam", how="outer").fillna(0)
+        t["pa_pg"] = t["team_pa"] / t["team_g"].clip(lower=1)
+        t["ra_pg"] = t["team_ra"] / t["team_g"].clip(lower=1)
+        return t.set_index("posteam")[["pa_pg", "ra_pg"]]
+    t = _vol(prior)
+    w = weights()
+    if st["in_progress"] and len(w):
+        now = _vol(st["season"]).reindex(t.index)
+        wv = w.reindex(t.index).fillna(0.0)
+        for c in ("pa_pg", "ra_pg"):
+            t[c] = wv * now[c].fillna(t[c]) + (1 - wv) * t[c]
+    _TV_CACHE = {"by_team": t.to_dict("index"),
+                 "lg_pa": float(t["pa_pg"].mean()), "lg_ra": float(t["ra_pg"].mean())}
+    return _TV_CACHE
 
 
 # QB starters (depth chart) and a rookie/replacement prior
@@ -310,29 +415,41 @@ def _distribute(team: str, team_pa: float, team_ra: float, off_tds: float, prof:
     rb_ra = max(team_ra - qb_car, team_ra * 0.5)
     tdw_total = max(1e-6, qb_tdw + ((rbs.carry_pg * rbs.rtd_carry).sum() if not rbs.empty else 0.0))
     qb_line["rush_td"] = round(rush_tds * qb_tdw / tdw_total, 1)
-    rush_lines = []
-    if not rbs.empty:
-        denom = rbs["carry_pg"].sum()
-        for _, r in rbs.iterrows():
-            car = rb_ra * (r.carry_pg / denom)
-            rush_lines.append({"name": r.player_name, "pos": "RB",
-                               "carries": round(car), "rush_yds": round(car * r.ypc * rush_factor),
-                               "rush_td": round(rush_tds * (r.carry_pg * r.rtd_carry) / tdw_total, 1),
-                               "targets": round(r.tgt_pg), "rec": round(r.tgt_pg * r.catch_pct),
-                               "rec_yds": round(r.tgt_pg * r.ypt * pass_factor), "rec_td": 0})
-
-    # Receivers: concentrate targets on the actual pass-catchers (top 6), scaled by pass matchup
+    # Receivers: concentrate targets on the actual pass-catchers (top 6), scaled by pass matchup,
+    # then RECONCILED to the QB line — receptions sum to his completions, yards to his passing
+    # yards, TDs to his passing TDs. Receiver and passer rates are estimated separately, so
+    # without this the receiving column ran ~10% above the passing column on the same page.
     recs = roster[roster.position.isin(["WR", "TE", "RB"]) & (roster.tgt_pg > 0.5)].sort_values(
         "tgt_pg", ascending=False).head(6).copy()
     rec_lines = []
     if not recs.empty:
         denom = recs["tgt_pg"].sum(); tdw = max(1e-6, (recs.tgt_pg * recs.rectd_tgt).sum())
+        raw = []
         for _, r in recs.iterrows():
             tg = team_pa * 0.95 * (r.tgt_pg / denom)
-            rec_lines.append({"name": r.player_name, "pos": r.position,
-                              "targets": round(tg), "rec": round(tg * r.catch_pct),
-                              "rec_yds": round(tg * r.ypt * pass_factor),
-                              "rec_td": round(pass_tds * (r.tgt_pg * r.rectd_tgt) / tdw, 1)})
+            raw.append({"name": r.player_name, "pos": r.position, "targets": tg, "rec": tg * r.catch_pct,
+                        "rec_yds": tg * r.ypt * pass_factor, "rec_td": pass_tds * (r.tgt_pg * r.rectd_tgt) / tdw})
+        s_rec = sum(x["rec"] for x in raw) or 1.0
+        s_yds = sum(x["rec_yds"] for x in raw) or 1.0
+        s_td = sum(x["rec_td"] for x in raw) or 1.0
+        k_rec, k_yds, k_td = qb_line["cmp"] / s_rec, qb_line["pass_yds"] / s_yds, qb_line["pass_td"] / s_td
+        for x in raw:
+            rec_lines.append({"name": x["name"], "pos": x["pos"], "targets": round(x["targets"]),
+                              "rec": round(x["rec"] * k_rec), "rec_yds": round(x["rec_yds"] * k_yds),
+                              "rec_td": round(x["rec_td"] * k_td, 1)})
+    rec_by_name = {x["name"]: x for x in rec_lines}
+
+    rush_lines = []
+    if not rbs.empty:
+        denom = rbs["carry_pg"].sum()
+        for _, r in rbs.iterrows():
+            car = rb_ra * (r.carry_pg / denom)
+            rl = rec_by_name.get(r.player_name)                 # the RB's receiving is the reconciled line
+            rush_lines.append({"name": r.player_name, "pos": "RB",
+                               "carries": round(car), "rush_yds": round(car * r.ypc * rush_factor),
+                               "rush_td": round(rush_tds * (r.carry_pg * r.rtd_carry) / tdw_total, 1),
+                               "targets": rl["targets"] if rl else 0, "rec": rl["rec"] if rl else 0,
+                               "rec_yds": rl["rec_yds"] if rl else 0, "rec_td": rl["rec_td"] if rl else 0})
     return {"qb": qb_line, "rush": rush_lines, "rec": rec_lines}
 
 

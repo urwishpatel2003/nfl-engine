@@ -2383,7 +2383,8 @@ def clear_caches():
         _hist.clear()
     except Exception:
         pass
-    for modname, cachename in [("ml.adjust", "_ADJ_CACHE"), ("ml.backtest_spreads", "_BT_CACHE")]:
+    for modname, cachename in [("ml.adjust", "_ADJ_CACHE"), ("ml.backtest_spreads", "_BT_CACHE"),
+                               ("ml.projections", "_BOX_CACHE")]:
         try:
             import importlib
             getattr(importlib.import_module(modname), cachename).clear()
@@ -2407,7 +2408,8 @@ def clear_caches():
     for mod, attr in [("ml.matchup_engine", "_UNITS"), ("ml.squad", "_PCT_CACHE"),
                       ("ml.squad", "_META_CACHE"), ("ml.squad", "_SKILL_CACHE"),
                       ("ml.squad", "_PBP_AGG"), ("ml.projections", "_PROFILE_CACHE"),
-                      ("ml.projections", "_QBDEPTH_CACHE"), ("ml.projections", "_RANK_CACHE")]:
+                      ("ml.projections", "_QBDEPTH_CACHE"), ("ml.projections", "_RANK_CACHE"),
+                      ("ml.projections", "_TV_CACHE")]:
         try:
             import importlib
             setattr(importlib.import_module(mod), attr, None)
