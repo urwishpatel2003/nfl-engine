@@ -49,7 +49,66 @@ PPG_SCALE = 4.5      # points/game per unit-talent z-score
 # 0.52, but weeks 1-4 lines run 0.851x a full season's spread dispersion (pooled 2021-25), so the
 # full-season-equivalent factor is 0.52/0.851 = 0.61. The two routes agree; 0.60 sits between them.
 # Re-fit with scratch fit_k2-style sweep if the roster model's own dispersion ever changes.
-MARGIN_CALIBRATION = 0.60
+#
+# IN-SEASON IT DID CHANGE, so the constant is now the FALLBACK only. Once results blend into
+# the units the raw margins are far less over-dispersed (week 3 of 2026: model sd 6.4 vs
+# market 5.4, ratio 1.20 — not 1.66), and a fixed 0.60 then over-shrinks: calibrated sd 3.8,
+# NARROWER than the market, so a 10-pt favorite read as 5 and the underdog gained 3 points
+# it had not earned (KC at MIA: units said KC by 11.6, page said 5.0 and Miami 23).
+# margin_calibration() measures the ratio market sd / raw model sd over this season's priced
+# regular-season games (pooled, all weeks so far incl. the upcoming one), clipped to
+# [CAL_MIN, 1.0]. Same derivation as the constant — match the market's scale — just re-done
+# on every refresh instead of once in August.
+MARGIN_CALIBRATION = 0.60          # fallback while fewer than CAL_MIN_GAMES priced games exist
+CAL_MIN, CAL_MIN_GAMES = 0.50, 12
+_CAL = None
+
+
+def margin_calibration() -> float:
+    return calibration()["margin"]
+
+
+def calibration() -> dict:
+    """{margin, total, total_mean}: market sd / raw model sd for margins AND totals over this
+    season's priced games, clipped to [CAL_MIN, 1]; cached until refresh. Totals are scaled
+    about the model's own mean total on those games (its mean is unbiased — week 3 of 2026:
+    45.6 vs market 45.1 — but its spread is 1.5x the market's, so a 51-point projection was
+    a 49 once the pass/rush nudges were put on the market's scale)."""
+    global _CAL
+    if _CAL is not None:
+        return _CAL
+    fallback = {"margin": MARGIN_CALIBRATION, "total": 1.0, "total_mean": None}
+    try:
+        from ml.current import state
+        s = pd.read_parquet(RAW / "schedules.parquet")
+        st = state()
+        s = s[(s["season"] == st["season"]) & (s["game_type"].fillna("REG").str.upper() == "REG")
+              & s["spread_line"].notna() & s["home_team"].notna() & s["away_team"].notna()]
+        # upcoming games too (their lines exist); cap at the current week + 1
+        wk_cap = (int(s[s["home_score"].notna()]["week"].max()) if s["home_score"].notna().any() else 0) + 1
+        s = s[s["week"] <= wk_cap]
+        raws, lines, tots, vtots = [], [], [], []
+        for _, g in s.iterrows():
+            r = _raw_project(g["home_team"], g["away_team"])
+            if r is None:
+                continue
+            raws.append(r["raw_margin"] - r["hfa"])          # strength differential only (HFA held out)
+            lines.append(float(g["spread_line"]))
+            if pd.notna(g.get("total_line")):
+                tots.append(r["total"]); vtots.append(float(g["total_line"]))
+        if len(raws) < CAL_MIN_GAMES:
+            _CAL = fallback
+        else:
+            sd_raw = float(np.std(raws)) or 1e-9
+            out = {"margin": float(np.clip(np.std(lines) / sd_raw, CAL_MIN, 1.0)), "total": 1.0, "total_mean": None}
+            if len(tots) >= CAL_MIN_GAMES:
+                sd_t = float(np.std(tots)) or 1e-9
+                out["total"] = float(np.clip(np.std(vtots) / sd_t, CAL_MIN, 1.0))
+                out["total_mean"] = float(np.mean(tots))
+            _CAL = out
+    except Exception:
+        _CAL = fallback
+    return _CAL
 
 
 def _z(s: pd.Series) -> pd.Series:
@@ -218,6 +277,33 @@ def team_units() -> pd.DataFrame:
 
 
 # ── unit-vs-unit points model ───────────────────────────────────────
+def _raw_project(home: str, away: str, neutral: bool = False, unit_adj: dict = None):
+    """Everything up to the UNCALIBRATED margin: {raw_margin, hfa, total, u}. None if unknown."""
+    u = team_units()
+    if home not in u.index or away not in u.index:
+        return None
+    from ml.squad import predict_matchup, team_hfa
+    roster = predict_matchup(home, away, neutral)
+    hfa = 0.0 if neutral else team_hfa(home)
+    lg_pace = float(u["pace"].mean())
+
+    def uz(team, col):
+        base = float(u.loc[team, col])
+        return base + (unit_adj.get(team, {}).get(col, 0.0) if unit_adj else 0.0)
+
+    def phase(off, deff, sign):
+        base = 0.5 * u.loc[off, "pf"] + 0.5 * u.loc[deff, "pa"]
+        nudge = 0.8 * ((uz(off, "z_off_pass") + uz(deff, "z_def_pass")) +
+                       0.6 * (uz(off, "z_off_rush") + uz(deff, "z_def_rush")))
+        return float(base + nudge + u.loc[off, "st"] + 0.4 * u.loc[off, "z_coaching"] + sign * hfa / 2)
+
+    ph, pa_ = phase(home, away, +1), phase(away, home, -1)
+    pace_mult = (u.loc[home, "pace"] + u.loc[away, "pace"]) / (2 * lg_pace)
+    total = (ph + pa_) * (0.85 + 0.15 * pace_mult)
+    raw_margin = 0.55 * roster["pred_margin"] + 0.45 * (ph - pa_)
+    return {"raw_margin": raw_margin, "hfa": hfa, "total": total, "u": u}
+
+
 def project_game(home: str, away: str, neutral: bool = False, unit_adj: dict = None) -> dict:
     """Expected points for each team from offense-vs-defense + ST + coaching + pace,
     with the margin anchored to the roster-talent rating (consistent with the rankings).
@@ -226,57 +312,34 @@ def project_game(home: str, away: str, neutral: bool = False, unit_adj: dict = N
     u = team_units()
     if home not in u.index or away not in u.index:
         return {"error": "unknown team(s)"}
-    from ml.squad import predict_matchup
-    roster = predict_matchup(home, away, neutral)
-    from ml.squad import team_hfa
-    hfa = 0.0 if neutral else team_hfa(home)   # per-team, shrunken (see squad.team_hfa)
-    lg_pace = float(u["pace"].mean())
+    if True:
+        r = _raw_project(home, away, neutral, unit_adj)
+        hfa, raw_total, raw_margin = r["hfa"], r["total"], r["raw_margin"]
+        c = calibration()
+        cal = c["margin"]
+        final_margin = hfa + cal * (raw_margin - hfa)
+        total = raw_total if c["total_mean"] is None else c["total_mean"] + c["total"] * (raw_total - c["total_mean"])
+        home_pts = (total + final_margin) / 2
+        away_pts = (total - final_margin) / 2
+        wp = float(1 / (1 + np.exp(-final_margin / 13.5 * np.pi / np.sqrt(3))))
 
-    def uz(team, col):                      # unit z-score with any per-game adjustment
-        base = float(u.loc[team, col])
-        return base + (unit_adj.get(team, {}).get(col, 0.0) if unit_adj else 0.0)
+        def edges(off, deff):
+            return {"pass_off": round(float(u.loc[off, "z_off_pass"]), 2),
+                    "rush_off": round(float(u.loc[off, "z_off_rush"]), 2),
+                    "pass_def": round(float(-u.loc[deff, "z_def_pass"]), 2),
+                    "rush_def": round(float(-u.loc[deff, "z_def_rush"]), 2),
+                    "st": round(float(u.loc[off, "z_st"]), 2),
+                    "coach": round(float(u.loc[off, "z_coaching"]), 2)}
 
-    def phase(off, deff, sign):
-        # points-for/against blend (captures overall off vs def), then small unit nudges + ST + coaching
-        base = 0.5 * u.loc[off, "pf"] + 0.5 * u.loc[deff, "pa"]
-        # specific pass/rush mismatch nudge: good offense vs bad (high-EPA-allowed) defense.
-        # unit_adj lets an injured unit lose *harder* to a strong opposing unit (the interaction).
-        nudge = 0.8 * ((uz(off, "z_off_pass") + uz(deff, "z_def_pass")) +
-                       0.6 * (uz(off, "z_off_rush") + uz(deff, "z_def_rush")))
-        pts = base + nudge + u.loc[off, "st"] + 0.4 * u.loc[off, "z_coaching"] + sign * hfa / 2
-        return float(pts)
-
-    ph, pa_ = phase(home, away, +1), phase(away, home, -1)
-    # pace: more combined plays -> scale total modestly
-    pace_mult = (u.loc[home, "pace"] + u.loc[away, "pace"]) / (2 * lg_pace)
-    mid = (ph + pa_) / 2
-    ph = mid + (ph - mid) * 1.0; pa_ = mid + (pa_ - mid) * 1.0
-    total = (ph + pa_) * (0.85 + 0.15 * pace_mult)
-
-    unit_margin = ph - pa_
-    # anchor the margin to the roster-talent rating so it never contradicts the rankings
-    raw_margin = 0.55 * roster["pred_margin"] + 0.45 * unit_margin
-    # then calibrate team strength to market scale, holding home field at full weight
-    final_margin = hfa + MARGIN_CALIBRATION * (raw_margin - hfa)
-    home_pts = (total + final_margin) / 2
-    away_pts = (total - final_margin) / 2
-    wp = float(1 / (1 + np.exp(-final_margin / 13.5 * np.pi / np.sqrt(3))))
-
-    def edges(off, deff):
-        return {"pass_off": round(float(u.loc[off, "z_off_pass"]), 2),
-                "rush_off": round(float(u.loc[off, "z_off_rush"]), 2),
-                "pass_def": round(float(-u.loc[deff, "z_def_pass"]), 2),   # flip so +=good D
-                "rush_def": round(float(-u.loc[deff, "z_def_rush"]), 2),
-                "st": round(float(u.loc[off, "z_st"]), 2),
-                "coach": round(float(u.loc[off, "z_coaching"]), 2)}
-
-    return {
-        "home": home, "away": away,
-        "pred_home_score": round(home_pts, 1), "pred_away_score": round(away_pts, 1),
-        "pred_margin": round(final_margin, 1), "pred_total": round(total, 1),
-        "home_win_prob": round(wp, 3), "away_win_prob": round(1 - wp, 3),
-        "units": {home: edges(home, away), away: edges(away, home)},
-    }
+        return {
+            "home": home, "away": away,
+            "pred_home_score": round(home_pts, 1), "pred_away_score": round(away_pts, 1),
+            "pred_margin": round(final_margin, 1), "pred_total": round(total, 1),
+            "raw_margin": round(raw_margin, 1), "raw_total": round(raw_total, 1),
+            "calibration": round(cal, 3), "total_calibration": round(c["total"], 3),
+            "home_win_prob": round(wp, 3), "away_win_prob": round(1 - wp, 3),
+            "units": {home: edges(home, away), away: edges(away, home)},
+        }
 
 
 if __name__ == "__main__":
