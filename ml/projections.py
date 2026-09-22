@@ -195,17 +195,30 @@ def player_profiles() -> pd.DataFrame:
     g = df["games"].clip(lower=1)
     # per-game volume
     df["att_pg"] = df["pass_att"] / g
-    df["cmp_pct"] = np.where(df["pass_att"] > 0, df["cmp"] / df["pass_att"], 0.63)
-    df["ypa"] = np.where(df["pass_att"] > 0, df["pass_yds"] / df["pass_att"], 0)
-    df["ptd_pa"] = np.where(df["pass_att"] > 0, df["pass_td"] / df["pass_att"], 0)
-    df["int_pa"] = np.where(df["pass_att"] > 0, df["interc"] / df["pass_att"], 0)
+    # Per-attempt EFFICIENCY is shrunk toward a replacement-level prior by sample size:
+    #     rate = (n·observed + K·prior) / (n + K)
+    # Without this a backup's mop-up line became a starter's projection — Malik Willis, 38
+    # attempts in 2025 at 11.1 yds/att and 79% completion, projected for 340 yards against
+    # Kansas City once handed 32 attempts. Volume (per-game counts) is NOT shrunk; it is
+    # re-derived from team volume and depth-chart role at projection time anyway.
+    # K is "how many attempts before the observed rate outweighs the prior": 150 for a QB
+    # (about a month as a starter), 60 carries, 40 targets. The QB prior is the same
+    # replacement line a rookie/unknown starter gets (ROOKIE_QB); the skill priors are
+    # league-typical rates. Priors, not fitted constants.
+    def shrink(num, den, prior, k):
+        return (num + k * prior) / (den + k)
+    pa_, ca_, tg_ = df["pass_att"], df["carries"], df["targets"]
+    df["cmp_pct"] = shrink(df["cmp"], pa_, ROOKIE_QB["cmp_pct"], K_PASS_ATT)
+    df["ypa"] = shrink(df["pass_yds"], pa_, ROOKIE_QB["ypa"], K_PASS_ATT)
+    df["ptd_pa"] = shrink(df["pass_td"], pa_, ROOKIE_QB["ptd_pa"], K_PASS_ATT)
+    df["int_pa"] = shrink(df["interc"], pa_, ROOKIE_QB["int_pa"], K_PASS_ATT)
     df["carry_pg"] = df["carries"] / g
-    df["ypc"] = np.where(df["carries"] > 0, df["rush_yds"] / df["carries"], 0)
-    df["rtd_carry"] = np.where(df["carries"] > 0, df["rush_td"] / df["carries"], 0)
+    df["ypc"] = shrink(df["rush_yds"], ca_, SKILL_PRIOR["ypc"], K_CARRIES)
+    df["rtd_carry"] = shrink(df["rush_td"], ca_, SKILL_PRIOR["rtd_carry"], K_CARRIES)
     df["tgt_pg"] = df["targets"] / g
-    df["catch_pct"] = np.where(df["targets"] > 0, df["rec"] / df["targets"], 0)
-    df["ypt"] = np.where(df["targets"] > 0, df["rec_yds"] / df["targets"], 0)
-    df["rectd_tgt"] = np.where(df["targets"] > 0, df["rec_td"] / df["targets"], 0)
+    df["catch_pct"] = shrink(df["rec"], tg_, SKILL_PRIOR["catch_pct"], K_TARGETS)
+    df["ypt"] = shrink(df["rec_yds"], tg_, SKILL_PRIOR["ypt"], K_TARGETS)
+    df["rectd_tgt"] = shrink(df["rec_td"], tg_, SKILL_PRIOR["rectd_tgt"], K_TARGETS)
 
     # team shares (of season attempts)
     df = df.merge(team_pa[["posteam", "team_pa", "team_g"]], left_on="team", right_on="posteam", how="left")
@@ -249,6 +262,9 @@ def _qb_starters() -> dict:
 # league-average starter line (used for rookies / no-2025-usage starters)
 ROOKIE_QB = {"cmp_pct": 0.62, "ypa": 6.4, "ptd_pa": 0.036, "int_pa": 0.028,
              "carry_pg": 3.0, "ypc": 4.0, "rtd_carry": 0.03}
+# league-typical per-touch rates: the prior a small-sample RB/WR/TE is shrunk toward
+SKILL_PRIOR = {"ypc": 4.2, "rtd_carry": 0.03, "catch_pct": 0.65, "ypt": 7.5, "rectd_tgt": 0.045}
+K_PASS_ATT, K_CARRIES, K_TARGETS = 150, 60, 40      # sample size at which observed = prior weight
 
 
 # ── 4. distribute team volume to players for a matchup ──────────────
