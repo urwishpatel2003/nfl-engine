@@ -1546,10 +1546,27 @@ def _finalize_slate(base_games):
             g["total_pick"] = "Over" if over else "Under"
             g["total_prob"] = tp["over"] if over else tp["under"]
     MIN_EDGE = 2.5                                    # min points vs the line to count as a real play
-    qualified = [g for g in scored if abs(g.get("edge") or 0) >= MIN_EDGE]
+    _mark_early(games)
+    qualified = [g for g in scored if abs(g.get("edge") or 0) >= MIN_EDGE and not g.get("early")]
     for i, g in enumerate(sorted(qualified, key=lambda x: -x["cover_prob"])[:5], 1):
         g["pick_rank"] = i
     return games, odds_status
+
+
+def _mark_early(games: list) -> None:
+    """Flag games that kick off BEFORE the week's Saturday-morning lock (Thursday night,
+    Friday/Saturday internationals) as early=True. They stay on the slate and in the
+    all-games record, but are NOT eligible for the top-5: the pick'em deadline for those
+    games comes before the board is set, so the contest picks never include them."""
+    try:
+        from ml.ledger import week_lock_time, kickoff_utc
+        lock = week_lock_time(games)
+        for g in games:
+            ko = kickoff_utc(g.get("gameday"), g.get("gametime"))
+            g["early"] = bool(lock is not None and ko is not None and ko < lock)
+    except Exception:
+        for g in games:
+            g["early"] = False
 
 
 def _reg_weeks(season: int):
@@ -1591,6 +1608,7 @@ def lock_current_week() -> str:
             return "season complete"
         _SCHED_PRED.pop((season, week), None)         # refresh changed rosters/injuries → re-predict
         slate = _slate(season, week)
+        _overlay_locked(season, slate["games"])       # rank the live games around the frozen ones
         _lock_picks(season, week, slate["games"])
         return f"locked {season} wk{week}"
     except Exception as e:
@@ -1615,8 +1633,11 @@ def api_schedule():
     week = int(request.args.get('week', default_week))
     out = _slate(season, week)
     if season == seasons[-1]:
+        # overlay FIRST so the live games' top-5 ranks are slotted around the games already
+        # frozen (a Thursday game keeps its rank; Sunday games fill the free slots), and it is
+        # those consistent ranks that get written to the record
+        _overlay_locked(season, out["games"])         # started/frozen games show the pick that was on the board
         _lock_picks(season, week, out["games"])       # the live season writes the record
-        _overlay_locked(season, out["games"])         # finished games show the pick that was on the board
     return jsonify(_native({**out, "seasons": seasons, "weeks": weeks}))
 
 
@@ -1629,7 +1650,7 @@ def _overlay_locked(season: int, games: list) -> None:
     """Replace the live re-prediction with the ledger row (ml/ledger.py) for every game that
     is FROZEN (the week passed its lock time) or has KICKED OFF. The model moves every day
     — results feed the blend, injuries change, lines close — so the board a reader sees
-    after Thursday 2pm ET must be the board that gets graded, not a re-prediction. Before
+    after Saturday 9am ET must be the board that gets graded, not a re-prediction. Before
     the lock time the live model prices the slate and the ledger is provisional."""
     try:
         from ml.ledger import load, kickoff_utc, week_lock_time
@@ -1665,7 +1686,7 @@ def _overlay_locked(season: int, games: list) -> None:
             taken = {int(g["pick_rank"]) for g in games if g.get("locked") and g.get("pick_rank")}
             free = [r for r in range(1, 6) if r not in taken]
             live = [g for g in games if not g.get("locked") and g.get("cover_prob") is not None
-                    and abs(g.get("edge") or 0) >= 2.5]
+                    and abs(g.get("edge") or 0) >= 2.5 and not g.get("early")]
             live.sort(key=lambda g: -g["cover_prob"])
             for g in games:
                 if not g.get("locked"):

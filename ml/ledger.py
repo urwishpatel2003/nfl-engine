@@ -11,7 +11,7 @@ record(season, week, games)
       ATS   : ats_pick / edge / cover_prob / pick_rank (top-5 flag)
       Total : total_pick (Over/Under) / total_prob
       ML    : ml_pick (model's straight-up favorite) / ml_prob / posted odds / no-vig implied
-    Until the week's LOCK TIME (Thursday 2pm ET, see week_lock_time) a game is re-written on
+    Until the week's LOCK TIME (Saturday 9am ET, see week_lock_time) a game is re-written on
     every slate computation — the board is provisional while lines and injury reports are
     still arriving. From the lock time on the whole week is frozen: rows are never
     overwritten, so the top-5 a reader sees is the top-5 that gets graded. Nothing is ever
@@ -106,20 +106,24 @@ def load() -> pd.DataFrame:
 
 
 def week_lock_time(games: list) -> datetime | None:
-    """When a week's board freezes: THURSDAY 18:00 UTC (2pm ET) of the game week, or two
-    hours before the week's earliest kickoff if that comes first (week 1 opened on a
-    Wednesday). One fixed moment per week, so the top-5 a reader sees on Thursday is the
-    top-5 that gets graded — the board must not move during the week."""
+    """When a week's board freezes: SATURDAY 13:00 UTC (9am ET) before the week's Sunday
+    slate — after Friday's final injury designations and the overnight availability pulls
+    (09:00 UTC is the last one before the lock). One fixed moment per week, so the top-5 a
+    reader sees Saturday morning is the top-5 that gets graded.
+
+    Games that kick off BEFORE the lock (Thursday night, Friday/Saturday internationals)
+    are frozen by their own kickoff: record() never writes a game after it has started, so
+    the last provisional row before kickoff is their pick of record."""
     kos = [kickoff_utc(g.get("gameday"), g.get("gametime")) for g in games]
     kos = [k for k in kos if k is not None]
     if not kos:
         return None
-    first = min(kos)
-    thu = first - timedelta(days=(first.weekday() - 3) % 7)          # the Thursday on/before the first game...
-    thu = thu.replace(hour=18, minute=0, second=0, microsecond=0)
-    if thu > first - timedelta(hours=2):                            # ...but never inside the first game
-        thu = first - timedelta(hours=2)
-    return thu
+    sundays = [k for k in kos if k.weekday() == 6]
+    anchor = min(sundays) if sundays else max(kos)                   # the Sunday slate, else the last game
+    sat = (anchor - timedelta(days=1)).replace(hour=13, minute=0, second=0, microsecond=0)
+    if sat > anchor - timedelta(hours=2):                             # never inside the anchor game
+        sat = anchor - timedelta(hours=2)
+    return sat
 
 
 def record(season: int, week: int, games: list, now: datetime | None = None) -> int:
