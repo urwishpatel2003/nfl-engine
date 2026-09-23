@@ -550,12 +550,65 @@ _PFF_UNIT_AGG = {
 }
 
 
-def _pff_unit_scores(teams) -> pd.DataFrame | None:
-    """Per-team PFF unit grades from current rosters, or None when no PFF data exists."""
+_PFF_TABLE = None
+
+
+def _pff_table() -> pd.DataFrame | None:
+    """The PFF grade table every consumer reads: the CURRENT-season grades (pff_grades.parquet)
+    blended toward LAST season's (pff_grades_<prior>.parquet, built by pff_prior.py) by games
+    played — w = g/(g+4), the in-season rule used everywhere else.
+
+    pff.com's roster endpoint serves only the current season, so from week 1 the file holds
+    season-to-date grades: two games of film after week 2. At the model's 80% PFF weight that
+    swapped a 17-game grade for a 2-game one and moved teams 20 places. Blending restores the
+    prior; the current season takes over as the games accumulate. A player with no prior
+    grade is shrunk toward his position's prior-season mean instead. Every grades_* column
+    is blended the same way; `qualifies` is kept from the current file."""
+    global _PFF_TABLE
+    if _PFF_TABLE is not None:
+        return _PFF_TABLE
     p = PROC / "pff_grades.parquet"
     if not p.exists():
         return None
     d = pd.read_parquet(p)
+    try:
+        from ml.current import state, K_GAMES
+        st = state()
+        prior_path = PROC / f"pff_grades_{st['prior']}.parquet"
+        if st["in_progress"] and prior_path.exists() and "pff_id" in d.columns:
+            pr = pd.read_parquet(prior_path).drop_duplicates("pff_id").set_index("pff_id")
+            g = d["team"].map(st["games"]).fillna(0).astype(float)
+            w = g / (g + K_GAMES)
+            gcols = [c for c in d.columns if c.startswith("grades_")] + ["pff_grade"]
+            pos_mean = {c: pr.groupby("position")[c].mean() for c in gcols if c in pr.columns}
+            for c in gcols:
+                if c not in pr.columns:
+                    continue
+                cur = pd.to_numeric(d[c], errors="coerce")
+                prv = d["pff_id"].map(pr[c])
+                fallback = d["position"].map(pos_mean[c])
+                prv = prv.fillna(fallback)
+                blended = w * cur + (1 - w) * prv
+                # no current grade (hasn't played yet) → the prior stands on its own
+                d[c] = blended.where(cur.notna(), prv)
+            # `qualifies` came from the current file = met PFF's snap minimum THIS season. A
+            # player who has not played yet (Darnold, back at QB1 after Lock's two starts) has
+            # a full prior season of film; he qualifies on that. Prior games >= 6 counts.
+            if "qualifies" in d.columns and "games" in pr.columns:
+                prior_games = d["pff_id"].map(pr["games"]).fillna(0)
+                d["qualifies"] = d["qualifies"].fillna(False).astype(bool) | (prior_games >= 6)
+            d.attrs["blend_w"] = float(w.mean())
+    except Exception as e:
+        print(f"[pff] prior blend skipped: {e}", flush=True)
+    _PFF_TABLE = d
+    return d
+
+
+def _pff_unit_scores(teams) -> pd.DataFrame | None:
+    """Per-team PFF unit grades from current rosters, or None when no PFF data exists."""
+    d = _pff_table()
+    if d is None:
+        return None
     if "qualifies" in d.columns:                    # PFF's own snap minimum — kills noise grades
         d = d[d["qualifies"]]
     out = pd.DataFrame(index=teams)
@@ -814,9 +867,9 @@ def _pff_grades():
     keys unique within PFF so a shared lastname+initial can't mis-grade a player."""
     global _PFF_CACHE
     if _PFF_CACHE is None:
-        p = PROC / "pff_grades.parquet"
-        if p.exists():
-            d = pd.read_parquet(p).dropna(subset=["pff_grade"]).copy()
+        t = _pff_table()
+        if t is not None:
+            d = t.dropna(subset=["pff_grade"]).copy()
             # Percentile each QUALIFYING player's grade within his PFF position (FB folded
             # into HB — tiny cohorts mint fake 100s). Used to blend cards toward the film
             # grades; non-qualifying grades keep a badge but don't blend (too little snap

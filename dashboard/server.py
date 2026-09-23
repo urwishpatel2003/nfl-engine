@@ -524,7 +524,7 @@ def api_pff_upload():
     _PFF_UNITS_CACHE.clear()
     try:
         import ml.squad as _sq
-        _sq._PFF_CACHE = _sq._PFF_PRE_CACHE = None
+        _sq._PFF_CACHE = _sq._PFF_PRE_CACHE = _sq._PFF_TABLE = None
     except Exception:
         pass
     return jsonify({"ok": True, "saved": saved})
@@ -2396,7 +2396,7 @@ def clear_caches():
     _PFF_UNITS_CACHE.clear()
     try:                                              # PFF grade lookups (squad player cards)
         import ml.squad as _sq
-        _sq._PFF_CACHE = _sq._PFF_PRE_CACHE = None
+        _sq._PFF_CACHE = _sq._PFF_PRE_CACHE = _sq._PFF_TABLE = None
     except Exception:
         pass
     try:                                              # QB/unit history tables
@@ -2557,7 +2557,7 @@ def _pff_boot_sync():
             global _PFF_COMPARE
             _PFF_COMPARE = None
             import ml.squad as _sq
-            _sq._PFF_CACHE = _sq._PFF_PRE_CACHE = None
+            _sq._PFF_CACHE = _sq._PFF_PRE_CACHE = _sq._PFF_TABLE = None
             _DEPTH_CACHE.clear()
             _PFF_UNITS_CACHE.clear()
         print(f"[boot] pff sync: {res}")
