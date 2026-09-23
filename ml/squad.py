@@ -90,6 +90,26 @@ def _composite_2025():
 # current season) — recency-weighted passing+rushing EPA for QBs, and real production
 # (yards + TDs + touches + EPA) for skill players.
 _PBP_W = {2025: 0.32, 2024: 0.24, 2023: 0.18, 2022: 0.14, 2021: 0.12}   # 5-yr recency weights
+
+
+def _season_weights(base: dict) -> dict:
+    """The recency weights PLUS the season in progress.
+
+    Every per-player table below is a recency-weighted average over completed seasons. In
+    season the current year is added with weight = (top weight) x wk/(wk+4) — the same
+    games-played shrink the team views use (ml/current.py) — so after two weeks this
+    season carries a third of last season's weight, half by week 4, and about 80% by week
+    17. That is how a player's card moves with what he has done this year without two games
+    outweighing a full season. Empty (no PBP yet) seasons are skipped by the callers."""
+    try:
+        from ml.current import state, K_GAMES
+        st = state()
+        if st["in_progress"] and st["season"] not in base and st["weeks_played"] > 0:
+            wk = float(st["weeks_played"])
+            return {st["season"]: max(base.values()) * wk / (wk + K_GAMES), **base}
+    except Exception:
+        pass
+    return dict(base)
 _COV_SHRINK = 35.0   # targets of regression toward league-average coverage (tames small samples)
 _PBP_AGG = None
 _SKILL_CACHE = None
@@ -101,7 +121,7 @@ def _pbp_agg():
     if _PBP_AGG is not None:
         return _PBP_AGG
     rush, rec, pas, names = [], [], [], {}
-    for s, w in _PBP_W.items():
+    for s, w in _season_weights(_PBP_W).items():
         p = RAW / f"pbp_{s}.parquet"
         if not p.exists():
             continue
@@ -212,7 +232,7 @@ def _qb_value_table():
     scheme- and supporting-cast-influenced — not an isolated talent grade; a great-scheme QB
     legitimately grades near the top by these numbers."""
     rows = []
-    for s, w in _QB_W.items():
+    for s, w in _season_weights(_QB_W).items():
         p = RAW / f"pbp_{s}.parquet"
         if not p.exists():
             continue
@@ -320,7 +340,7 @@ def _pass_rush_players():
     name second. SHARED by the team metric and the per-player card ratings so both tell one story."""
     pf = pd.read_parquet(RAW / "pfr_defense.parquet")
     frames = []
-    for yr, w in _DEF_W.items():
+    for yr, w in _season_weights(_DEF_W).items():
         d = pf[pf["season"] == yr]
         if d.empty:
             continue
@@ -367,7 +387,7 @@ def _coverage_players():
     by pfr_player_id with gsis + name-key so cards/team metric can match by ID first. SHARED."""
     pf = pd.read_parquet(RAW / "pfr_defense.parquet")
     frames = []
-    for yr, w in _DEF_W.items():
+    for yr, w in _season_weights(_DEF_W).items():
         d = pf[pf["season"] == yr]
         if d.empty:
             continue
@@ -444,7 +464,9 @@ def _ol():
         pf = pd.read_parquet(RAW / "pfr_passing.parquet")
         ros_all = pd.read_parquet(RAW / "rosters_seasonal.parquet")
         pr_by, sk_by, run = {}, {}, []
-        for yr, w in _DEF_W.items():
+        ros_cur = pd.read_parquet(RAW / "rosters_2026.parquet").dropna(subset=["player_id"]) \
+            .drop_duplicates("player_id").set_index("player_id")["position"]
+        for yr, w in _season_weights(_DEF_W).items():
             d = pf[pf["season"] == yr]
             pbpf = RAW / f"pbp_{yr}.parquet"
             if d.empty or not pbpf.exists():
@@ -456,6 +478,8 @@ def _ol():
             pr_by[yr] = g["press"] / dbg                          # per-year team pressure rate
             sk_by[yr] = g["sk"] / dbg
             pos = ros_all[ros_all["season"] == yr].drop_duplicates("player_id").set_index("player_id")["position"]
+            if pos.empty:                                          # season in progress: no seasonal roster yet
+                pos = ros_cur
             runs = pbp[pbp["rush_attempt"] == 1].copy()
             runs["rp"] = runs["rusher_player_id"].map(pos)
             rb = runs[runs["rp"].isin(["RB", "FB"])]                # exclude QB sneaks/kneels/scrambles
@@ -481,8 +505,8 @@ def _ol():
 def _def_team():
     """Opponent-adjusted TEAM defense (run + pass EPA suppressed), higher = better. A complete,
     schedule-adjusted defensive signal — much stronger than name-matched individual stats."""
-    from ml.adjust import adjusted_unit_epa
-    adj = adjusted_unit_epa(2025)
+    from ml.current import adjusted_units                     # rolling: this season shrunk toward last
+    adj = adjusted_units()
     if adj:
         return pd.Series({t: -(d.get("def_pass", 0.0) + d.get("def_rush", 0.0)) for t, d in adj.items()})
     p = PROC / "team_styles.parquet"                               # fallback: raw def EPA

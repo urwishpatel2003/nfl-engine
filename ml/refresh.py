@@ -70,6 +70,12 @@ def _candidate_urls(season: int) -> dict:
         "schedules": [f"{NFLDATA}/games.parquet", f"{NFLDATA}/games.csv"],
         "depth_charts": [f"{NFLVERSE}/depth_charts/depth_charts_{s}.parquet"],
         f"rosters_{s}": [f"{NFLVERSE}/rosters/roster_{s}.parquet"],
+        # PFR weekly advanced stats (per-season assets): the per-player pass-rush, coverage
+        # and O-line pass-protection tables in ml/squad read these, so player cards and unit
+        # grades roll with the season instead of freezing on last year's file.
+        "pfr_defense":   [f"{NFLVERSE}/pfr_advstats/advstats_week_def_{s}.parquet"],
+        "pfr_passing":   [f"{NFLVERSE}/pfr_advstats/advstats_week_pass_{s}.parquet"],
+        "pfr_receiving": [f"{NFLVERSE}/pfr_advstats/advstats_week_rec_{s}.parquet"],
     }
 
 
