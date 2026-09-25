@@ -102,13 +102,15 @@ def unit_injury_deltas(team: str) -> dict:
     """Unit z-score deltas from this team's Out list — only STARTERS / heavily-featured
     players count, and each is scaled by the injured player's 0-100 rating (losing an
     All-Pro >> losing a depth piece, which barely moves it since a similar player replaces him)."""
-    from ml.projections import current_reports, reserve_ids
+    from ml.projections import current_reports, reserve_ids, _injury_dnp
     d = {"z_off_pass": 0.0, "z_off_rush": 0.0, "z_def_pass": 0.0, "z_def_rush": 0.0}
-    # (1) Out in the team's CURRENT-SEASON report (never a prior season's list) …
+    # (1) Out — or an injury DNP with no designation yet — in the team's CURRENT-SEASON
+    #     report (never a prior season's list) …
     inj = current_reports(_injuries())
     rows = []
     if not inj.empty and "team" in inj.columns:
-        t = inj[(inj["team"] == team) & (inj["report_status"] == "Out")]
+        t = inj[inj["team"] == team]
+        t = t[(t["report_status"] == "Out") | t.apply(_injury_dnp, axis=1)]
         rows += [{"position": r.get("position"), "gsis_id": r.get("gsis_id"),
                   "full_name": r.get("full_name")} for _, r in t.iterrows()]
     # (2) … plus anyone on IR/PUP/exempt in the roster release who still sits on the

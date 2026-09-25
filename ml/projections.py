@@ -76,18 +76,39 @@ def reserve_ids(team: str | None = None) -> dict:
             for g, s, d in zip(r["player_id"], r["status"], r["status_description_abbr"])}
 
 
+_REST_WORDS = ("rest", "not injury", "personal", "coach", "veteran")
+_DNP = "Did Not Participate In Practice"
+
+
+def _injury_dnp(row) -> bool:
+    """A DNP with an actual injury listed and NO game designation yet. Wednesday–Thursday
+    reports carry practice status only; the Out/Questionable call comes Friday. A player
+    who is not practising because of an injury (Daniels, elbow) is treated as unavailable
+    until that call arrives — a rest-day DNP ('not injury related - resting player') is not."""
+    st = row.get("report_status")
+    if not (st is None or (isinstance(st, float) and pd.isna(st))):
+        return False
+    if str(row.get("practice_status") or "") != _DNP:
+        return False
+    why = str(row.get("practice_primary_injury") or "").lower()
+    return bool(why) and not any(w in why for w in _REST_WORDS)
+
+
 def unavailable_map(statuses=OUT_STATUSES) -> dict:
     """{gsis_id: label} of players who won't play: ruled Out/Doubtful in each team's
-    current-season report (same report the dashboard's injury panel shows) PLUS everyone on
-    a reserve/exempt list in the roster release. The label is the reason ('Out', 'IR', …)
-    so a projection can say WHO it left out and why."""
+    current-season report (same report the dashboard's injury panel shows), injury DNPs that
+    have no designation yet (label 'DNP'), PLUS everyone on a reserve/exempt list in the
+    roster release. The label is the reason so a projection can say WHO it left out and why."""
     ids = dict(reserve_ids())
     inj = current_reports()
     if not inj.empty and {"gsis_id", "report_status"} <= set(inj.columns):
         inj = inj.dropna(subset=["gsis_id"])
-        for g, st in zip(inj["gsis_id"].astype(str), inj["report_status"]):
+        for _, r in inj.iterrows():
+            g, st = str(r["gsis_id"]), r.get("report_status")
             if st in statuses:
                 ids[g] = str(st)                       # a game designation outranks a reserve tag
+            elif _injury_dnp(r):
+                ids[g] = "DNP"
     return ids
 
 

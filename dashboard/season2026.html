@@ -1443,7 +1443,7 @@ async function viewMatchup(home, away, neutral){
   <div class="card"><h2>Recent form <span>${r.form[r.home]&&r.form[r.home].season||''}</span></h2><div class="box">${formPanel(r.away, r.form[r.away])}${formPanel(r.home, r.form[r.home])}</div></div>
   ${h2hPanel(r)}
   ${conditionsPanel(r)}
-  <div class="card"><h2>Latest injuries <span>Out/Doubtful and reserve-list (IR/PUP/exempt) players are removed from the projection &amp; spread · DNP/LP = practice participation only, no designation yet</span></h2>
+  <div class="card"><h2>Latest injuries <span>Out/Doubtful, reserve-list (IR/PUP/exempt) and injury-DNP players are removed from the projection &amp; spread · DNP/LP = practice status only, no game designation yet (an injury DNP counts as out until Friday's designation; a rest-day DNP does not)</span></h2>
     ${injImpactNote(r)}
     <div class="box">${injPanel(r.away, r.injuries[r.away])}${injPanel(r.home, r.injuries[r.home])}</div></div>
   <div class="card"><h2>Projected box score <span>expected stat lines · available players</span></h2><div id="mBox" class="box"><div class="loading">Projecting player stat lines…</div></div></div>`;
