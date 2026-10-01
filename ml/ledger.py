@@ -44,7 +44,7 @@ ML_VALUE = 0.05                  # model win prob must beat the no-vig market pr
 COLS = ["game_id", "season", "week", "home", "away", "kickoff_utc", "locked_at", "frozen", "week_locked_at",
         "pred_home", "pred_away", "pred_margin", "pred_total", "home_win_prob",
         "vegas_spread", "vegas_total", "home_ml", "away_ml", "line_source",
-        "ats_pick", "edge", "cover_prob", "pick_rank",
+        "ats_pick", "edge", "cover_prob", "pick_rank", "pick_tier",
         "total_pick", "total_prob",
         "ml_pick", "ml_prob", "ml_odds", "ml_implied"]
 
@@ -176,7 +176,7 @@ def record(season: int, week: int, games: list, now: datetime | None = None) -> 
             "home_ml": g.get("home_ml"), "away_ml": g.get("away_ml"),
             "line_source": g.get("line_source"),
             "ats_pick": g.get("ats_pick"), "edge": g.get("edge"), "cover_prob": g.get("cover_prob"),
-            "pick_rank": g.get("pick_rank"),
+            "pick_rank": g.get("pick_rank"), "pick_tier": g.get("pick_tier"),
             "total_pick": g.get("total_pick"), "total_prob": g.get("total_prob"),
             "ml_pick": ml_pick, "ml_prob": ml_prob, "ml_odds": ml_odds, "ml_implied": ml_imp,
         })
@@ -270,6 +270,10 @@ def grade(season: int) -> dict:
         summary = {
             "ats_all": _tally(fin, "ats", "ats_units"),
             "ats_top": _tally(_sub(fin["pick_rank"].notna()), "ats", "ats_units"),
+            # the five always include fillers when fewer than five games clear the edge floor;
+            # a row with no tier predates the tier column and counted as an edge pick (it was)
+            "ats_top_edge": _tally(_sub(fin["pick_rank"].notna() & (fin["pick_tier"].fillna("edge") == "edge")), "ats", "ats_units"),
+            "ats_top_fill": _tally(_sub(fin["pick_rank"].notna() & (fin["pick_tier"] == "fill")), "ats", "ats_units"),
             "ou_all": _tally(fin, "ou", "ou_units"),
             "ou_conf": _tally(_sub(fin["total_prob"] >= TOTAL_CONF), "ou", "ou_units"),
             "ml_all": _tally(fin, "ml", "ml_units"),

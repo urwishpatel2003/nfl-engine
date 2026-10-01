@@ -1545,12 +1545,35 @@ def _finalize_slate(base_games):
             over = tp["over"] >= tp["under"]
             g["total_pick"] = "Over" if over else "Under"
             g["total_prob"] = tp["over"] if over else tp["under"]
-    MIN_EDGE = 2.5                                    # min points vs the line to count as a real play
     _mark_early(games)
-    qualified = [g for g in scored if abs(g.get("edge") or 0) >= MIN_EDGE and not g.get("early")]
-    for i, g in enumerate(sorted(qualified, key=lambda x: -x["cover_prob"])[:5], 1):
-        g["pick_rank"] = i
+    _rank_top5(games, [])
     return games, odds_status
+
+
+MIN_EDGE = 2.5          # points vs the line for a pick to count as a real EDGE play
+
+
+def _rank_top5(games: list, taken: list) -> None:
+    """Assign pick_rank 1-5 (skipping ranks in `taken`) and pick_tier to the live games.
+
+    The pick'em needs FIVE entries every week, so the board always carries five: first the
+    games that disagree with the line by >= MIN_EDGE, ranked by cover probability
+    (tier 'edge'); if fewer than five clear the floor, the remaining slots are filled by
+    the next-largest disagreements (tier 'fill'). The tier is stored and graded separately
+    — the three-week review showed 4+ pt edges 8-4 and 1-2.5 pt picks 3-10, so the record
+    must be able to tell a forced fifth pick from a real one. Early (pre-lock) games never
+    qualify for either tier."""
+    free = [r for r in range(1, 6) if r not in taken]
+    for g in games:
+        if not g.get("locked"):
+            g["pick_rank"] = None; g["pick_tier"] = None
+    pool = [g for g in games if not g.get("locked") and not g.get("early")
+            and g.get("cover_prob") is not None and g.get("edge") is not None]
+    edge = sorted([g for g in pool if abs(g["edge"]) >= MIN_EDGE], key=lambda x: -x["cover_prob"])
+    fill = sorted([g for g in pool if abs(g["edge"]) < MIN_EDGE], key=lambda x: (-abs(x["edge"]), -x["cover_prob"]))
+    for g, r in zip(edge + fill, free):
+        g["pick_rank"] = r
+        g["pick_tier"] = "edge" if abs(g["edge"]) >= MIN_EDGE else "fill"
 
 
 def _mark_early(games: list) -> None:
@@ -1643,7 +1666,7 @@ def api_schedule():
 
 _LOCK_FIELDS = ("pred_home", "pred_away", "pred_margin", "pred_total", "home_win_prob",
                 "vegas_spread", "vegas_total", "line_source", "ats_pick", "edge", "cover_prob",
-                "pick_rank", "total_pick", "total_prob")
+                "pick_rank", "pick_tier", "total_pick", "total_prob")
 
 
 def _overlay_locked(season: int, games: list) -> None:
@@ -1683,16 +1706,8 @@ def _overlay_locked(season: int, games: list) -> None:
         # slate (the old way) let a locked #2 and a live #2 coexist, or a locked #3 with no #1
         # — mid-week the strip showed duplicates or gaps and read as "not five picks".
         if any(x.get("locked") for x in games):
-            taken = {int(g["pick_rank"]) for g in games if g.get("locked") and g.get("pick_rank")}
-            free = [r for r in range(1, 6) if r not in taken]
-            live = [g for g in games if not g.get("locked") and g.get("cover_prob") is not None
-                    and abs(g.get("edge") or 0) >= 2.5 and not g.get("early")]
-            live.sort(key=lambda g: -g["cover_prob"])
-            for g in games:
-                if not g.get("locked"):
-                    g["pick_rank"] = None
-            for g, r in zip(live, free):
-                g["pick_rank"] = r
+            taken = [int(g["pick_rank"]) for g in games if g.get("locked") and g.get("pick_rank")]
+            _rank_top5(games, taken)
     except Exception as e:
         print(f"[ledger] overlay failed: {e}", flush=True)
 

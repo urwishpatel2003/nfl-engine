@@ -1910,9 +1910,10 @@ async function viewSchedule(params){
       <div class="toppicks">${picks.map(g=>{
         const pn = g.vegas_spread==null?null:(g.ats_pick===g.home?-g.vegas_spread:g.vegas_spread);
         const ps = pn==null?g.ats_pick:Math.abs(pn)<0.05?`${g.ats_pick} PK`:`${g.ats_pick} ${pn>0?'+':''}${pn}`;
-        return `<div class="tp" onclick="go('#/matchup?home=${g.home}&away=${g.away}')">
-        <span class="rk">${g.pick_rank}</span><b>${ps}</b>&nbsp;${g.away}@${g.home} · ${Math.round(g.cover_prob*100)}% cover · ${Math.abs(g.edge).toFixed(1)} pt edge</div>`;}).join('')}</div>
-      <div style="color:var(--muted);font-size:11px;margin-top:8px">Two-stage: only games where the model disagrees with the line by ≥2.5 points qualify, then those are ranked by key-number-aware cover probability (so a real edge in a good key-number spot rises). Fewer than 5 may show if the slate is efficient — and these are not guaranteed winners (the model doesn't reliably beat NFL spreads out-of-sample; see the backtest).</div>
+        const fill = g.pick_tier==='fill';
+        return `<div class="tp" style="${fill?'border-style:dashed;opacity:.85':''}" onclick="go('#/matchup?home=${g.home}&away=${g.away}')" title="${fill?'filler: under the 2.5-pt edge floor, included so the board always carries five':'clears the 2.5-pt edge floor'}">
+        <span class="rk" style="${fill?'background:#475569':''}">${g.pick_rank}</span><b>${ps}</b>&nbsp;${g.away}@${g.home} · ${Math.round(g.cover_prob*100)}% cover · ${Math.abs(g.edge).toFixed(1)} pt edge${fill?' · <span style="color:var(--muted)">filler</span>':''}</div>`;}).join('')}</div>
+      <div style="color:var(--muted);font-size:11px;margin-top:8px">Two-stage: games where the model disagrees with the line by ≥2.5 points qualify first, ranked by key-number-aware cover probability. The board always carries five for the pick'em: when fewer than five clear the floor, the next-largest disagreements fill the remaining slots and are marked <b>filler</b> (dashed) — they are graded separately on the Model Record, because small disagreements have not paid (1–2.5 pt picks 3-10 through week 3). None of these are guaranteed winners; the model doesn't reliably beat NFL spreads out-of-sample.</div>
     </div>` : (priced.length ? `<div class="card" style="padding:14px"><h2 style="margin:0 0 6px">🔥 Top 5 picks <span>none this week</span></h2>
       <div class="note">No game disagrees with the line by 2.5+ points — the model and the market agree on this slate. Closest: ${near.map(g=>`${esc(g.ats_pick)} ${g.away}@${g.home} (${Math.abs(g.edge).toFixed(1)} pt)`).join(' · ')||'—'}.</div></div>` : '');
   const os=d.odds_status||{}, nLive=d.games.filter(g=>g.line_source==='live').length;
@@ -1960,7 +1961,7 @@ async function viewRecord(params){
     ATS and totals are priced at −110 (break-even ${fP(be)}); moneyline uses the posted price. <b>${d.n_locked}</b> picks locked · <b>${d.n_final}</b> graded · <b>${d.n_pending}</b> pending.</div>`;
   const tiles = `<div class="rtiles">
     ${recTile('ATS · all games','model side vs the spread, every game', S.ats_all, be)}
-    ${recTile('ATS · top-5 picks','≥2.5-pt edge, ranked by cover prob', S.ats_top, be)}
+    ${recTile('ATS · top-5 picks',`the five submitted each week${S.ats_top_fill&&S.ats_top_fill.n?` · edge ${S.ats_top_edge.w}-${S.ats_top_edge.l}, fillers ${S.ats_top_fill.w}-${S.ats_top_fill.l}`:''}`, S.ats_top, be)}
     ${recTile('Totals · all games','Over/Under, model vs the line', S.ou_all, be)}
     ${recTile('Totals · confident',`model prob ≥ ${fP(d.rules.total_conf)}`, S.ou_conf, be)}
     ${recTile('Moneyline · all games','model favorite at the posted price', S.ml_all, 0.5)}
