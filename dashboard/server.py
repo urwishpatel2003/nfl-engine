@@ -461,12 +461,19 @@ def api_pff_units():
         return jsonify({"error": "team required"}), 400
     if team in _PFF_UNITS_CACHE:
         return jsonify(_PFF_UNITS_CACHE[team])
-    units, season_tag = [], "2026 preseason"
+    # In-season facet files (pff_season_*, built by pff_facets.py from the regular-season
+    # weeks) take precedence over the preseason ones; the card says which it is showing.
+    units, season_tag, source = [], "2026 preseason", "preseason"
     for key, fname, label, grade_col, vol_col, cols in _PFF_UNIT_SPEC:
-        p = PROC / f"{fname}.parquet"
+        p_season = PROC / f"{fname.replace('pff_preseason_', 'pff_season_')}.parquet"
+        p = p_season if p_season.exists() else PROC / f"{fname}.parquet"
         if not p.exists():
             continue
         d = pd.read_parquet(p)
+        if p is p_season:
+            source = "season"
+            tw = int(d["through_week"].max()) if "through_week" in d.columns and d["through_week"].notna().any() else None
+            season_tag = f"2026 regular season{f' · through week {tw}' if tw else ''}"
         if "team" not in d.columns or grade_col not in d.columns:
             continue
         d = d[(d["team"] == team) & d[grade_col].notna()]
@@ -487,7 +494,7 @@ def api_pff_units():
         units.append({"key": key, "label": label,
                       "columns": [{"k": c, "label": lbl, "dec": dec} for c, lbl, dec in cols_avail],
                       "grade_col": grade_col, "rows": rows})
-    payload = {"available": bool(units), "team": team, "season": season_tag, "units": units}
+    payload = {"available": bool(units), "team": team, "season": season_tag, "source": source, "units": units}
     _PFF_UNITS_CACHE[team] = payload
     return jsonify(_native(payload))
 

@@ -1041,7 +1041,7 @@ async function loadPffUnits(team){
       <div id="pffUnitHost">${pffUnitTable()}</div>
       <div class="epa-leg" style="margin-top:8px"><span>Grades are PFF 0–100 (colored). BTT/TWP = big-time throw / turnover-worthy play rates ·
         PBE = pass-block efficiency · TPS = true pass sets · PRP = pass-rush productivity · Y/CS = yards per coverage snap ·
-        MTF = missed tackles forced · preseason sample — small snap counts, read accordingly</span></div>
+        MTF = missed tackles forced · ${d.source==='season'?'regular-season sample, updated with each weekly PFF pull':'preseason sample — small snap counts, read accordingly'}</span></div>
     </div>`;
   }catch(e){ /* leave the section empty */ }
 }
