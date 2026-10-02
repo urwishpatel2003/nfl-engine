@@ -321,6 +321,23 @@ def run(season: int, log=_default_log, skip_download: bool = False, light: bool 
     single 09:00 UTC pull left the matchup box scores a day behind them."""
     t0 = time.time()
     started = _now()
+    # A FULL refresh only has new work when games have been played since the last one:
+    # play-by-play, the adjusted units, team_styles and the season projections all key off
+    # completed games. On the other days (most Wednesdays, Saturdays) it rebuilt everything
+    # from unchanged data. Pull the schedule first (cheap) and downgrade to a light pull if
+    # the number of finals has not moved. `games_played` is stored in the status file.
+    finals = None
+    if not light and not skip_download:
+        try:
+            download_nflverse(season, log, only=("schedules",), light_only=True)
+            s = pd.read_parquet(RAW / "schedules.parquet", columns=["season", "home_score"])
+            finals = int(((s["season"] == season) & s["home_score"].notna()).sum())
+            prev = (last_status() or {}).get("games_played")
+            if prev is not None and finals == prev:
+                light = True
+                log(f"no new finals since the last full refresh ({finals} games) — running light instead")
+        except Exception as e:
+            log(f"  finals check failed ({e}); running full", "WARN")
     log(f"Refresh start — season {season}{' (light: availability only)' if light else ''}")
 
     if light:
@@ -333,9 +350,17 @@ def run(season: int, log=_default_log, skip_download: bool = False, light: bool 
 
     ok = (skip_download or any("rows" in v for v in files.values())) and \
          all(not str(v).startswith("error") for v in rebuild.values())
+    if finals is None:                                   # light pulls / skip-download: carry forward
+        finals = (last_status() or {}).get("games_played")
+    if not light:
+        try:
+            s = pd.read_parquet(RAW / "schedules.parquet", columns=["season", "home_score"])
+            finals = int(((s["season"] == season) & s["home_score"].notna()).sum())
+        except Exception:
+            pass
     status = {
         "season": season, "started": started, "finished": _now(), "time": _now(),
-        "elapsed_sec": round(time.time() - t0, 1), "light": bool(light),
+        "elapsed_sec": round(time.time() - t0, 1), "light": bool(light), "games_played": finals,
         "files": files, "rebuild": rebuild, "ok": bool(ok),
     }
     try:

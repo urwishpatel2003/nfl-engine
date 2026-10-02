@@ -2492,12 +2492,14 @@ def _run_refresh(season: int, light: bool = False):
         del _REFRESH_STATE["log"][:-40]
         print(f"[refresh] {msg}", flush=True)         # also to stdout so `railway logs` shows it
 
+    ran_light = light
     try:
-        R.run(season, log=log, light=light)
+        st = R.run(season, log=log, light=light)
+        ran_light = bool(st.get("light", light))       # a full run downgrades itself when no new finals
     except Exception as e:
         log(f"FATAL {e}", "WARN")
     finally:
-        clear_caches("light" if light else "full")
+        clear_caches("light" if ran_light else "full")
         _release_memory()
         log(f"picks ledger: {lock_current_week()}")   # freeze this week's picks on fresh data
         _release_memory()
