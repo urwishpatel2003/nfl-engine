@@ -2407,14 +2407,48 @@ _REFRESH_STATE = {"running": False, "log": []}
 _REFRESH_LOCK = threading.Lock()
 
 
-def clear_caches():
-    """Drop every in-process cache so freshly refreshed data is served immediately."""
-    global _TEAM_META, _QB1, _SQUAD, _STYLES, _INJ, _SCHED, _PFF_COMPARE
-    _TEAM_META = _QB1 = _SQUAD = _STYLES = _INJ = _SCHED = _PFF_COMPARE = None
+def clear_caches(scope: str = "full"):
+    """Drop in-process caches so freshly refreshed data is served immediately.
+
+    scope='light' (the 4-hourly availability pull: injuries, rosters, depth charts,
+    schedules) keeps the heavy, unchanged tables — play-by-play frames, team_styles, the
+    adjusted-EPA fits, history, backtests — and clears only what those feeds touch. Clearing
+    and rebuilding everything six times a day left the process at ~1 GB of half-released
+    frames between pulls, which is what Railway was billing."""
+    global _TEAM_META, _QB1, _SQUAD, _INJ, _SCHED, _PFF_COMPARE
+    _QB1 = _SQUAD = _INJ = _SCHED = _PFF_COMPARE = None
     _DEPTH_CACHE.clear()
     _PROJ_CACHE.clear()
-    _PBP_CACHE.clear()
     _SCHED_PRED.clear()
+    for mod, attr in [("ml.matchup_engine", "_UNITS"), ("ml.matchup_engine", "_CAL"), ("ml.squad", "_PCT_CACHE"),
+                      ("ml.squad", "_META_CACHE"), ("ml.squad", "_PBP_AGG"), ("ml.squad", "_SKILL_CACHE"),
+                      ("ml.projections", "_PROFILE_CACHE"), ("ml.projections", "_QBDEPTH_CACHE"),
+                      ("ml.projections", "_RANK_CACHE"), ("ml.projections", "_TV_CACHE")]:
+        try:
+            import importlib
+            setattr(importlib.import_module(mod), attr, None)
+        except Exception:
+            pass
+    for modname in ("ml.matchup_context", "ml.current", "ml.season"):
+        try:
+            import importlib
+            importlib.import_module(modname).clear()
+        except Exception:
+            pass
+    # blended views depend on games played (ml.current weights) — rebuild them from the kept raw tables
+    global _STYLES
+    _STYLES = None
+    _UNIT_EPA_CACHE.clear()
+    _LEAGUE_STATS_CACHE.clear()
+    try:
+        import ml.squad as _sq
+        _sq._PFF_TABLE = None                         # PFF prior blend weight moves with games played
+    except Exception:
+        pass
+    if scope == "light":
+        return
+    _TEAM_META = None
+    _PBP_CACHE.clear()
     _PFF_UNITS_CACHE.clear()
     try:                                              # PFF grade lookups (squad player cards)
         import ml.squad as _sq
@@ -2442,20 +2476,10 @@ def clear_caches():
     _STYLES_RAW = None
     _UNIT_EPA_CACHE.clear()
     _LEAGUE_STATS_CACHE.clear()
-    for modname in ("ml.matchup_context", "ml.coaching", "ml.fantasy", "ml.odds", "ml.season", "ml.current"):
+    for modname in ("ml.coaching", "ml.fantasy", "ml.odds"):
         try:
             import importlib
             importlib.import_module(modname).clear()
-        except Exception:
-            pass
-    for mod, attr in [("ml.matchup_engine", "_UNITS"), ("ml.matchup_engine", "_CAL"), ("ml.squad", "_PCT_CACHE"),
-                      ("ml.squad", "_META_CACHE"), ("ml.squad", "_SKILL_CACHE"),
-                      ("ml.squad", "_PBP_AGG"), ("ml.projections", "_PROFILE_CACHE"),
-                      ("ml.projections", "_QBDEPTH_CACHE"), ("ml.projections", "_RANK_CACHE"),
-                      ("ml.projections", "_TV_CACHE")]:
-        try:
-            import importlib
-            setattr(importlib.import_module(mod), attr, None)
         except Exception:
             pass
 
@@ -2473,9 +2497,24 @@ def _run_refresh(season: int, light: bool = False):
     except Exception as e:
         log(f"FATAL {e}", "WARN")
     finally:
-        clear_caches()
+        clear_caches("light" if light else "full")
+        _release_memory()
         log(f"picks ledger: {lock_current_week()}")   # freeze this week's picks on fresh data
+        _release_memory()
         _REFRESH_STATE["running"] = False
+
+
+def _release_memory() -> None:
+    """Hand freed frames back to the OS. Dropping a cache frees Python objects, but glibc keeps
+    the arenas, so the container's RSS — what Railway bills — stayed near its peak until the
+    next restart. gc + malloc_trim returns it; a no-op where malloc_trim is unavailable."""
+    import gc
+    gc.collect()
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
 
 
 def _start_refresh(season: int, light: bool = False) -> bool:

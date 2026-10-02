@@ -74,7 +74,17 @@ def get_live_depth_charts() -> pd.DataFrame:
     We take the most recent dt entry per player (gsis_id) from the
     NaN-season rows to get each player's current team.
     """
-    dc = load("depth_charts")
+    # The latest-per-team snapshot file (written by ml/refresh on every pull) is the same
+    # data the cumulative file's live rows reduce to, at ~0.3% of the size. Prefer it: the
+    # hosted server runs this rebuild six times a day and loading the 670k-row cumulative
+    # file was its biggest memory spike.
+    cur = RAW / "depth_2026_current.parquet"
+    if cur.exists():
+        dc = pd.read_parquet(cur)
+        if "season" not in dc.columns:
+            dc["season"] = float("nan")
+    else:
+        dc = load("depth_charts")
     if dc.empty:
         return pd.DataFrame()
 

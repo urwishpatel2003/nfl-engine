@@ -141,8 +141,10 @@ LIGHT_FILES = ("injuries", "depth_charts", "schedules")   # + rosters_{season}: 
                                                           # (schedules = final scores → the pick record grades itself)
 
 
-def download_nflverse(season: int, log=_default_log, only: tuple | None = None) -> dict:
-    """Download the current-season release files (or just `only`). Returns per-file status."""
+def download_nflverse(season: int, log=_default_log, only: tuple | None = None,
+                      light_only: bool = False) -> dict:
+    """Download the current-season release files (or just `only`). Returns per-file status.
+    light_only skips the heavy cumulative depth-chart merge (the light availability pull)."""
     results = {}
     for name, urls in _candidate_urls(season).items():
         if only is not None and name not in only:
@@ -157,26 +159,30 @@ def download_nflverse(season: int, log=_default_log, only: tuple | None = None) 
                 _safe_to_parquet(df, RAW / "schedules.parquet")
                 n = len(df)
             elif name == "depth_charts":
-                # The current-season release is a CUMULATIVE dt-stamped live snapshot with no
-                # season column. Keep historical (season-tagged) rows, replace all live
-                # (season=NaN) rows with the fresh release — bounded size, no stale dupes.
-                path = RAW / "depth_charts.parquet"
-                if path.exists():
-                    old = pd.read_parquet(path)
-                    hist = old[old["season"].notna()] if "season" in old.columns else old
-                    combined = pd.concat([hist, df], ignore_index=True)
-                else:
-                    combined = df
-                _safe_to_parquet(combined, path)
-                # Also refresh depth_2026_current.parquet — the CANONICAL "current depth
-                # chart" every model reads (squad, projections, qb_overlay). It is each
-                # team's most recent published snapshot from the cumulative live data.
+                # depth_{season}_current.parquet is the CANONICAL "current depth chart" every
+                # model reads (squad, projections, roster rebuild): each team's most recent
+                # published snapshot from the cumulative live release.
                 cur = df.copy()
                 cur["dt"] = cur["dt"].astype(str)
                 cur = cur[cur["dt"] == cur.groupby("team")["dt"].transform("max")]
                 _safe_to_parquet(cur, RAW / f"depth_{season}_current.parquet")
                 log(f"  depth_{season}_current: {len(cur):,} rows (latest per-team snapshot)")
-                n = len(combined)
+                n = len(cur)
+                # The cumulative depth_charts.parquet (670k rows; only the offline engine
+                # build reads it) is re-merged on the FULL refresh only: loading it to splice
+                # in the new snapshot was the single biggest memory spike of the light pull.
+                if not light_only:
+                    path = RAW / "depth_charts.parquet"
+                    if path.exists():
+                        old = pd.read_parquet(path)
+                        hist = old[old["season"].notna()] if "season" in old.columns else old
+                        combined = pd.concat([hist, df], ignore_index=True)
+                        del old, hist
+                    else:
+                        combined = df
+                    _safe_to_parquet(combined, path)
+                    n = len(combined)
+                    del combined
             elif name.startswith("rosters_"):
                 # nflverse seasonal roster release → the canonical rosters_{season}.parquet
                 # consumed across ml/ (squad, fantasy, matchup_engine, …). Align the release
@@ -266,9 +272,23 @@ def rebuild_light(log=_default_log) -> dict:
     try:
         seasons = sorted({int(p.stem.split("_")[1]) for p in RAW.glob("pbp_*.parquet")})
         from engine.styles import build_team_styles
-        build_team_styles(seasons=seasons)
-        out["team_styles"] = f"ok ({seasons})"
-        log(f"  team_styles rebuilt for {seasons}")
+        # Rebuild ONLY the current season and splice it into the committed table. Every metric
+        # and label in team_styles is computed within a season, so prior seasons never change
+        # here (code changes reach them via the committed build that each deploy re-syncs).
+        # Rebuilding all eight seasons loaded ~1.1 GB of PBP into the server process every
+        # morning for a result identical to the file already on disk — most of a $20 Railway bill.
+        cur = max(seasons)
+        path = PROC / "team_styles.parquet"
+        old = pd.read_parquet(path) if path.exists() else pd.DataFrame()
+        new = build_team_styles(seasons=[cur])              # writes the parquet with just `cur`
+        if len(old) and "season" in old.columns:
+            keep = old[old["season"] != cur]
+            merged = pd.concat([keep, new], ignore_index=True)
+            _safe_to_parquet(merged, path)
+            out["team_styles"] = f"ok ({cur} rebuilt, {sorted(keep['season'].unique().tolist())} kept)"
+        else:
+            out["team_styles"] = f"ok ({cur})"
+        log(f"  team_styles: {out['team_styles']}")
     except Exception as e:
         out["team_styles"] = f"error: {str(e)[:200]}"
         log(f"  team_styles FAILED — {e}", "WARN")
@@ -304,7 +324,7 @@ def run(season: int, log=_default_log, skip_download: bool = False, light: bool 
     log(f"Refresh start — season {season}{' (light: availability only)' if light else ''}")
 
     if light:
-        files = download_nflverse(season, log, only=LIGHT_FILES + (f"rosters_{season}",))
+        files = download_nflverse(season, log, only=LIGHT_FILES + (f"rosters_{season}",), light_only=True)
         rebuild = rebuild_roster(log)
     else:
         files = {} if skip_download else download_nflverse(season, log)
