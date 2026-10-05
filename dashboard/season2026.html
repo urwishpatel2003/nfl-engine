@@ -1702,7 +1702,8 @@ function ppGameCard(g, lines){
     : g.started ? `<span style="color:var(--good)">● in progress</span>`
     : lines ? (g.lines ? `<span style="color:var(--good)">● ${g.lines} book lines</span>` : `<span class="mk" title="${esc(g.lines_error||'')}">no book lines yet</span>`) : '';
   const nBest = (g._best||0);
-  return `<details class="ppgame" id="ppg-${g.game_id}" ${nBest?'open':''}>
+  // props are shown on open for every game still to be played; played games stay collapsed
+  return `<details class="ppgame" id="ppg-${g.game_id}" ${(nBest||!g.started)?'open':''}>
     <summary><div class="ppg-tms"><img src="${g.away_logo}" onerror="this.style.visibility='hidden'"><b>${g.away}</b><span class="mk">@</span><img src="${g.home_logo}" onerror="this.style.visibility='hidden'"><b>${g.home}</b></div>
       <div class="ppg-meta"><span>${esc(g.gameday||'')} ${esc(g.gametime||'')}</span><span>model ${pred}</span>${status}${nBest?`<span class="ppbadge lean-o" style="margin:0">${nBest} lean${nBest>1?'s':''}</span>`:''}</div>
       <span class="ppg-more">details ›</span></summary>
@@ -1765,7 +1766,7 @@ async function viewProps(params){
   d.games.forEach(g=>{ g._best=perGame[g.game_id]||0; });
   PP_ROWS=[];
   body.innerHTML = oddsBar + strip
-    + `<div class="note">${nOpen} of ${d.games.length} games still to kick off. Click a game to open its two tables; every row prices the book line (or the model's own line when the book has none) as over/under with fair odds.</div>`
+    + `<div class="note">${nOpen} of ${d.games.length} games still to kick off — their props are shown below (played games are collapsed; click to open). Every row prices the book line (or the model's own line when the book has none) as over/under with fair odds.</div>`
     + `<div class="ppgames">${d.games.map(g=>ppGameCard(g,lines)).join('')}</div>`;
   PP_ROWS.forEach((_,i)=>{ if(document.getElementById('pp-'+i)) ppUpdate(i); });   // prime all rows
 }

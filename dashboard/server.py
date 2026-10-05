@@ -2833,7 +2833,13 @@ def _daily_scheduler():
         if age >= stale_h:
             print(f"[boot] last refresh {age:.1f}h old (>= {stale_h}h) — refreshing now")
             _t.sleep(15)                     # let gunicorn finish binding first
-            _start_refresh(season)
+            _start_refresh(season)           # (warms the props board when it finishes)
+        else:
+            # No refresh due: pre-build the week's props board now, so the page shows the
+            # props the moment it is opened instead of a two-minute cold build.
+            _t.sleep(15)
+            print(f"[boot] props board: {warm_props_slate()}", flush=True)
+            _release_memory()
     except Exception as e:
         print(f"[boot] catch-up refresh check failed: {e}")
     # Between the daily full refresh, LIGHT availability pulls (injuries + depth charts +
