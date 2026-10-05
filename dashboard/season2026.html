@@ -1864,7 +1864,7 @@ function schCard(g){
     <div class="gc-row"><span>Vegas line${g.line_source==='live'?' <span style="color:var(--good);font-size:9px;font-weight:700">● LIVE</span>':''}</span><b>${veg}</b></div>
     ${blendRow}
     ${edgeRow}
-    <div class="gc-row"><span>Total · model / Vegas</span><b>${pred?g.pred_total.toFixed(1):'—'} / ${g.vegas_total??'—'}</b></div>
+    <div class="gc-row"><span>Total${g.vegas_total!=null&&!g.total_pick?' <span style="color:var(--muted);font-size:9.5px" title="the model total is anchored to the market total — its own total carried no signal against the line (25-37 through week 4), so no totals pick is issued">· market-anchored, no pick</span>':' · model / Vegas'}</span><b>${pred?g.pred_total.toFixed(1):'—'}${g.vegas_total!=null&&!g.total_pick?'':` / ${g.vegas_total??'—'}`}</b></div>
     ${totalRow}
     ${injPts>0?`<div class="gc-row"><span>⚕ injury adjust</span><b>−${injPts.toFixed(1)} pts</b></div>`:''}
     ${fin}
@@ -1962,8 +1962,8 @@ async function viewRecord(params){
   const tiles = `<div class="rtiles">
     ${recTile('ATS · all games','model side vs the spread, every game', S.ats_all, be)}
     ${recTile('ATS · top-5 picks',`the five submitted each week${S.ats_top_fill&&S.ats_top_fill.n?` · edge ${S.ats_top_edge.w}-${S.ats_top_edge.l}, fillers ${S.ats_top_fill.w}-${S.ats_top_fill.l}`:''}`, S.ats_top, be)}
-    ${recTile('Totals · all games','Over/Under, model vs the line', S.ou_all, be)}
-    ${recTile('Totals · confident',`model prob ≥ ${fP(d.rules.total_conf)}`, S.ou_conf, be)}
+    ${recTile('Totals · all games','Over/Under, weeks 1–4 · retired: the model total is now the market total (no signal vs the line)', S.ou_all, be)}
+    ${recTile('Totals · confident',`model prob ≥ ${fP(d.rules.total_conf)} · weeks 1–4, retired`, S.ou_conf, be)}
     ${recTile('Moneyline · all games','model favorite at the posted price', S.ml_all, 0.5)}
     ${recTile('Moneyline · value',`model prob ≥ market +${Math.round(d.rules.ml_value*100)} pts`, S.ml_value, 0.5)}
   </div>`;

@@ -1243,10 +1243,16 @@ def _adjusted_prediction(home: str, away: str, neutral: bool = False, unavail=No
         return res
     imp = {home: injury_impact(home, unavail), away: injury_impact(away, unavail)}
     sch = scheme_matchup(home, away)
-    res["pred_home_score"] = round(res["pred_home_score"] - imp[home]["pts"] + sch["home_delta"], 1)
-    res["pred_away_score"] = round(res["pred_away_score"] - imp[away]["pts"] + sch["away_delta"], 1)
-    res["pred_margin"] = round(res["pred_home_score"] - res["pred_away_score"], 1)
-    res["pred_total"] = round(res["pred_home_score"] + res["pred_away_score"], 1)
+    hs = res["pred_home_score"] - imp[home]["pts"] + sch["home_delta"]
+    as_ = res["pred_away_score"] - imp[away]["pts"] + sch["away_delta"]
+    margin = hs - as_
+    if res.get("total_source") == "market":
+        # injuries and scheme move the MARGIN; the total stays on the market line (which
+        # already prices the absences) so this page and the Schedule agree on every score
+        hs, as_ = (res["pred_total"] + margin) / 2, (res["pred_total"] - margin) / 2
+    res["pred_home_score"], res["pred_away_score"] = round(hs, 1), round(as_, 1)
+    res["pred_margin"] = round(margin, 1)
+    res["pred_total"] = round(hs + as_, 1)
     _wp = float(1 / (1 + np.exp(-res["pred_margin"] / 13.5 * np.pi / np.sqrt(3))))
     res["home_win_prob"], res["away_win_prob"] = round(_wp, 3), round(1 - _wp, 3)
     res["injury_impact"] = imp
@@ -1547,11 +1553,18 @@ def _finalize_slate(base_games):
         g["push_prob"] = a["push"]
         g["blend_margin"] = round((1 - w) * g["pred_margin"] + w * g["vegas_spread"], 1)
         g["blend_weight"] = w
-        if g.get("pred_total") is not None and g.get("vegas_total") is not None:
+        # Totals: no pick. The model's total is anchored to the market total (see
+        # ml.matchup_engine.project_game) because its own total carried no signal against
+        # the line (25-37 through week 4, lean right 40%). A pick is issued only if the two
+        # still differ by 0.5+ (a line that moved after the slate was predicted).
+        if g.get("pred_total") is not None and g.get("vegas_total") is not None \
+                and abs(float(g["pred_total"]) - float(g["vegas_total"])) >= 0.5:
             tp = _total_prob(g["pred_total"], g["vegas_total"])
             over = tp["over"] >= tp["under"]
             g["total_pick"] = "Over" if over else "Under"
             g["total_prob"] = tp["over"] if over else tp["under"]
+        else:
+            g["total_pick"] = None; g["total_prob"] = None
     _mark_early(games)
     _rank_top5(games, [])
     return games, odds_status
@@ -1754,9 +1767,15 @@ def _slate(season: int, week: int) -> dict:
             # neutral site removes home field (via project_game); travel/weather nudge each score
             pred = _adjusted_prediction(home, away, neutral=ctx["neutral"], unavail=unavail)
             if "error" not in pred:
-                hs = round(pred["pred_home_score"] + ctx["home_delta"], 1)
-                as_ = round(pred["pred_away_score"] + ctx["away_delta"], 1)
+                hs = pred["pred_home_score"] + ctx["home_delta"]
+                as_ = pred["pred_away_score"] + ctx["away_delta"]
                 margin = round(hs - as_, 1)
+                # the context deltas (weather, travel, rest) may move the margin; the TOTAL
+                # stays anchored to the market line (see ml.matchup_engine.project_game)
+                if pd.notna(g.get("total_line")):
+                    tot = float(g["total_line"])
+                    hs, as_ = (tot + margin) / 2, (tot - margin) / 2
+                hs, as_ = round(hs, 1), round(as_, 1)
                 wp = float(1 / (1 + np.exp(-margin / 13.5 * np.pi / np.sqrt(3))))
                 rec.update({
                     "pred_home": hs, "pred_away": as_,
@@ -2420,7 +2439,8 @@ def clear_caches(scope: str = "full"):
     _DEPTH_CACHE.clear()
     _PROJ_CACHE.clear()
     _SCHED_PRED.clear()
-    for mod, attr in [("ml.matchup_engine", "_UNITS"), ("ml.matchup_engine", "_CAL"), ("ml.squad", "_PCT_CACHE"),
+    for mod, attr in [("ml.matchup_engine", "_UNITS"), ("ml.matchup_engine", "_CAL"), ("ml.matchup_engine", "_MT_CACHE"),
+                      ("ml.squad", "_PCT_CACHE"),
                       ("ml.squad", "_META_CACHE"), ("ml.squad", "_PBP_AGG"), ("ml.squad", "_SKILL_CACHE"),
                       ("ml.projections", "_PROFILE_CACHE"), ("ml.projections", "_QBDEPTH_CACHE"),
                       ("ml.projections", "_RANK_CACHE"), ("ml.projections", "_TV_CACHE")]:

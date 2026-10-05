@@ -277,6 +277,29 @@ def team_units() -> pd.DataFrame:
 
 
 # ── unit-vs-unit points model ───────────────────────────────────────
+_MT_CACHE = None
+
+
+def _market_total(home: str, away: str):
+    """The posted total for this season's next unplayed game between these teams (either
+    venue order), or None. Cached per refresh (ml/refresh rewrites schedules; the server
+    resets _MT_CACHE with the other engine caches)."""
+    global _MT_CACHE
+    if _MT_CACHE is None:
+        try:
+            from ml.current import state
+            s = pd.read_parquet(RAW / "schedules.parquet",
+                                columns=["season", "home_team", "away_team", "home_score", "total_line", "week"])
+            s = s[(s["season"] == state()["season"]) & s["home_score"].isna() & s["total_line"].notna()]
+            s = s.sort_values("week")
+            _MT_CACHE = {}
+            for r in s.itertuples():
+                _MT_CACHE.setdefault((r.home_team, r.away_team), float(r.total_line))
+        except Exception:
+            _MT_CACHE = {}
+    return _MT_CACHE.get((home, away), _MT_CACHE.get((away, home)))
+
+
 def _raw_project(home: str, away: str, neutral: bool = False, unit_adj: dict = None):
     """Everything up to the UNCALIBRATED margin: {raw_margin, hfa, total, u}. None if unknown."""
     u = team_units()
@@ -319,6 +342,17 @@ def project_game(home: str, away: str, neutral: bool = False, unit_adj: dict = N
         cal = c["margin"]
         final_margin = hfa + cal * (raw_margin - hfa)
         total = raw_total if c["total_mean"] is None else c["total_mean"] + c["total"] * (raw_total - c["total_mean"])
+        # TOTAL = THE MARKET TOTAL when one is posted. Measured on the 62 locked games of
+        # 2026 weeks 1-4: the model's total missed by 11.7 pts/game vs the market's 10.8,
+        # correlated 0.26 with the result vs the market's 0.40, and the DIRECTION of its
+        # disagreement with the market was right 40% of the time (corr -0.02) — no signal
+        # at any disagreement size. The market total is the better estimate, so every score,
+        # box score and Kalshi price uses it; the model keeps the margin, where its top-5
+        # edge lives. Before a line is posted the calibrated model total stands in.
+        mt = _market_total(home, away)
+        total_src = "model"
+        if mt is not None:
+            total, total_src = float(mt), "market"
         home_pts = (total + final_margin) / 2
         away_pts = (total - final_margin) / 2
         wp = float(1 / (1 + np.exp(-final_margin / 13.5 * np.pi / np.sqrt(3))))
@@ -335,7 +369,7 @@ def project_game(home: str, away: str, neutral: bool = False, unit_adj: dict = N
             "home": home, "away": away,
             "pred_home_score": round(home_pts, 1), "pred_away_score": round(away_pts, 1),
             "pred_margin": round(final_margin, 1), "pred_total": round(total, 1),
-            "raw_margin": round(raw_margin, 1), "raw_total": round(raw_total, 1),
+            "raw_margin": round(raw_margin, 1), "raw_total": round(raw_total, 1), "total_source": total_src,
             "calibration": round(cal, 3), "total_calibration": round(c["total"], 3),
             "home_win_prob": round(wp, 3), "away_win_prob": round(1 - wp, 3),
             "units": {home: edges(home, away), away: edges(away, home)},
