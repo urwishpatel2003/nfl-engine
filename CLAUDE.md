@@ -139,6 +139,13 @@ Refresh is exposed at `POST /api/refresh` (guarded by the `REFRESH_TOKEN` env va
 
 The dashboard (`dashboard/season2026.html`) is a hash-routed SPA: Rankings, Team profile
 (`/api/team_profile`), Trends (`/api/team_trends`), Matchup (`/api/matchup_full`), Refresh.
+Betting > Player Props (`/api/props_slate`) is schedule-driven like Schedule & Picks: every game
+of the week, model props per player (`ml/props.py`), live book lines merged per event
+(`ml/odds.event_props`, one Odds-API request per game, cached 30 min), and a "best props" strip
+of markets where the model beats the vig-free book price by ≥5 pts. A cold week builds in a
+background thread (the route answers 202 + progress; the page polls) because 16 box scores
+exceed the gunicorn timeout; the refresh job pre-warms the current week (`warm_props_slate`).
+Props are leans, not graded picks — there is no props ledger.
 
 ## Kalshi (Betting > Kalshi tab)
 

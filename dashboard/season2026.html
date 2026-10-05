@@ -383,6 +383,19 @@
   .ppbadge{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;margin-left:6px}
   .ppbadge.lean-o{background:#0f2a1c;color:#7fe3ad}.ppbadge.lean-u{background:#2a1620;color:#f2a1bb}
   .ppbadge.lean-n{background:var(--panel2);color:var(--muted);border:1px solid var(--line)}
+  /* props board (one <details> per game) */
+  .ppgames{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+  .ppgame{background:var(--panel);border:1px solid var(--line);border-radius:12px}
+  .ppgame[open]{border-color:#2f4a78}
+  .ppgame summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:14px;padding:12px 14px;flex-wrap:wrap}
+  .ppgame summary::-webkit-details-marker{display:none}
+  .ppgame summary:hover{background:var(--panel2);border-radius:12px}
+  .ppg-tms{display:flex;align-items:center;gap:7px;font-size:14px;min-width:150px}
+  .ppg-tms img{width:26px;height:26px;object-fit:contain}
+  .ppg-meta{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);flex:1;align-items:center}
+  .ppg-more{font-size:11px;color:var(--muted);margin-left:auto}
+  .ppgame[open] .ppg-more{display:none}
+  .ppg-body{padding:0 14px 14px}
   /* season win totals */
   .wt img{width:24px;height:24px;object-fit:contain;vertical-align:middle}
   .wbig{font-size:17px;font-weight:800;font-variant-numeric:tabular-nums}
@@ -1668,14 +1681,102 @@ function ppRows(players){
   });
   return html;
 }
+// The board: every game of the week from the schedule (default = current week), model props per
+// player, live book lines merged per event, and one strip of the slate's best leans — the same
+// shape as Schedule & Picks. A single custom matchup is still reachable (#/props?home=&away=).
+function ppLeanChip(x){
+  const ln = x.market==='anytime_td' ? '' : ` ${x.line}`;
+  const bk = x.book_odds!=null ? ` · book ${ppOdds(x.book_odds)}` : '';
+  return `<div class="tp" style="border-color:${x.side==='UNDER'?'#5a2a3a':'#235a3c'}" onclick="document.getElementById('ppg-${x.game_id}').open=true;document.getElementById('ppg-${x.game_id}').scrollIntoView({behavior:'smooth',block:'start'})" title="model ${Math.round(x.prob*100)}% vs vig-free book ${Math.round((x.book_prob||0)*100)}%">
+    <span class="rk" style="background:${x.side==='UNDER'?'#9f3a5a':'#1f8a55'}">${x.side==='YES'?'TD':x.side[0]}</span>
+    <b>${esc(x.player)}</b>&nbsp;<span class="mk">${x.pos} · ${x.team}</span>&nbsp;${x.side==='YES'?'anytime TD':x.side.toLowerCase()+ln+' '+esc(x.label)}
+    &nbsp;<span class="ppodds">${Math.round(x.prob*100)}%</span>${bk}&nbsp;<span class="ppbadge lean-${x.side==='UNDER'?'u':'o'}">+${(x.edge*100).toFixed(0)}%</span>
+    &nbsp;<span class="mk" style="font-size:10.5px">${x.away}@${x.home}</span></div>`;
+}
+function ppGameCard(g, lines){
+  const head=`<tr><th>Player</th><th>Market</th><th class="r">Proj</th><th class="c">${lines&&g.lines?'Book line':'Line'}</th><th>Model lean · fair odds${lines&&g.lines?' · book · +EV':''}</th></tr>`;
+  const teamBlock=(t)=>`<div class="bxs" style="font-size:12.5px;margin:12px 0 4px">${esc(META[t]?META[t].name:t)}</div>
+    <div style="overflow-x:auto"><table class="pptbl"><thead>${head}</thead><tbody>${ppRows((g.teams||{})[t]||[])}</tbody></table></div>`;
+  const pred = g.pred ? `${g.away} ${Math.round(g.pred.away)} — ${Math.round(g.pred.home)} ${g.home}` : '—';
+  const status = g.final ? `<span class="mk">Final ${g.away} ${g.away_score} — ${g.home_score} ${g.home}</span>`
+    : g.started ? `<span style="color:var(--good)">● in progress</span>`
+    : lines ? (g.lines ? `<span style="color:var(--good)">● ${g.lines} book lines</span>` : `<span class="mk" title="${esc(g.lines_error||'')}">no book lines yet</span>`) : '';
+  const nBest = (g._best||0);
+  return `<details class="ppgame" id="ppg-${g.game_id}" ${nBest?'open':''}>
+    <summary><div class="ppg-tms"><img src="${g.away_logo}" onerror="this.style.visibility='hidden'"><b>${g.away}</b><span class="mk">@</span><img src="${g.home_logo}" onerror="this.style.visibility='hidden'"><b>${g.home}</b></div>
+      <div class="ppg-meta"><span>${esc(g.gameday||'')} ${esc(g.gametime||'')}</span><span>model ${pred}</span>${status}${nBest?`<span class="ppbadge lean-o" style="margin:0">${nBest} lean${nBest>1?'s':''}</span>`:''}</div>
+      <span class="ppg-more">details ›</span></summary>
+    <div class="ppg-body">${g.error?`<div class="note warn">${esc(g.error)}</div>`:''}
+      ${g.teams&&g.teams[g.away]?teamBlock(g.away):''}${g.teams&&g.teams[g.home]?teamBlock(g.home):''}
+      <div style="margin-top:8px"><a href="#/matchup?home=${g.home}&away=${g.away}" style="font-size:12px">full matchup breakdown ›</a></div></div>
+  </details>`;
+}
 async function viewProps(params){
+  await ensureRankings();
+  if(params&&params.get('home')&&params.get('away')) return viewPropsMatchup(params);
+  const qs=new URLSearchParams();
+  if(params.get('season')) qs.set('season',params.get('season'));
+  if(params.get('week'))   qs.set('week',params.get('week'));
+  const lines = params.get('lines')!=='0';                    // live book lines by default, like the picks board
+  if(lines) qs.set('lines','1');
+  app().innerHTML=`<div class="pad">
+    <div class="viewhead">
+      <div class="ttl">Player Props <span>every game of the week · model lines vs the live book</span></div>
+      <div style="display:flex;gap:8px">
+        <select id="ppSeason" class="pick" style="min-width:110px"></select>
+        <select id="ppWeek" class="pick" style="min-width:120px"></select>
+      </div>
+    </div>
+    <div id="ppBody"><div class="loading">Projecting every box score on the slate${lines?' + fetching live book lines':''}… (first load ~20s)</div></div>
+  </div>`;
+  // a cold week builds in the background on the server (16 box scores); poll until it is cached
+  let d=await j('/api/props_slate?'+qs.toString());
+  while(d && d.building){
+    const bd=document.getElementById('ppBody'); if(!bd) return;              // user navigated away
+    bd.innerHTML=`<div class="loading">Projecting the slate… ${d.done||0} of ${d.total||'?'} games done${lines?' — book lines load once the board is built':''}</div>`;
+    await new Promise(r=>setTimeout(r,2500));
+    d=await j('/api/props_slate?'+qs.toString());
+  }
+  const ss=document.getElementById('ppSeason'), sw=document.getElementById('ppWeek');
+  if(!ss) return;
+  ss.innerHTML=(d.seasons||[]).map(s=>`<option value="${s}" ${s==d.season?'selected':''}>${s} season</option>`).join('');
+  sw.innerHTML=(d.weeks||[]).map(w=>`<option value="${w}" ${w==d.week?'selected':''}>Week ${w}</option>`).join('');
+  ss.onchange=()=>go(`#/props?season=${ss.value}`);
+  sw.onchange=()=>go(`#/props?season=${ss.value}&week=${sw.value}`);
+  const body=document.getElementById('ppBody');
+  if(d.error){ body.innerHTML=`<div class="note warn">${esc(d.error)}</div>`; return; }
+  if(!d.games||!d.games.length){ body.innerHTML=`<div class="note warn">No games found for this week.</div>`; return; }
+  const os=d.odds_status||{}, best=d.best||[], minE=Math.round(((d.rules||{}).min_edge||0.05)*100);
+  const credits = os.remaining_credits!=null?` · ${esc(''+os.remaining_credits)} credits left`:'';
+  const oddsBar = !lines
+    ? `<div class="note" style="margin:0 0 12px">Model lines only. <a href="#/props?season=${d.season}&week=${d.week}">Load live book lines</a> (one odds-API request per game, cached 30 min).</div>`
+    : os.error ? `<div class="note warn" style="margin:0 0 12px">Live lines unavailable: ${esc(os.error)}. Showing model lines only — enter a book number in any row to price it.</div>`
+    : os.events ? `<div class="note" style="margin:0 0 12px"><span style="color:var(--good)">● LIVE</span> Book lines on ${os.events} game${os.events>1?'s':''} (${os.markets} player markets, consensus across US books${credits}).${os.missing&&os.missing.length?` Not posted yet: ${esc(os.missing.join(', '))}.`:''} Lines refresh every 30 minutes; the model side re-prices if you edit a line.</div>`
+    : `<div class="note" style="margin:0 0 12px">No player props posted for this week yet — books post them close to game day. Showing model lines${credits}.</div>`;
+  const nOpen = d.games.filter(g=>!g.started).length;
+  const strip = best.length ? `<div class="card" style="padding:14px">
+      <h2 style="margin:0 0 10px">🎯 Best props <span>${best.length} of ${d.n_lined} book-lined markets where the model beats the vig-free price by ${minE}+ pts · ranked by edge</span></h2>
+      <div class="toppicks">${best.map(ppLeanChip).join('')}</div>
+      <div style="color:var(--muted);font-size:11px;margin-top:8px">The number is the model's probability on that side minus the book's vig-free probability. Props are priced from the same opponent-adjusted, availability-aware box scores as the matchup page, with league-typical game-to-game variance — a credible line, not a proven market-beater: these are leans to check, not graded picks. Anytime-TD edges keep the book's vig (one-sided market) so they read low.</div>
+    </div>`
+    : (lines && os.events ? `<div class="card" style="padding:14px"><h2 style="margin:0 0 6px">🎯 Best props <span>none clear the ${minE}-pt floor</span></h2><div class="note" style="margin:0">The model and the books agree on every lined market this week within ${minE} points of probability.</div></div>` : '');
+  // mark games that carry a lean so their card opens by default
+  const perGame={}; best.forEach(x=>{ perGame[x.game_id]=(perGame[x.game_id]||0)+1; });
+  d.games.forEach(g=>{ g._best=perGame[g.game_id]||0; });
+  PP_ROWS=[];
+  body.innerHTML = oddsBar + strip
+    + `<div class="note">${nOpen} of ${d.games.length} games still to kick off. Click a game to open its two tables; every row prices the book line (or the model's own line when the book has none) as over/under with fair odds.</div>`
+    + `<div class="ppgames">${d.games.map(g=>ppGameCard(g,lines)).join('')}</div>`;
+  PP_ROWS.forEach((_,i)=>{ if(document.getElementById('pp-'+i)) ppUpdate(i); });   // prime all rows
+}
+async function viewPropsMatchup(params){
   await ensureRankings();
   const h=(params&&params.get('home'))||RANKINGS[0].team;
   const a=(params&&params.get('away'))||RANKINGS[RANKINGS.length-1].team;
   const neutral=(params&&params.get('neutral'))==='1';
   const lines=(params&&params.get('lines'))==='1';
   app().innerHTML=`<div class="pad"><div class="card">
-    <h2>Player Props <span>projected stat lines + over/under · pick a matchup</span></h2>
+    <h2>Player Props <span>custom matchup · <a href="#/props">back to the weekly board</a></span></h2>
     <div class="selrow"><select id="ppAway">${teamOptions(a)}</select><span class="at">@</span><select id="ppHome">${teamOptions(h)}</select></div>
     <div class="opts"><input type="checkbox" id="ppNeutral" ${neutral?'checked':''}><label for="ppNeutral">Neutral site</label></div>
     <button id="ppGo">Project props</button>

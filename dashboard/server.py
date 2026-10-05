@@ -13,6 +13,7 @@ Then open: http://localhost:5000
 
 import sys
 import json
+import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -2368,6 +2369,241 @@ def api_props():
     return jsonify(_native(data))
 
 
+_PROPS_SLATE = {}       # (season, week, availability signature) -> per-game model props; cleared on refresh
+PROPS_MIN_EDGE = 0.05   # model prob must beat the vig-free book price by 5 pts to make the "best props" strip
+PROPS_STRIP_N = 12      # how many leans the strip carries
+
+
+def _price_market(m: dict) -> None:
+    """Attach the model's side, probability and fair odds to a market row — and, when the book
+    has a line, the vig-free book probability and the model's edge against it. Edge is the
+    same number the single-matchup page shows (+EV badge), computed once here so the whole
+    slate can be ranked. Over/Under markets price the book's line; anytime TD prices the
+    straight yes price (one-sided market, so its edge keeps the book's vig and reads a little
+    low — conservative on purpose)."""
+    from ml.props import prob_over, fair_odds
+    book = m.get("book")
+    if m["dist"] == "prob":
+        p = float(m["proj"])
+        m.update({"side": "YES", "prob": round(p, 3), "fair": fair_odds(p)})
+        if book and book.get("yes_odds") is not None:
+            implied = _implied(book["yes_odds"])
+            m["book_prob"] = round(implied, 3)
+            m["edge"] = round(p - implied, 3)
+        return
+    line = book.get("line") if book else None
+    if line is None:                                     # no book line: price the model's own half-point line
+        line = round(float(m["proj"]) * 2) / 2
+        m["line"] = line
+    r = prob_over(m, float(line))
+    over_side = r["over"] >= r["under"]
+    prob = r["over"] if over_side else r["under"]
+    m.update({"line": float(line), "side": "OVER" if over_side else "UNDER",
+              "prob": round(prob, 3), "fair": fair_odds(prob), "push": r["push"],
+              "p_over": r["over"], "p_under": r["under"]})
+    if book and book.get("over_odds") is not None and book.get("under_odds") is not None:
+        po, pu = _implied(book["over_odds"]), _implied(book["under_odds"])
+        novig = po / (po + pu)
+        edge_o, edge_u = r["over"] - novig, r["under"] - (1 - novig)
+        if edge_o >= edge_u:
+            m.update({"side": "OVER", "prob": r["over"], "fair": fair_odds(r["over"]),
+                      "book_prob": round(novig, 3), "book_odds": book["over_odds"], "edge": round(edge_o, 3)})
+        else:
+            m.update({"side": "UNDER", "prob": r["under"], "fair": fair_odds(r["under"]),
+                      "book_prob": round(1 - novig, 3), "book_odds": book["under_odds"], "edge": round(edge_u, 3)})
+
+
+def _implied(odds) -> float:
+    o = float(odds)
+    return (-o) / ((-o) + 100) if o < 0 else 100 / (o + 100)
+
+
+_PROPS_BUILD = {"key": None, "done": 0, "total": 0, "thread": None, "error": None}
+_PROPS_LOCK = threading.Lock()
+
+
+def _build_props_slate(season: int, week: int, key: tuple) -> None:
+    """Project every game of the week (model props only, no book lines) into _PROPS_SLATE[key],
+    counting progress in _PROPS_BUILD. Runs in a thread from the API, or inline from the
+    refresh job (pre-warm)."""
+    from ml.props import player_props
+    from ml.context import game_context
+    try:
+        for k in [k for k in _PROPS_SLATE if k[2] != key[2]]:   # availability moved → every cached slate is stale
+            _PROPS_SLATE.pop(k, None)
+        d, _ = _reg_weeks(season)
+        meta = team_meta()
+        dw = d[d["week"] == week]
+        sort_cols = [c for c in ["gameday", "gametime"] if c in dw.columns]
+        if sort_cols:
+            dw = dw.sort_values(sort_cols)
+        rows = [g for _, g in dw.iterrows()
+                if isinstance(g.get("home_team"), str) and isinstance(g.get("away_team"), str)]
+        _PROPS_BUILD.update(done=0, total=len(rows), error=None)
+        games = []
+        for g in rows:
+            home, away = g["home_team"], g["away_team"]
+            hm, am = meta.get(home, {}), meta.get(away, {})
+            ctx = game_context(home, away, g)
+            rec = {
+                "game_id": g.get("game_id"), "gameday": g.get("gameday"), "gametime": g.get("gametime"),
+                "home": home, "away": away,
+                "home_name": hm.get("team_name", home), "away_name": am.get("team_name", away),
+                "home_logo": hm.get("team_logo_espn", ""), "away_logo": am.get("team_logo_espn", ""),
+                "home_score": safe_json(g.get("home_score")), "away_score": safe_json(g.get("away_score")),
+                "final": bool(pd.notna(g.get("home_score"))), "neutral": ctx["neutral"],
+                "vegas_total": safe_json(g.get("total_line")), "vegas_spread": safe_json(g.get("spread_line")),
+            }
+            try:
+                pp = player_props(home, away, neutral=ctx["neutral"])
+                rec["pred"] = {"home": pp["pred"]["pred_home_score"], "away": pp["pred"]["pred_away_score"]}
+                rec["teams"] = pp["teams"]
+            except Exception as e:
+                rec["error"] = str(e)[:120]
+                rec["teams"] = {}
+            games.append(rec)
+            _PROPS_BUILD["done"] += 1
+        _PROPS_SLATE[key] = games
+    except Exception as e:
+        _PROPS_BUILD["error"] = str(e)[:160]
+        print(f"[props] slate build failed {season} wk{week}: {e}", flush=True)
+
+
+def _start_props_build(season: int, week: int, key: tuple) -> dict:
+    """Kick off the background build for `key` unless one is already running; return progress."""
+    with _PROPS_LOCK:
+        t = _PROPS_BUILD.get("thread")
+        if not (t and t.is_alive()):
+            _PROPS_BUILD.update(key=key, done=0, total=0, error=None)
+            th = threading.Thread(target=_build_props_slate, args=(season, week, key), daemon=True)
+            _PROPS_BUILD["thread"] = th
+            th.start()
+        return {"done": _PROPS_BUILD["done"], "total": _PROPS_BUILD["total"], "error": _PROPS_BUILD.get("error")}
+
+
+def warm_props_slate() -> str:
+    """Pre-build the current week's props board (called after each refresh, inside the refresh
+    thread) so the page opens from cache instead of a 16-game cold build."""
+    try:
+        s = schedules_df()
+        season = int(s["season"].max())
+        week = _current_week(season)
+        if week is None:
+            return "season complete"
+        key = (season, week, _avail_sig())
+        if key in _PROPS_SLATE:
+            return f"cached {season} wk{week}"
+        _build_props_slate(season, week, key)
+        return f"built {season} wk{week} ({_PROPS_BUILD['done']} games)"
+    except Exception as e:
+        return f"error: {str(e)[:120]}"
+
+
+@app.route('/api/props_slate')
+def api_props_slate():
+    """The Player Props board, built the way Schedule & Picks is: every game of a week from the
+    schedule (default = the current week), each with the model's per-player prop markets, and
+    the live book lines merged per event when `lines=1`. Each market carries the model's side,
+    probability, fair odds and — where the book has a number — the vig-free edge, so the page
+    can rank the whole slate's leans in one strip and show every game's table below it.
+
+    Credits: one Odds-API request per event (all markets at once), cached per event in
+    ml.odds for _TTL seconds; games that have kicked off are never fetched. The model
+    projections are cached per (season, week, availability signature) like the box scores."""
+    from ml.props import player_props
+    from ml.ledger import kickoff_utc
+    from datetime import datetime, timezone
+    s = schedules_df()
+    if s.empty:
+        return jsonify({"error": "no schedule data"}), 404
+    seasons = sorted(int(x) for x in s["season"].dropna().unique())
+    season = int(request.args.get('season', seasons[-1]))
+    d, weeks = _reg_weeks(season)
+    if not weeks:
+        return jsonify(_native({"season": season, "week": None, "seasons": seasons, "weeks": [], "games": []}))
+    default_week = (_current_week(season) if season == seasons[-1] else None) or weeks[0]
+    week = int(request.args.get('week', default_week))
+    want_lines = request.args.get('lines') == '1'
+
+    key = (season, week, _avail_sig())
+    if key not in _PROPS_SLATE:
+        # A cold week is 16 box scores at ~2-6 s each — longer than the gunicorn timeout on
+        # Railway — so the build runs in a background thread and the page polls the progress
+        # (same pattern as the refresh). The daily refresh pre-warms the current week.
+        st = _start_props_build(season, week, key)
+        return jsonify(_native({"season": season, "week": week, "seasons": seasons, "weeks": weeks,
+                                "building": True, "done": st["done"], "total": st["total"]})), 202
+
+    # deep-ish copy so the cached model rows never carry book lines from a previous request
+    games = [{**g, "teams": {t: [{**p, "markets": [dict(m) for m in p["markets"]]} for p in pls]
+                             for t, pls in g.get("teams", {}).items()}} for g in _PROPS_SLATE[key]]
+    now = datetime.now(timezone.utc)
+    for g in games:
+        ko = kickoff_utc(g.get("gameday"), g.get("gametime"))
+        g["started"] = bool(g.get("final") or (ko is not None and now >= ko))
+    odds_status = {"requested": want_lines, "events": 0, "markets": 0}
+    if want_lines:
+        from ml.odds import event_props, have_key, _namekey
+        if not have_key():
+            odds_status["error"] = "ODDS_API_KEY not set on the server"
+        else:
+            missing = []
+            for g in games:
+                if g["started"]:
+                    continue
+                props_map, st = event_props(g["home_name"], g["away_name"])
+                if st.get("remaining_credits") is not None:
+                    odds_status["remaining_credits"] = st["remaining_credits"]
+                if st.get("error"):
+                    g["lines_error"] = st["error"]
+                    missing.append(f"{g['away']}@{g['home']}")
+                    continue
+                n = 0
+                for team in (g["home"], g["away"]):
+                    for pl in g["teams"].get(team, []):
+                        pk = _namekey(pl["name"])
+                        for m in pl["markets"]:
+                            book = props_map.get((pk, m["market"]))
+                            if book:
+                                m["book"] = book
+                                n += 1
+                g["lines"] = n
+                odds_status["events"] += 1
+                odds_status["markets"] += n
+            if missing and odds_status["events"] == 0:
+                # every unstarted game failed the same way → surface it once, not per card
+                odds_status["error"] = next(g["lines_error"] for g in games if g.get("lines_error"))
+            elif missing:
+                odds_status["missing"] = missing
+
+    # price every market and collect the slate-wide leans (book-lined markets only)
+    leans = []
+    for g in games:
+        for team, pls in g.get("teams", {}).items():
+            opp = g["away"] if team == g["home"] else g["home"]
+            for pl in pls:
+                for m in pl["markets"]:
+                    _price_market(m)
+                    # a near-zero projection (a back-up the book still lists) prices "under" at
+                    # ~100% — that is the model having no role for him, not an edge
+                    thin = (m["dist"] == "poisson" and m["proj"] < 0.5) or (m["dist"] == "normal" and m["proj"] < 5) \
+                        or (m["dist"] == "prob" and m["proj"] < 0.05)
+                    if m.get("edge") is not None and not g.get("started") and not thin:
+                        leans.append({"game_id": g["game_id"], "home": g["home"], "away": g["away"],
+                                      "team": team, "opp": opp, "player": pl["name"], "pos": pl["pos"],
+                                      "market": m["market"], "label": m["label"], "side": m["side"],
+                                      "line": m.get("line"), "proj": m["proj"], "prob": m["prob"],
+                                      "fair": m["fair"], "book_prob": m.get("book_prob"),
+                                      "book_odds": m.get("book_odds", (m.get("book") or {}).get("yes_odds")),
+                                      "edge": m["edge"], "books": (m.get("book") or {}).get("books")})
+    leans.sort(key=lambda x: -x["edge"])
+    best = [x for x in leans if x["edge"] >= PROPS_MIN_EDGE][:PROPS_STRIP_N]
+    return jsonify(_native({"season": season, "week": week, "seasons": seasons, "weeks": weeks,
+                            "games": games, "best": best, "n_lined": len(leans),
+                            "rules": {"min_edge": PROPS_MIN_EDGE, "strip_n": PROPS_STRIP_N},
+                            "odds_status": odds_status}))
+
+
 @app.route('/api/season')
 def api_season():
     """Season-long projections: team win totals (expected wins + fair O/U line + P(over) from the
@@ -2438,6 +2674,7 @@ def clear_caches(scope: str = "full"):
     _QB1 = _SQUAD = _INJ = _SCHED = _PFF_COMPARE = None
     _DEPTH_CACHE.clear()
     _PROJ_CACHE.clear()
+    _PROPS_SLATE.clear()
     _SCHED_PRED.clear()
     for mod, attr in [("ml.matchup_engine", "_UNITS"), ("ml.matchup_engine", "_CAL"), ("ml.matchup_engine", "_MT_CACHE"),
                       ("ml.squad", "_PCT_CACHE"),
@@ -2522,6 +2759,7 @@ def _run_refresh(season: int, light: bool = False):
         clear_caches("light" if ran_light else "full")
         _release_memory()
         log(f"picks ledger: {lock_current_week()}")   # freeze this week's picks on fresh data
+        log(f"props board: {warm_props_slate()}")     # pre-build the week's player props on fresh data
         _release_memory()
         _REFRESH_STATE["running"] = False
 

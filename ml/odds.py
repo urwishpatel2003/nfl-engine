@@ -36,7 +36,9 @@ _MKT = {
 }
 _REV = {v: k for k, v in _MKT.items()}
 
-_TTL = 600
+_TTL = 1800         # player props: one request per EVENT pulls all 11 markets (~11 credits), and the
+                    # props board asks for every game of the week at once, so a 30-min cache
+                    # caps a full week at ~150 credits per half hour, not per page view
 _GAME_TTL = 900     # game spreads/totals move slower pre-game; 15-min cache keeps credits sane
 _EVENTS = {"t": 0.0, "data": None}
 _PROPS = {}         # event_id -> {"t":, "data":, "meta":}
