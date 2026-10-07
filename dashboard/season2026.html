@@ -111,8 +111,25 @@
   .pr-cols .pr-od{flex-direction:row;gap:8px}
   .pr-cols .pr-odrow{grid-template-columns:22px 1fr 26px;gap:4px;flex:1}
   .pr-cols .pr-bar{height:5px}
-  /* rankings as team boxes (legacy) */
+  /* rankings as team boxes */
   .pr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-bottom:4px}
+  /* small boxes: 8 across on a laptop, 4 rows → the whole league in one viewport */
+  .pr-grid.sm{grid-template-columns:repeat(8,1fr);gap:8px}
+  @media(max-width:1180px){.pr-grid.sm{grid-template-columns:repeat(6,1fr)}}
+  @media(max-width:900px){.pr-grid.sm{grid-template-columns:repeat(4,1fr)}}
+  @media(max-width:560px){.pr-grid.sm{grid-template-columns:repeat(2,1fr)}}
+  .pr-card.sm{padding:6px 8px 6px;border-radius:9px}
+  .pr-card.sm .pc-rank-badge{top:5px;left:8px;font-size:11px}
+  .pr-card.sm .pc-logo-lg{width:30px;height:30px;margin:2px auto 3px}
+  .pr-card.sm .pc-team{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pr-card.sm .pc-qb{font-size:9.5px;margin-top:0}
+  .pr-card.sm .pc-wins{font-size:15px;margin:2px 0 3px}
+  .pr-card.sm .pc-wins span{font-size:9px}
+  .pr-card.sm .pc-od{gap:3px}
+  .pr-card.sm .pr-odrow{grid-template-columns:20px 1fr 24px;gap:4px}
+  .pr-card.sm .pr-odlbl{font-size:8px}
+  .pr-card.sm .pr-bar{height:5px}
+  .pr-card.sm .pr-odn{font-size:9.5px}
   .pr-card{background:var(--panel2);border:1px solid var(--line);border-top:3px solid var(--line);
            border-radius:12px;padding:14px 14px 13px;cursor:pointer;position:relative;text-align:center}
   .pr-card:hover{border-color:var(--accent)}
@@ -855,15 +872,29 @@ async function viewRankings(){
         <div class="pr-odrow"><span class="pr-odlbl">DEF</span><div class="pr-bar"><i style="width:${dfw}%;background:#3b82f6"></i></div><span class="pr-odn ${odClass(df)}">${df!=null?'#'+df:'—'}</span></div>
       </div></div>`; };
   const sorted=[...data].sort((a,b)=>a.rank-b.rank);
-  body = `<div class="pr-cols"><div>${sorted.slice(0,16).map(row).join('')}</div><div>${sorted.slice(16).map(row).join('')}</div></div>
-    <div class="epa-leg" style="margin-top:8px"><span>${RANK_TIERS.map(([lo,hi,l])=>`<i style="background:${TIER_COL[lo]}"></i>${l.replace(/^[^A-Za-z]+/,'')} #${lo}–${hi}`).join(' &nbsp; ')} · OFF / DEF = roster rank on each side · hover a row for the talent / results split</span></div>`;
+  // boxes, not a list: 32 small cards in one grid (8 × 4 on a laptop) so the whole league is on screen
+  const card=d=>{ const of=d.off_rank, df=d.def_rank, t=tierOf(d.rank)||[1];
+    const ofw=of!=null?Math.round((33-of)/32*100):0, dfw=df!=null?Math.round((33-df)/32*100):0;
+    const rtTip = d.perf_w ? `rating ${f1(d.rating)} = ${Math.round((1-d.perf_w)*100)}% roster talent ${f1(d.rating_talent)} + ${Math.round(d.perf_w*100)}% results ${d.rating_perf!=null?f1(d.rating_perf):'—'} (through week ${d.weeks_played}) · ${t[2]||''}` : `rating ${f1(d.rating)}`;
+    return `<div class="pr-card sm" title="${rtTip}" style="border-top-color:${vivid(d.color)}" onclick="go('#/team/${d.team}')">
+      <span class="pc-rank-badge" style="color:${TIER_COL[t[0]]||'var(--muted)'}">#${d.rank}</span>
+      <img class="pc-logo-lg" src="${d.logo}" onerror="this.style.visibility='hidden'">
+      <div class="pc-team">${esc(d.name||d.team)}</div>
+      <div class="pc-qb">${d.qb?esc(d.qb):d.team}</div>
+      <div class="pc-wins">${d.proj_wins!=null?d.proj_wins.toFixed(1):'—'}<span> W</span></div>
+      <div class="pc-od">
+        <div class="pr-odrow"><span class="pr-odlbl">OFF</span><div class="pr-bar"><i style="width:${ofw}%;background:#22c55e"></i></div><span class="pr-odn ${odClass(of)}">${of!=null?'#'+of:'—'}</span></div>
+        <div class="pr-odrow"><span class="pr-odlbl">DEF</span><div class="pr-bar"><i style="width:${dfw}%;background:#3b82f6"></i></div><span class="pr-odn ${odClass(df)}">${df!=null?'#'+df:'—'}</span></div>
+      </div></div>`; };
+  body = `<div class="pr-grid sm">${sorted.map(card).join('')}</div>
+    <div class="epa-leg" style="margin-top:8px"><span>${RANK_TIERS.map(([lo,hi,l])=>`<i style="background:${TIER_COL[lo]}"></i>${l.replace(/^[^A-Za-z]+/,'')} #${lo}–${hi}`).join(' &nbsp; ')} · W = projected wins · OFF / DEF = roster rank on each side · hover a box for the talent / results split</span></div>`;
   const pw=data.length?Math.round((data[0].perf_w||0)*100):0, wk=data.length?(data[0].weeks_played||0):0;
   app().innerHTML = `
     <div class="note">${wk?`<b>2026 rolling ranking · through week ${wk}</b> — roster talent (QB by multi-year EPA, skill / OL / pass-rush / coverage + coaching) blended with this season's <b>opponent-adjusted results</b>: rating = (1−w)·talent + w·performance with w = g/(g+4) per team (≈${pw}% results now, 50% by week 4, 75% by week 12 — the 4 was measured on 2021-25, see ml/current.py). Hover a rating to see both parts.`
       :`<b>2026 roster-talent ranking</b> — each team rated by the players on its current roster (QB by multi-year EPA, skill / OL / pass-rush / coverage) + coaching, <b>not</b> last year's results.`}
       <b>Proj wins</b> = expected 2026 wins; <b>OFF / DEF</b> = where the roster ranks on each side of the ball.
       Click a team for the full profile.</div>
-    <div class="pad"><div class="card"><h2>Power Rankings <span>2026 · ${wk?`roster talent + results through week ${wk}`:'roster talent'}, grouped by tier</span></h2>
+    <div class="pad"><div class="card" style="padding:12px 14px"><h2 style="margin-bottom:8px">Power Rankings <span>2026 · ${wk?`roster talent + results through week ${wk}`:'roster talent'} · rank colour = tier</span></h2>
       ${body}
     </div></div>`;
 }
