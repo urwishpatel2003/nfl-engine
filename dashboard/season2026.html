@@ -365,6 +365,8 @@
   .lgrow .pv{text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
   @media(max-width:560px){.lgrow{grid-template-columns:96px 54px 1fr 28px;font-size:11px}}
   .grid2 .rate,.grid3 .rate{grid-template-columns:1fr}            /* narrow cards: spider above the strips */
+  .grid2 .qbgrid{grid-template-columns:1fr}                         /* QB cards stack when beside the distribution */
+  .grid2 .mnum{grid-template-columns:repeat(2,1fr)}
   .grid2 .rsvg{max-width:280px}
   .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
   @media(max-width:1000px){.grid3{grid-template-columns:1fr}}
@@ -1834,16 +1836,19 @@ async function viewMatchup(home, away, neutral){
         <div class="tm"><img src="${r.home_logo}" onerror="this.style.visibility='hidden'"><div class="nm">${esc(r.home_name)}</div><div class="rec">${mRec(r,r.home)}</div><div class="pts">${r.pred_home_score.toFixed(1)}</div></div>
       </div>
       <div style="text-align:center;margin-top:12px"><span class="spreadpill"><span class="sk">Model</span>${fav} −${Math.abs(r.pred_margin).toFixed(1)}</span>
-        ${g.tightness?`<span class="chip" style="margin-left:8px">${esc(g.tightness)}${g.tempo?' · '+esc(g.tempo):''}</span>`:''}</div>
+        ${g.tightness?`<span class="chip" style="margin-left:8px">${esc(g.tightness)}${g.tempo?' · '+esc(g.tempo):''}</span>`:''}
+        <span class="chip" style="margin-left:8px">total ${Number(r.pred_total).toFixed(1)}${r.total_source==='market'?' (market)':''}</span></div>
+      ${(()=>{ const hp=Math.round(r.home_win_prob*100), ap=100-hp;
+        return `<div class="prob" style="margin-top:12px"><div class="probbar">
+          <div class="a" style="width:${ap}%;background:${r.away_color};justify-content:flex-start;padding-left:10px">${r.away} ${ap}%</div>
+          <div class="h" style="width:${hp}%;background:${r.home_color};justify-content:flex-end;padding-right:10px">${hp}% ${r.home}</div></div></div>`; })()}
     </div>
   </div>
   ${mNumber(r)}
-  ${mScore(r)}
   ${mMargin(r)}
-  ${mQBs(r)}
+  <div class="grid2">${mQBs(r)}${mDist(r)}</div>
   ${mRate(r)}
   ${situationalPanel(r)}
-  ${mDist(r)}
   ${mSchemes(r)}
   ${mForm(r)}
   ${mH2H(r)}
