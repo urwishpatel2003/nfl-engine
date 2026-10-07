@@ -315,16 +315,28 @@ def _raw_project(home: str, away: str, neutral: bool = False, unit_adj: dict = N
         return base + (unit_adj.get(team, {}).get(col, 0.0) if unit_adj else 0.0)
 
     def phase(off, deff, sign):
-        base = 0.5 * u.loc[off, "pf"] + 0.5 * u.loc[deff, "pa"]
-        nudge = 0.8 * ((uz(off, "z_off_pass") + uz(deff, "z_def_pass")) +
-                       0.6 * (uz(off, "z_off_rush") + uz(deff, "z_def_rush")))
-        return float(base + nudge + u.loc[off, "st"] + 0.4 * u.loc[off, "z_coaching"] + sign * hfa / 2)
+        """Expected points for `off` against `deff`, kept as named pieces so the matchup page
+        can show WHERE the margin comes from (the sum is the phase's points)."""
+        return {
+            "base": float(0.5 * u.loc[off, "pf"] + 0.5 * u.loc[deff, "pa"]),
+            "pass": float(0.8 * (uz(off, "z_off_pass") + uz(deff, "z_def_pass"))),
+            "rush": float(0.8 * 0.6 * (uz(off, "z_off_rush") + uz(deff, "z_def_rush"))),
+            "st": float(u.loc[off, "st"]),
+            "coaching": float(0.4 * u.loc[off, "z_coaching"]),
+            "hfa": float(sign * hfa / 2),
+        }
 
-    ph, pa_ = phase(home, away, +1), phase(away, home, -1)
+    ph_parts, pa_parts = phase(home, away, +1), phase(away, home, -1)
+    ph, pa_ = sum(ph_parts.values()), sum(pa_parts.values())
     pace_mult = (u.loc[home, "pace"] + u.loc[away, "pace"]) / (2 * lg_pace)
     total = (ph + pa_) * (0.85 + 0.15 * pace_mult)
     raw_margin = 0.55 * roster["pred_margin"] + 0.45 * (ph - pa_)
-    return {"raw_margin": raw_margin, "hfa": hfa, "total": total, "u": u}
+    # home-positive pieces of the RAW margin: roster talent (its own HFA held out) and the
+    # unit-matchup phases (HFA held out of them too) — HFA is reported once, as itself
+    parts = {"roster": 0.55 * (roster["pred_margin"] - hfa),
+             **{k: 0.45 * (ph_parts[k] - pa_parts[k]) for k in ("base", "pass", "rush", "st", "coaching")},
+             "hfa": hfa}
+    return {"raw_margin": raw_margin, "hfa": hfa, "total": total, "u": u, "parts": parts}
 
 
 def project_game(home: str, away: str, neutral: bool = False, unit_adj: dict = None) -> dict:
@@ -365,6 +377,13 @@ def project_game(home: str, away: str, neutral: bool = False, unit_adj: dict = N
                     "st": round(float(u.loc[off, "z_st"]), 2),
                     "coach": round(float(u.loc[off, "z_coaching"]), 2)}
 
+        # "Where the margin comes from": every non-HFA piece is shrunk by the market
+        # calibration (final = hfa + cal·(raw − hfa)), HFA is carried whole; the pieces sum
+        # to the final margin (home-positive points). Injuries and scheme are added on top
+        # by dashboard._adjusted_prediction.
+        comps = {k: round(cal * v, 2) for k, v in r["parts"].items() if k != "hfa"}
+        comps["hfa"] = round(hfa, 2)
+
         return {
             "home": home, "away": away,
             "pred_home_score": round(home_pts, 1), "pred_away_score": round(away_pts, 1),
@@ -373,6 +392,7 @@ def project_game(home: str, away: str, neutral: bool = False, unit_adj: dict = N
             "calibration": round(cal, 3), "total_calibration": round(c["total"], 3),
             "home_win_prob": round(wp, 3), "away_win_prob": round(1 - wp, 3),
             "units": {home: edges(home, away), away: edges(away, home)},
+            "components": comps,
         }
 
 

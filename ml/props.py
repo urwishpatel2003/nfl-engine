@@ -102,15 +102,17 @@ def player_props(home: str, away: str, neutral: bool = False) -> dict:
     for team in (home, away):
         t = m["teams"].get(team, {})
         players = []
+        # player_id (nflverse gsis id) rides along so the props record can grade a row
+        # against the play-by-play box score without a name match
         if t.get("qb"):
             q = t["qb"]
-            players.append({"name": q["name"], "pos": "QB", "markets": _qb_markets(q)})
+            players.append({"name": q["name"], "player_id": q.get("player_id"), "pos": "QB", "markets": _qb_markets(q)})
         for p in t.get("rush", []):
-            players.append({"name": p["name"], "pos": "RB", "markets": _rb_markets(p)})
+            players.append({"name": p["name"], "player_id": p.get("player_id"), "pos": "RB", "markets": _rb_markets(p)})
         for p in t.get("rec", []):
             if p["pos"] == "RB":                          # RBs already covered by the rush loop
                 continue
-            players.append({"name": p["name"], "pos": p["pos"], "markets": _rec_markets(p)})
+            players.append({"name": p["name"], "player_id": p.get("player_id"), "pos": p["pos"], "markets": _rec_markets(p)})
         out["teams"][team] = players
     return out
 

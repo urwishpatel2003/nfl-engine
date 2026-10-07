@@ -11,6 +11,7 @@ Usage:
 Then open: http://localhost:5000
 """
 
+import os
 import sys
 import json
 import threading
@@ -1260,6 +1261,9 @@ def _adjusted_prediction(home: str, away: str, neutral: bool = False, unavail=No
     res["scheme_matchup"] = sch
     res["unit_injuries"] = {t: {k: v for k, v in d.items() if abs(v) > 1e-9}
                             for t, d in unit_adj.items()}
+    if "components" in res:                       # the two second-order layers, same sign convention
+        res["components"]["injuries"] = round(-imp[home]["pts"] + imp[away]["pts"], 2)
+        res["components"]["scheme"] = round(sch["home_delta"] - sch["away_delta"], 2)
     return res
 
 
@@ -1398,7 +1402,43 @@ def _scheduled_game(home: str, away: str) -> dict:
         "div_game": bool(row.get("div_game")) if pd.notna(row.get("div_game")) else None,
         "stadium": safe_json(row.get("stadium")),
         "gameday": str(row.get("gameday")) if pd.notna(row.get("gameday")) else None,
+        "gametime": str(row.get("gametime")) if pd.notna(row.get("gametime")) else None,
+        "game_id": safe_json(row.get("game_id")),
     }
+
+
+def _team_records(season: int) -> dict:
+    """{team: {w, l, t}} from the season's completed regular-season games."""
+    s = schedules_df()
+    d = s[(s["season"] == season) & s["home_score"].notna()]
+    if "game_type" in d.columns:
+        d = d[d["game_type"].fillna("REG").str.upper().eq("REG")]
+    rec = {}
+    for r in d.itertuples():
+        for t, pf, pa in ((r.home_team, r.home_score, r.away_score), (r.away_team, r.away_score, r.home_score)):
+            x = rec.setdefault(t, {"w": 0, "l": 0, "t": 0})
+            x["w" if pf > pa else "l" if pf < pa else "t"] += 1
+    return rec
+
+
+def _matchup_qbs(home: str, away: str, unavail: set) -> dict:
+    """Projected starters for both teams with our QB efficiency percentile and whether the
+    depth-chart QB1 is out (the QB-out penalty is the biggest single injury adjustment)."""
+    from ml.projections import _available_qb, _depth_qbs
+    from ml.squad import _qb_value_table
+    try:
+        pct = _qb_value_table().rank(pct=True) * 100
+    except Exception:
+        pct = pd.Series(dtype=float)
+    out = {}
+    for t in (home, away):
+        qs = _depth_qbs().get(t, [])
+        gid, name = _available_qb(t, unavail)
+        qb1 = qs[0] if qs else (None, None)
+        out[t] = {"name": name, "pct": round(float(pct.get(gid)), 0) if gid in pct.index else None,
+                  "qb1": qb1[1], "qb1_out": bool(qb1[0] and qb1[0] in unavail),
+                  "qb1_pct": round(float(pct.get(qb1[0])), 0) if qb1[0] in pct.index else None}
+    return out
 
 
 def _matchup_betting(res: dict, sched: dict) -> dict:
@@ -1512,6 +1552,15 @@ def api_matchup_full():
     res["betting"] = _matchup_betting(res, sched)
     res["conditions"] = sched
     res["game_script"] = _game_script(res, _combined_pace(home, away, season))
+    try:
+        from ml.projections import unavailable_ids
+        cur = int(schedules_df()["season"].max())
+        recs = _team_records(cur)
+        res["records"] = {home: recs.get(home, {"w": 0, "l": 0, "t": 0}), away: recs.get(away, {"w": 0, "l": 0, "t": 0}),
+                          "season": cur}
+        res["qbs"] = _matchup_qbs(home, away, unavailable_ids())
+    except Exception as e:
+        print(f"[matchup] records/qbs failed: {e}", flush=True)
     return jsonify(_native(res))
 
 
@@ -2533,7 +2582,17 @@ def api_props_slate():
         st = _start_props_build(season, week, key)
         return jsonify(_native({"season": season, "week": week, "seasons": seasons, "weeks": weeks,
                                 "building": True, "done": st["done"], "total": st["total"]})), 202
+    out = _priced_props(season, week, key, want_lines, live=(season == seasons[-1]))
+    return jsonify(_native({**out, "seasons": seasons, "weeks": weeks}))
 
+
+def _priced_props(season: int, week: int, key: tuple, want_lines: bool, live: bool) -> dict:
+    """The priced board for a cached slate: book lines merged (when asked), every market
+    priced, the slate-wide leans ranked. When the week is the live season's and book lines
+    came back, the lined markets are written to the props record (ml/props_ledger.py) —
+    provisional until the week lock, frozen after, never after kickoff."""
+    from ml.ledger import kickoff_utc
+    from datetime import datetime, timezone
     # deep-ish copy so the cached model rows never carry book lines from a previous request
     games = [{**g, "teams": {t: [{**p, "markets": [dict(m) for m in p["markets"]]} for p in pls]
                              for t, pls in g.get("teams", {}).items()}} for g in _PROPS_SLATE[key]]
@@ -2588,6 +2647,8 @@ def api_props_slate():
                     # ~100% — that is the model having no role for him, not an edge
                     thin = (m["dist"] == "poisson" and m["proj"] < 0.5) or (m["dist"] == "normal" and m["proj"] < 5) \
                         or (m["dist"] == "prob" and m["proj"] < 0.05)
+                    if thin:
+                        m["thin"] = True                       # the record skips these too
                     if m.get("edge") is not None and not g.get("started") and not thin:
                         leans.append({"game_id": g["game_id"], "home": g["home"], "away": g["away"],
                                       "team": team, "opp": opp, "player": pl["name"], "pos": pl["pos"],
@@ -2598,10 +2659,66 @@ def api_props_slate():
                                       "edge": m["edge"], "books": (m.get("book") or {}).get("books")})
     leans.sort(key=lambda x: -x["edge"])
     best = [x for x in leans if x["edge"] >= PROPS_MIN_EDGE][:PROPS_STRIP_N]
-    return jsonify(_native({"season": season, "week": week, "seasons": seasons, "weeks": weeks,
-                            "games": games, "best": best, "n_lined": len(leans),
-                            "rules": {"min_edge": PROPS_MIN_EDGE, "strip_n": PROPS_STRIP_N},
-                            "odds_status": odds_status}))
+    recorded = 0
+    if live and odds_status.get("events"):
+        try:
+            from ml.props_ledger import record as _record_props
+            recorded = _record_props(season, week, games, now=now, strip_n=PROPS_STRIP_N)
+        except Exception as e:
+            print(f"[props ledger] record failed {season} wk{week}: {e}", flush=True)
+    return {"season": season, "week": week, "games": games, "best": best, "n_lined": len(leans),
+            "rules": {"min_edge": PROPS_MIN_EDGE, "strip_n": PROPS_STRIP_N},
+            "odds_status": odds_status, "recorded": recorded}
+
+
+PROPS_RECORD_LEAD_H = float(os.environ.get("PROPS_RECORD_LEAD_HOURS", 0))   # hours before the lock
+
+
+def record_props_now() -> str:
+    """Refresh-time write to the props record, so the week's leans are on the record even if
+    nobody opens the board: once the week is within PROPS_RECORD_LEAD_HOURS of its lock (default
+    0 = from the Saturday-morning lock on) and still has games to kick off, pull the book lines
+    for the unstarted games and record the priced board. Each pull is one Odds-API request per
+    unstarted game, so with the 4-hourly light refresh a week costs on the order of 1,000
+    credits — the window is deliberately the lock-to-kickoff stretch when props are posted."""
+    try:
+        from ml.odds import have_key
+        from ml.ledger import week_lock_time, kickoff_utc
+        from datetime import datetime, timezone, timedelta
+        if not have_key():
+            return "no odds key"
+        s = schedules_df()
+        season = int(s["season"].max())
+        week = _current_week(season)
+        if week is None:
+            return "season complete"
+        key = (season, week, _avail_sig())
+        if key not in _PROPS_SLATE:
+            return "board not built"
+        games = _PROPS_SLATE[key]
+        now = datetime.now(timezone.utc)
+        lock = week_lock_time(games)
+        if lock is None or now < lock - timedelta(hours=PROPS_RECORD_LEAD_H):
+            return f"before the window (lock {lock.isoformat() if lock else '?'})"
+        if not any(kickoff_utc(g.get("gameday"), g.get("gametime")) and now < kickoff_utc(g.get("gameday"), g.get("gametime"))
+                   for g in games):
+            return "all games kicked off"
+        out = _priced_props(season, week, key, want_lines=True, live=True)
+        st = out.get("odds_status", {})
+        return f"wk{week}: {st.get('events', 0)} games lined, {out.get('recorded', 0)} rows written" \
+               + (f" ({st['error']})" if st.get("error") else "")
+    except Exception as e:
+        return f"error: {str(e)[:120]}"
+
+
+@app.route('/api/props_record')
+def api_props_record():
+    """The player-prop record (ml/props_ledger.py): every book-lined market frozen before
+    kickoff, graded on the play-by-play box score — all vs best, by position, by market."""
+    from ml.props_ledger import grade
+    s = schedules_df()
+    season = int(request.args.get('season', s["season"].max() if len(s) else 2026))
+    return jsonify(_native(grade(season)))
 
 
 @app.route('/api/season')
@@ -2760,6 +2877,7 @@ def _run_refresh(season: int, light: bool = False):
         _release_memory()
         log(f"picks ledger: {lock_current_week()}")   # freeze this week's picks on fresh data
         log(f"props board: {warm_props_slate()}")     # pre-build the week's player props on fresh data
+        log(f"props record: {record_props_now()}")    # lock-to-kickoff window: lines pulled + leans recorded
         _release_memory()
         _REFRESH_STATE["running"] = False
 

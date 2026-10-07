@@ -416,12 +416,12 @@ def _distribute(team: str, team_pa: float, team_ra: float, off_tds: float, prof:
     qb_tdw = qb_car * (float(q.rtd_carry) if q is not None else rk["rtd_carry"])
     if q is None:
         # rookie / unknown starter — use the depth-chart name with a replacement line
-        qb_line = {"name": sname or "Starter", "pos": "QB", "rookie": True,
+        qb_line = {"name": sname or "Starter", "player_id": sid, "pos": "QB", "rookie": True,
                    "pass_att": round(team_pa), "cmp": round(team_pa * rk["cmp_pct"]),
                    "pass_yds": round(team_pa * rk["ypa"] * pass_factor), "pass_td": round(pass_tds, 1),
                    "int": round(team_pa * rk["int_pa"], 1)}
     else:
-        qb_line = {"name": q.player_name, "pos": "QB", "rookie": False,
+        qb_line = {"name": q.player_name, "player_id": q.player_id, "pos": "QB", "rookie": False,
                    "pass_att": round(team_pa), "cmp": round(team_pa * q.cmp_pct),
                    "pass_yds": round(team_pa * q.ypa * pass_factor), "pass_td": round(pass_tds, 1),
                    "int": round(team_pa * q.int_pa, 1)}
@@ -448,14 +448,14 @@ def _distribute(team: str, team_pa: float, team_ra: float, off_tds: float, prof:
         raw = []
         for _, r in recs.iterrows():
             tg = team_pa * 0.95 * (r.tgt_pg / denom)
-            raw.append({"name": r.player_name, "pos": r.position, "targets": tg, "rec": tg * r.catch_pct,
+            raw.append({"name": r.player_name, "player_id": r.player_id, "pos": r.position, "targets": tg, "rec": tg * r.catch_pct,
                         "rec_yds": tg * r.ypt * pass_factor, "rec_td": pass_tds * (r.tgt_pg * r.rectd_tgt) / tdw})
         s_rec = sum(x["rec"] for x in raw) or 1.0
         s_yds = sum(x["rec_yds"] for x in raw) or 1.0
         s_td = sum(x["rec_td"] for x in raw) or 1.0
         k_rec, k_yds, k_td = qb_line["cmp"] / s_rec, qb_line["pass_yds"] / s_yds, qb_line["pass_td"] / s_td
         for x in raw:
-            rec_lines.append({"name": x["name"], "pos": x["pos"], "targets": round(x["targets"]),
+            rec_lines.append({"name": x["name"], "player_id": x["player_id"], "pos": x["pos"], "targets": round(x["targets"]),
                               "rec": round(x["rec"] * k_rec), "rec_yds": round(x["rec_yds"] * k_yds),
                               "rec_td": round(x["rec_td"] * k_td, 1)})
     rec_by_name = {x["name"]: x for x in rec_lines}
@@ -466,7 +466,7 @@ def _distribute(team: str, team_pa: float, team_ra: float, off_tds: float, prof:
         for _, r in rbs.iterrows():
             car = rb_ra * (r.carry_pg / denom)
             rl = rec_by_name.get(r.player_name)                 # the RB's receiving is the reconciled line
-            rush_lines.append({"name": r.player_name, "pos": "RB",
+            rush_lines.append({"name": r.player_name, "player_id": r.player_id, "pos": "RB",
                                "carries": round(car), "rush_yds": round(car * r.ypc * rush_factor),
                                "rush_td": round(rush_tds * (r.carry_pg * r.rtd_carry) / tdw_total, 1),
                                "targets": rl["targets"] if rl else 0, "rec": rl["rec"] if rl else 0,
