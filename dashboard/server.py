@@ -1038,6 +1038,20 @@ def api_team_profile():
                 "off_penalties_pg", "def_penalties_pg", "off_penalty_yds_pg", "def_penalty_yds_pg"]
     style = {k: safe_json(row[k]) for k in style_keys if k in row.index}
     situational = {k: safe_json(row[k]) for k in sit_keys if k in row.index}
+    # league percentile (0-100) of this team's value for every numeric style/situational
+    # metric, among the season's 32 teams — the team page draws these as radars against the
+    # league. A metric with no spread across the league (an unpopulated column) gets None.
+    lg = s[s["season"] == season]
+    pctl = {}
+    for k in style_keys + sit_keys:
+        if k in lg.columns and k in row.index:
+            col = pd.to_numeric(lg[k], errors="coerce")
+            v = pd.to_numeric(pd.Series([row[k]]), errors="coerce").iloc[0]
+            if col.notna().sum() >= 8 and col.std() > 1e-9 and pd.notna(v):
+                pctl[k] = int(round(100 * (col < v).mean() + 50 * (col == v).mean()))
+            else:
+                pctl[k] = None
+    league_pctl = pctl
 
     pcts = _profile_percentiles(team, season)
     strengths = sorted(pcts, key=lambda x: -x["pctl"])[:5]
@@ -1055,7 +1069,7 @@ def api_team_profile():
         "qb": qb1_2026().get(team, ""),
         "rank": int(rr["rank"].iloc[0]) if len(rr) else None,
         "rating": float(rr["rating"].iloc[0]) if len(rr) else None,
-        "style": style, "situational": situational,
+        "style": style, "situational": situational, "league_pctl": league_pctl,
         "strengths": strengths, "weaknesses": weaknesses,
         "tendencies": _tendencies(team, season),
         "units": _units_display(team),
@@ -1541,6 +1555,13 @@ def api_matchup_full():
         res[f"{side}_color"] = m.get("team_color") or "#334155"
         res[f"{side}_logo"] = m.get("team_logo_espn", "")
     res["schemes"] = {home: scheme(home), away: scheme(away)}
+    try:                                           # league averages so tendencies can be drawn vs the norm
+        ls = styles[styles["season"] == season]
+        res["schemes"]["league"] = {k: safe_json(ls[c].mean()) for k, c in
+                                    (("pass_rate", "pass_rate_overall"), ("pace", "pace"),
+                                     ("blitz_rate", "blitz_rate"), ("play_action_rate", "play_action_rate")) if c in ls.columns}
+    except Exception:
+        res["schemes"]["league"] = {}
     res["form"] = {home: form(home), away: form(away)}
     res["injuries"] = {home: latest_injuries(home), away: latest_injuries(away)}
     from ml.spreads import simulate
