@@ -1444,14 +1444,30 @@ def _matchup_qbs(home: str, away: str, unavail: set) -> dict:
         pct = _qb_value_table().rank(pct=True) * 100
     except Exception:
         pct = pd.Series(dtype=float)
+    # season-to-date EPA/play (pass + rush) so a hot or cold start is visible beside the
+    # multi-season percentile — the percentile moves slowly by design (w = g/(g+4))
+    cur = {}
+    try:
+        season = int(schedules_df()["season"].max())
+        p = pd.read_parquet(RAW / f"pbp_{season}.parquet",
+                            columns=["passer_player_id", "rusher_player_id", "epa", "pass_attempt", "rush_attempt"])
+        pa = p[p["pass_attempt"] == 1].groupby("passer_player_id")["epa"].agg(["sum", "count"])
+        ru = p[p["rush_attempt"] == 1].groupby("rusher_player_id")["epa"].agg(["sum", "count"])
+        j = pa.add(ru, fill_value=0)
+        cur = {i: (round(float(r["sum"] / r["count"]), 3), int(r["count"])) for i, r in j.iterrows() if r["count"] >= 20}
+        cur_season = season
+    except Exception:
+        cur_season = None
     out = {}
     for t in (home, away):
         qs = _depth_qbs().get(t, [])
         gid, name = _available_qb(t, unavail)
         qb1 = qs[0] if qs else (None, None)
+        sd = cur.get(gid)
         out[t] = {"name": name, "pct": round(float(pct.get(gid)), 0) if gid in pct.index else None,
                   "qb1": qb1[1], "qb1_out": bool(qb1[0] and qb1[0] in unavail),
-                  "qb1_pct": round(float(pct.get(qb1[0])), 0) if qb1[0] in pct.index else None}
+                  "qb1_pct": round(float(pct.get(qb1[0])), 0) if qb1[0] in pct.index else None,
+                  "cur_epa": sd[0] if sd else None, "cur_plays": sd[1] if sd else None, "cur_season": cur_season}
     return out
 
 

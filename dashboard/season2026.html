@@ -1661,10 +1661,11 @@ function mQBs(r){
   const card=t=>{ const x=q[t]||{}; const m=META[t]||{};
     const pc=x.pct!=null?`${Math.round(x.pct)}<small>pctile · efficiency</small>`:`—<small>no rated sample</small>`;
     const note=x.qb1_out?`<div class="tm" style="color:var(--warn)">${esc(x.qb1)} (QB1) is out${x.qb1_pct!=null?` · rated ${Math.round(x.qb1_pct)}${(n=>n%10==1&&n%100!=11?'st':n%10==2&&n%100!=12?'nd':n%10==3&&n%100!=13?'rd':'th')(Math.round(x.qb1_pct))} percentile`:''}${r.injury_impact&&r.injury_impact[t]&&r.injury_impact[t].pts?` · −${r.injury_impact[t].pts} pts`:''}</div>`:'';
-    return `<div class="qbcard"><div><div class="nm">${esc(x.name||'—')}</div><div class="tm">${esc(m.team_name||t)}${x.qb1_out?' · fill-in starter':' · starter'}</div>${note}</div><div class="pc">${pc}</div></div>`; };
-  return `<div class="card"><h2>Quarterbacks <span>projected starters · percentile of our QB efficiency rating</span></h2>
+    const cur=x.cur_epa!=null?`<div class="tm" style="color:${x.cur_epa>=0.05?'var(--good)':x.cur_epa<0?'var(--bad)':'var(--muted)'}">${x.cur_season||'This season'} so far: ${x.cur_epa>=0?'+':''}${Number(x.cur_epa).toFixed(2)} EPA/play over ${x.cur_plays} plays</div>`:'';
+    return `<div class="qbcard"><div><div class="nm">${esc(x.name||'—')}</div><div class="tm">${esc(m.team_name||t)}${x.qb1_out?' · fill-in starter':' · starter'}</div>${cur}${note}</div><div class="pc">${pc}</div></div>`; };
+  return `<div class="card"><h2>Quarterbacks <span>projected starters · percentile of our multi-season efficiency rating · this season's line beside it</span></h2>
     <div class="qbgrid">${card(r.away)}${card(r.home)}</div>
-    <div class="mnote">Efficiency rating = recency- and volume-weighted passing + rushing EPA per play over up to five seasons, regressed toward a draft-capital prior. A ruled-out QB1 is replaced by the next available depth-chart QB and the gap between them is charged to the margin above.</div></div>`;
+    <div class="mnote">Percentile = recency- and volume-weighted passing + rushing EPA per play over up to five seasons (this season currently ${Math.round(((RANKINGS&&RANKINGS[0]&&RANKINGS[0].perf_w)||0)*100)}% of the weight, rising with games played; last season carries most of the rest), regressed toward a draft-capital prior; elite is +0.15 or better per play. A ruled-out QB1 is replaced by the next available depth-chart QB and the gap between them is charged to the margin above.</div></div>`;
 }
 const M_AXES=[['pass_off','Pass off'],['rush_off','Rush off'],['pass_def','Pass def'],['rush_def','Run def'],['st','Spec. teams'],['coach','Coaching']];
 function mRadarSvg(r, keys, title){
