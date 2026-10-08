@@ -15,6 +15,7 @@ data/processed/last_refresh.json
 data/processed/picks_ledger.parquet   # the deployed site's pre-kickoff pick record (ml/ledger.py)
 data/processed/props_ledger.parquet   # the deployed site's player-prop record (ml/props_ledger.py)
 data/processed/kalshi_exposure.jsonl  # confirmed Kalshi orders (ml/risk.py) — server state, never committed
+data/processed/slate_cache/           # on-disk slate predictions (dashboard/server._slate_save) — rebuilt when data/code move
 data_seed/
 
 # PFF subscriber data — LICENSED, personal use only. Never commit or redistribute

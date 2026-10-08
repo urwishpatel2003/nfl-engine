@@ -1819,10 +1819,94 @@ def _overlay_locked(season: int, games: list) -> None:
         print(f"[ledger] overlay failed: {e}", flush=True)
 
 
+_SLATE_DIR = PROC / "slate_cache"       # on the Railway volume: survives deploys and restarts
+_CODE_SIG = None
+
+
+def _code_sig() -> str:
+    """A hash of the model code (ml/*.py, engine/*.py, this file), so a cached slate written
+    by an older model is not served after a deploy that changed the model."""
+    global _CODE_SIG
+    if _CODE_SIG is None:
+        import hashlib
+        h = hashlib.sha1()
+        root = Path(__file__).parent.parent
+        for p in sorted(list((root / "ml").glob("*.py")) + list((root / "engine").glob("*.py")) + [Path(__file__)]):
+            try:
+                h.update(p.read_bytes())
+            except Exception:
+                pass
+        _CODE_SIG = h.hexdigest()[:12]
+    return _CODE_SIG
+
+
+def _slate_sig() -> str:
+    """Everything a slate prediction depends on: the availability files, play-by-play, the
+    schedule, the built styles / grades, and the model code. If any of it moved, recompute."""
+    names = [RAW / n for n in ("injuries.parquet", "rosters_2026.parquet", "depth_2026_current.parquet",
+                               "pbp_2026.parquet", "pbp_2025.parquet", "schedules.parquet")]
+    names += [PROC / n for n in ("team_styles.parquet", "pff_grades.parquet", "pff_grades_2025.parquet",
+                                 "composite_scores.parquet", "coaching_scores.parquet", "situational_stats.parquet")]
+    # content digests, not mtimes: every deploy re-copies the curated files onto the volume
+    # with fresh timestamps, which would invalidate the cache on each deploy for nothing
+    return _code_sig() + "|" + "|".join(f"{p.name}:{_file_digest(p)}" for p in names)
+
+
+_DIGESTS = {}
+
+
+def _file_digest(p: Path) -> str:
+    """sha1 of a file's bytes, memoised on (mtime, size) so it is hashed once per change."""
+    if not p.exists():
+        return "-"
+    st = p.stat()
+    key = (str(p), int(st.st_mtime), st.st_size)
+    if key not in _DIGESTS:
+        import hashlib
+        h = hashlib.sha1()
+        with open(p, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        for k in [k for k in _DIGESTS if k[0] == key[0]]:   # drop the file's stale entry
+            _DIGESTS.pop(k, None)
+        _DIGESTS[key] = h.hexdigest()[:10]
+    return _DIGESTS[key]
+
+
+def _slate_load(season: int, week: int):
+    """The cached base predictions for a week if they were computed from the current data
+    and code, else None. Lets a fresh process serve the Schedule instantly after a deploy."""
+    p = _SLATE_DIR / f"{season}_wk{week:02d}.json"
+    if not p.exists():
+        return None
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+        if d.get("sig") == _slate_sig():
+            return d["games"]
+    except Exception:
+        pass
+    return None
+
+
+def _slate_save(season: int, week: int, games: list) -> None:
+    from datetime import datetime, timezone
+    try:
+        _SLATE_DIR.mkdir(parents=True, exist_ok=True)
+        (_SLATE_DIR / f"{season}_wk{week:02d}.json").write_text(
+            json.dumps({"sig": _slate_sig(), "written": datetime.now(timezone.utc).isoformat(),
+                        "games": _native(games)}), encoding="utf-8")
+    except Exception as e:
+        print(f"[slate] cache write failed {season} wk{week}: {e}", flush=True)
+
+
 def _slate(season: int, week: int) -> dict:
-    """Predictions (cached) + fresh lines/picks for one week."""
+    """Predictions (cached in-process AND on disk) + fresh lines/picks for one week."""
     from ml.projections import unavailable_ids
     d, _ = _reg_weeks(season)
+    if (season, week) not in _SCHED_PRED:
+        cached = _slate_load(season, week)
+        if cached is not None:
+            _SCHED_PRED[(season, week)] = cached
     if (season, week) not in _SCHED_PRED:            # cache only the EXPENSIVE predictions (no lines/picks)
         dw = d[d["week"] == week]
         sort_cols = [c for c in ["gameday", "gametime"] if c in dw.columns]
@@ -1873,6 +1957,7 @@ def _slate(season: int, week: int) -> dict:
                 })
             base.append(rec)
         _SCHED_PRED[(season, week)] = base
+        _slate_save(season, week, base)
 
     # live Vegas lines + picks are applied fresh each request (cheap; predictions stay cached)
     games, odds_status = _finalize_slate(_SCHED_PRED[(season, week)])
@@ -2990,9 +3075,12 @@ def _daily_scheduler():
             _t.sleep(15)                     # let gunicorn finish binding first
             _start_refresh(season)           # (warms the props board when it finishes)
         else:
-            # No refresh due: pre-build the week's props board now, so the page shows the
-            # props the moment it is opened instead of a two-minute cold build.
+            # No refresh due: warm the engine now — the current week's slate (served from
+            # the on-disk slate cache when the data and code have not moved, else rebuilt
+            # and re-cached) and the props board — so the first visitor after a deploy
+            # does not pay the two-minute cold build.
             _t.sleep(15)
+            print(f"[boot] slate: {lock_current_week()}", flush=True)
             print(f"[boot] props board: {warm_props_slate()}", flush=True)
             _release_memory()
     except Exception as e:
