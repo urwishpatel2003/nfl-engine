@@ -674,8 +674,9 @@ const NAV = [
   {id:'rankings', label:'Rankings', views:['rankings','epa','stats','pff','history','team','trends','matchup'], items:[
     ['Power Rankings','#/rankings'],['Unit EPA Map','#/epa'],['League Stats','#/stats'],
     ['PFF vs Model','#/pff'],['History','#/history'],['Team Profile','#/team'],['Trends','#/trends'],['Matchup','#/matchup']]},
+  // Kalshi is hidden from the nav for now (the view still answers at #/kalshi)
   {id:'betting', label:'Betting', views:['schedule','record','kalshi','props','season'], items:[
-    ['Schedule & Picks','#/schedule'],['Model Record','#/record'],['Kalshi','#/kalshi'],['Player Props','#/props'],['Season & Futures','#/season']]},
+    ['Schedule & Picks','#/schedule'],['Model Record','#/record'],['Player Props','#/props'],['Season & Futures','#/season']]},
   // Fantasy (draft board / draft path / value vs ADP / breakouts) is hidden from the nav
   // during the season — not in use; the views still answer at #/fantasy?mode=… if needed.
 ];
