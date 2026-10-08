@@ -437,6 +437,18 @@
   .rb{display:inline-block;min-width:16px;text-align:center;font-size:10px;font-weight:700;padding:1px 5px;border-radius:9px;margin-left:4px}
   .rb.w{background:#14321f;color:#4ade80} .rb.l{background:#3a1414;color:#f87171} .rb.p{background:#2a2a2a;color:#cbd5e1} .rb.pend{background:transparent;color:var(--muted)}
   .rk-mini{background:var(--accent);color:#fff;font-size:9.5px;font-weight:700;padding:0 5px;border-radius:8px;margin-left:4px}
+  /* model record: one card per week */
+  .ppgame.wkcard summary{gap:18px}
+  .wk-t{font-weight:700;font-size:14px;min-width:70px}
+  .wk-s{font-size:12px;color:var(--muted)} .wk-s b{color:var(--txt)}
+  .wrow{display:grid;grid-template-columns:34px 1.4fr 1.3fr 30px 1.2fr auto;align-items:center;gap:10px;padding:5px 4px;border-bottom:1px solid #1a2334;font-size:12.5px;cursor:pointer}
+  .wrow:hover{background:var(--panel2)}
+  .wrow.top{background:#101a2e}
+  .wrow.pending{opacity:.8}
+  .wrow small{display:block;color:var(--muted);font-size:10.5px}
+  .wrow .wrk .rk-mini{margin:0}
+  .wrow .ws{color:var(--muted);font-variant-numeric:tabular-nums}
+  @media(max-width:700px){.wrow{grid-template-columns:30px 1.3fr 1.2fr 28px;gap:6px}.wrow .ws,.wrow .wm{display:none}}
 
   /* schedule slate */
   .sched{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px}
@@ -2456,45 +2468,55 @@ async function viewRecord(params){
   const body = document.getElementById('recBody');
   if(d.error){ body.innerHTML = `<div class="note warn">${esc(d.error)}</div>`; return; }
   const S = d.summary||{}, be = d.rules.breakeven_110;
-  const intro = `<div class="note" style="margin-bottom:12px">Every game's pick is written to a ledger the last time the slate is computed <b>before kickoff</b> (each Schedule visit and the daily refresh re-lock it; nothing is written once a game starts). Finished games are graded against the final score, so this is the record of what was actually on the board — not a re-prediction with hindsight.
-    ATS and totals are priced at −110 (break-even ${fP(be)}); moneyline uses the posted price. <b>${d.n_locked}</b> picks locked · <b>${d.n_final}</b> graded · <b>${d.n_pending}</b> pending.</div>`;
-  const tiles = `<div class="rtiles">
-    ${recTile('ATS · all games','model side vs the spread, every game', S.ats_all, be)}
-    ${recTile('ATS · top-5 picks',`the five submitted each week${S.ats_top_fill&&S.ats_top_fill.n?` · edge ${S.ats_top_edge.w}-${S.ats_top_edge.l}, fillers ${S.ats_top_fill.w}-${S.ats_top_fill.l}`:''}`, S.ats_top, be)}
-    ${recTile('Totals · all games','Over/Under, weeks 1–4 · retired: the model total is now the market total (no signal vs the line)', S.ou_all, be)}
-    ${recTile('Totals · confident',`model prob ≥ ${fP(d.rules.total_conf)} · weeks 1–4, retired`, S.ou_conf, be)}
-    ${recTile('Moneyline · all games','model favorite at the posted price', S.ml_all, 0.5)}
-    ${recTile('Moneyline · value',`model prob ≥ market +${Math.round(d.rules.ml_value*100)} pts`, S.ml_value, 0.5)}
-  </div>`;
+  const intro = `<div class="note intro" style="margin-bottom:12px" onclick="this.classList.toggle('open')">Picks are frozen before kickoff and graded on the final score — the record of what was on the board, not a re-prediction. ATS at −110 (break-even ${fP(be)}); moneyline value plays at the posted price. Totals are retired (the model total is the market total) and the every-game moneyline is not a bet, so neither is shown. ${d.n_locked} picks locked · ${d.n_final} graded · ${d.n_pending} pending.</div>`;
   const A = d.accuracy;
-  const acc = !A || !A.n ? '' : `<div class="card"><h2>Model vs market accuracy <span>same graded games · mean absolute error of the locked number vs the closing line</span></h2>
-    <div class="note" style="margin-bottom:10px">Reads the week honestly: a losing week where the market missed by as much is variance; a losing week where the market was close and the model was not is signal. Totals are the model's weakest output — the average total row shows whether the whole league scored more (or less) than anyone priced.</div>
-    <div class="rtiles">
-      <div class="rtile"><div class="rt-ttl">Margin error<span>points per game, lower is better</span></div><div class="rt-rec ${A.margin_mae_model<=A.margin_mae_market?'g':'b'}" style="font-size:22px">${A.margin_mae_model} <span class="muted" style="font-size:13px">vs market ${A.margin_mae_market}</span></div></div>
-      <div class="rtile"><div class="rt-ttl">Total error<span>points per game, lower is better</span></div><div class="rt-rec ${A.total_mae_model<=A.total_mae_market?'g':'b'}" style="font-size:22px">${A.total_mae_model} <span class="muted" style="font-size:13px">vs market ${A.total_mae_market}</span></div></div>
-      <div class="rtile"><div class="rt-ttl">Average total<span>actual · model · market</span></div><div class="rt-rec" style="font-size:22px">${A.avg_total_actual} <span class="muted" style="font-size:13px">· ${A.avg_total_model} · ${A.avg_total_market}</span></div></div>
-      <div class="rtile"><div class="rt-ttl">Straight-up winners<span>model · market favorite</span></div><div class="rt-rec ${A.winner_acc>=A.market_winner_acc?'g':'b'}" style="font-size:22px">${fP(A.winner_acc)} <span class="muted" style="font-size:13px">vs ${fP(A.market_winner_acc)}</span></div></div>
-    </div></div>`;
-  const weeks = (d.weeks||[]).length ? `<div class="card"><h2>Week by week <span>W-L(-P) · units at −110 (ML at posted odds)</span></h2>
-    <div class="tblwrap"><table class="tbl rec"><thead><tr><th>Week</th><th>Games</th><th>Final</th><th title="model side vs the spread, every game">ATS all</th><th title="units on every game at −110">ATS all u</th><th title="the ≥2.5-pt-edge picks only">Top-5</th><th title="units on the top-5 picks only at −110">Top-5 u</th><th>O/U</th><th>O/U u</th><th>ML</th><th>ML u</th></tr></thead><tbody>
-    ${d.weeks.map(w=>`<tr><td>Wk ${w.week}</td><td>${w.games}</td><td>${w.final}</td><td>${fWL(w.ats)}</td><td class="${w.ats&&w.ats.units>0?'g':w.ats&&w.ats.units<0?'b':''}">${w.ats?fU(w.ats.units):'—'}</td><td>${fWL(w.ats_top)}</td><td class="${w.ats_top&&w.ats_top.units>0?'g':w.ats_top&&w.ats_top.units<0?'b':''}">${w.ats_top&&w.ats_top.n?fU(w.ats_top.units):'—'}</td><td>${fWL(w.ou)}</td><td class="${w.ou&&w.ou.units>0?'g':w.ou&&w.ou.units<0?'b':''}">${w.ou?fU(w.ou.units):'—'}</td><td>${fWL(w.ml)}</td><td class="${w.ml&&w.ml.units>0?'g':w.ml&&w.ml.units<0?'b':''}">${w.ml?fU(w.ml.units):'—'}</td></tr>`).join('')}
-    </tbody></table></div></div>` : '';
+  const tiles = `<div class="rtiles">
+    ${recTile('ATS · top-5 picks',`the five submitted each week${S.ats_top_fill&&S.ats_top_fill.n?` · edge ${S.ats_top_edge.w}-${S.ats_top_edge.l}, fillers ${S.ats_top_fill.w}-${S.ats_top_fill.l}`:''}`, S.ats_top, be)}
+    ${recTile('ATS · all games','model side vs the spread, every game', S.ats_all, be)}
+    ${recTile('Moneyline · value',`model prob ≥ market +${Math.round(d.rules.ml_value*100)} pts`, S.ml_value, 0.5)}
+    ${A&&A.n?`<div class="rtile"><div class="rt-ttl">Margin error<span>pts/game vs the closing line · lower is better</span></div><div class="rt-rec ${A.margin_mae_model<=A.margin_mae_market?'g':'b'}" style="font-size:22px">${A.margin_mae_model} <span class="muted" style="font-size:13px">vs market ${A.margin_mae_market}</span></div></div>
+    <div class="rtile"><div class="rt-ttl">Straight-up winners<span>model · market favorite</span></div><div class="rt-rec ${A.winner_acc>=A.market_winner_acc?'g':'b'}" style="font-size:22px">${fP(A.winner_acc)} <span class="muted" style="font-size:13px">vs ${fP(A.market_winner_acc)}</span></div></div>`:''}
+  </div>`;
+  const acc = '';
+  // ── week by week: one collapsible card per week, top-5 first, then the rest of the slate ──
   const pickNum = g => g.vegas_spread==null?'':(g.ats_pick===g.home?-g.vegas_spread:g.vegas_spread);
   const fLine = n => n===''||n==null ? '' : (Math.abs(n)<0.05?'PK':(n>0?'+':'')+n);
   const fOdds = o => o==null?'':(o>0?'+':'')+Math.round(o);
-  const rows = (d.games||[]).slice().reverse().map(g=>{
-    const st = g.status==='final' ? `${g.away} ${g.away_score} — ${g.home_score} ${g.home}` : g.status==='live' ? '<span style="color:var(--good)">● in progress</span>' : `<span class="muted">${esc((g.kickoff_utc||'').slice(0,16).replace('T',' '))} UTC</span>`;
-    return `<tr class="${g.status}" onclick="go('#/matchup?home=${g.home}&away=${g.away}')">
-      <td>Wk ${g.week}</td><td><b>${g.away} @ ${g.home}</b>${g.pick_rank?` <span class="rk-mini" title="top-5 pick #${g.pick_rank}">#${g.pick_rank}</span>`:''}</td>
-      <td>${g.pred_margin!=null?`${g.pred_margin>=0?g.home:g.away} −${Math.abs(g.pred_margin).toFixed(1)} · ${Number(g.pred_total).toFixed(1)}`:'—'}</td>
-      <td>${g.ats_pick?`${g.ats_pick} ${fLine(pickNum(g))} <span class="muted">${fP(g.cover_prob)}</span>`:'—'} ${resBadge(g.ats)}</td>
-      <td>${g.total_pick?`${g.total_pick} ${g.vegas_total??''} <span class="muted">${fP(g.total_prob)}</span>`:'—'} ${resBadge(g.ou)}</td>
-      <td>${g.ml_pick?`${g.ml_pick} ${fOdds(g.ml_odds)} <span class="muted">${fP(g.ml_prob)}${g.ml_implied!=null?' vs '+fP(g.ml_implied):''}</span>`:'—'} ${resBadge(g.ml)}</td>
-      <td>${st}</td></tr>`; }).join('');
-  const log = `<div class="card"><h2>Pick log <span>newest first · click a game for the matchup breakdown</span></h2>
-    ${rows ? `<div class="tblwrap"><table class="tbl rec log"><thead><tr><th>Week</th><th>Game</th><th title="model line and total at lock time">Model</th><th title="side · line taken · cover prob">ATS pick</th><th title="Over/Under · line · model prob">Total pick</th><th title="model favorite · posted odds · model prob vs market no-vig prob">ML pick</th><th>Result</th></tr></thead><tbody>${rows}</tbody></table></div>`
-         : `<div class="note">No picks locked yet for ${d.season}. Open <a href="#/schedule">Schedule &amp; Picks</a> before kickoff (or wait for the daily refresh) and the week's picks are written here automatically.</div>`}</div>`;
-  body.innerHTML = intro + tiles + acc + weeks + log;
+  const uCls = u => u>0?'g':u<0?'b':'';
+  const wkSum = {}; (d.weeks||[]).forEach(w=>wkSum[w.week]=w);
+  const byWeek = {}; (d.games||[]).forEach(g=>(byWeek[g.week]=byWeek[g.week]||[]).push(g));
+  const weekNums = Object.keys(byWeek).map(Number).sort((a,b)=>b-a);
+  const openWeek = weekNums.find(w=>byWeek[w].some(g=>g.status!=='final')) ?? weekNums[0];
+  const row = g => {
+    const top = !!g.pick_rank, fill = g.pick_tier==='fill';
+    const res = g.status==='final' ? `${g.away} ${g.away_score} — ${g.home_score} ${g.home}` : g.status==='live' ? '<span style="color:var(--good)">● in progress</span>' : `<span class="muted">${esc((g.kickoff_utc||'').slice(5,16).replace('T',' '))}Z</span>`;
+    const ml = g.ml_pick&&g.ml_implied!=null&&(g.ml_prob-g.ml_implied)>=d.rules.ml_value ? `<span class="chip" style="padding:1px 7px;font-size:10.5px" title="moneyline value: model ${fP(g.ml_prob)} vs market ${fP(g.ml_implied)}">ML ${g.ml_pick} ${fOdds(g.ml_odds)} ${resBadge(g.ml)}</span>` : '';
+    return `<div class="wrow ${top?'top':''} ${g.status}" onclick="go('#/matchup?home=${g.home}&away=${g.away}')">
+      <div class="wrk">${top?`<span class="rk-mini" style="${fill?'background:#475569':''}" title="${fill?'filler (under the 2.5-pt edge floor)':'top-5 pick'}">#${g.pick_rank}</span>`:''}</div>
+      <div class="wg"><b>${g.away} @ ${g.home}</b><small>model ${g.pred_margin!=null?`${g.pred_margin>=0?g.home:g.away} −${Math.abs(g.pred_margin).toFixed(1)}`:'—'}</small></div>
+      <div class="wp">${g.ats_pick?`<b>${g.ats_pick} ${fLine(pickNum(g))}</b><small>${fP(g.cover_prob)} cover${g.edge!=null?' · '+Math.abs(g.edge).toFixed(1)+' pt edge':''}</small>`:'—'}</div>
+      <div class="wr">${resBadge(g.ats)}</div>
+      <div class="ws">${res}</div>
+      <div class="wm">${ml}</div></div>`;
+  };
+  const weekCard = w => {
+    const gs = byWeek[w], s = wkSum[w]||{};
+    const sorted = [...gs].sort((a,b)=>(a.pick_rank||99)-(b.pick_rank||99) || String(a.kickoff_utc).localeCompare(String(b.kickoff_utc)));
+    const top = sorted.filter(g=>g.pick_rank), rest = sorted.filter(g=>!g.pick_rank);
+    const nF = gs.filter(g=>g.status==='final').length;
+    const hdr = `<span class="wk-t">Week ${w}</span>
+      <span class="wk-s">${nF}/${gs.length} final</span>
+      <span class="wk-s">Top-5 <b class="${s.ats_top?uCls(s.ats_top.units):''}">${fWL(s.ats_top)}</b>${s.ats_top&&s.ats_top.n?` <span class="${uCls(s.ats_top.units)}">${fU(s.ats_top.units)}</span>`:''}</span>
+      <span class="wk-s">All games <b class="${s.ats?uCls(s.ats.units):''}">${fWL(s.ats)}</b>${s.ats&&s.ats.n?` <span class="${uCls(s.ats.units)}">${fU(s.ats.units)}</span>`:''}</span>`;
+    return `<details class="ppgame wkcard" ${w===openWeek?'open':''}><summary>${hdr}<span class="ppg-more">open ›</span></summary>
+      <div class="ppg-body">
+        ${top.length?`<div class="bxs">Top-5 picks</div>${top.map(row).join('')}`:''}
+        ${rest.length?`<div class="bxs" style="margin-top:10px">Rest of the slate</div>${rest.map(row).join('')}`:''}
+      </div></details>`;
+  };
+  const weeks = weekNums.length ? `<div class="ppgames">${weekNums.map(weekCard).join('')}</div>`
+    : `<div class="note">No picks locked yet for ${d.season}. Open <a href="#/schedule">Schedule &amp; Picks</a> before kickoff (or wait for the daily refresh) and the week's picks are written here automatically.</div>`;
+  body.innerHTML = intro + tiles + acc + weeks;
 }
 
 // ── VIEW: Kalshi (ported from the tennis engine) ────────────────────
