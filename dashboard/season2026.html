@@ -441,14 +441,19 @@
   .ppgame.wkcard summary{gap:18px}
   .wk-t{font-weight:700;font-size:14px;min-width:70px}
   .wk-s{font-size:12px;color:var(--muted)} .wk-s b{color:var(--txt)}
-  .wrow{display:grid;grid-template-columns:34px 1.4fr 1.3fr 30px 1.2fr auto;align-items:center;gap:10px;padding:5px 4px;border-bottom:1px solid #1a2334;font-size:12.5px;cursor:pointer}
+  /* fixed column widths so every row in a week lines up (each row is its own grid) */
+  .wrow{display:grid;grid-template-columns:34px minmax(140px,1.2fr) minmax(160px,1.2fr) 36px 180px 170px;align-items:center;gap:10px;padding:5px 4px;border-bottom:1px solid #1a2334;font-size:12.5px;cursor:pointer}
   .wrow:hover{background:var(--panel2)}
   .wrow.top{background:#101a2e}
   .wrow.pending{opacity:.8}
+  .wrow.hd{cursor:default;font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);border-bottom:1px solid var(--line);padding:2px 4px 5px}
+  .wrow.hd:hover{background:transparent}
   .wrow small{display:block;color:var(--muted);font-size:10.5px}
   .wrow .wrk .rk-mini{margin:0}
-  .wrow .ws{color:var(--muted);font-variant-numeric:tabular-nums}
-  @media(max-width:700px){.wrow{grid-template-columns:30px 1.3fr 1.2fr 28px;gap:6px}.wrow .ws,.wrow .wm{display:none}}
+  .wrow .wr{text-align:center}
+  .wrow .ws{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .wrow .wm{text-align:right;white-space:nowrap}
+  @media(max-width:760px){.wrow{grid-template-columns:30px 1.3fr 1.2fr 30px;gap:6px}.wrow .ws,.wrow .wm{display:none}}
 
   /* schedule slate */
   .sched{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px}
@@ -2489,8 +2494,8 @@ async function viewRecord(params){
   const openWeek = weekNums.find(w=>byWeek[w].some(g=>g.status!=='final')) ?? weekNums[0];
   const row = g => {
     const top = !!g.pick_rank, fill = g.pick_tier==='fill';
-    const res = g.status==='final' ? `${g.away} ${g.away_score} — ${g.home_score} ${g.home}` : g.status==='live' ? '<span style="color:var(--good)">● in progress</span>' : `<span class="muted">${esc((g.kickoff_utc||'').slice(5,16).replace('T',' '))}Z</span>`;
-    const ml = g.ml_pick&&g.ml_implied!=null&&(g.ml_prob-g.ml_implied)>=d.rules.ml_value ? `<span class="chip" style="padding:1px 7px;font-size:10.5px" title="moneyline value: model ${fP(g.ml_prob)} vs market ${fP(g.ml_implied)}">ML ${g.ml_pick} ${fOdds(g.ml_odds)} ${resBadge(g.ml)}</span>` : '';
+    const res = g.status==='final' ? `${g.away} ${g.away_score} — ${g.home_score} ${g.home}` : g.status==='live' ? '<span style="color:var(--good)">● in progress</span>' : `<span class="muted">${esc((g.kickoff_utc||'').slice(5,16).replace('T',' '))}</span>`;
+    const ml = g.ml_pick&&g.ml_implied!=null&&(g.ml_prob-g.ml_implied)>=d.rules.ml_value ? `<span class="chip" style="padding:1px 7px;font-size:10.5px" title="moneyline value: model ${fP(g.ml_prob)} vs market ${fP(g.ml_implied)}">${g.ml_pick} ${fOdds(g.ml_odds)}${g.ml?' '+resBadge(g.ml):''}</span>` : '<span class="muted">—</span>';
     return `<div class="wrow ${top?'top':''} ${g.status}" onclick="go('#/matchup?home=${g.home}&away=${g.away}')">
       <div class="wrk">${top?`<span class="rk-mini" style="${fill?'background:#475569':''}" title="${fill?'filler (under the 2.5-pt edge floor)':'top-5 pick'}">#${g.pick_rank}</span>`:''}</div>
       <div class="wg"><b>${g.away} @ ${g.home}</b><small>model ${g.pred_margin!=null?`${g.pred_margin>=0?g.home:g.away} −${Math.abs(g.pred_margin).toFixed(1)}`:'—'}</small></div>
@@ -2510,6 +2515,7 @@ async function viewRecord(params){
       <span class="wk-s">All games <b class="${s.ats?uCls(s.ats.units):''}">${fWL(s.ats)}</b>${s.ats&&s.ats.n?` <span class="${uCls(s.ats.units)}">${fU(s.ats.units)}</span>`:''}</span>`;
     return `<details class="ppgame wkcard" ${w===openWeek?'open':''}><summary>${hdr}<span class="ppg-more">open ›</span></summary>
       <div class="ppg-body">
+        <div class="wrow hd"><div></div><div>Game · model line</div><div>Pick · cover · edge</div><div class="wr">ATS</div><div class="ws">Final · kickoff (UTC)</div><div class="wm">Moneyline value</div></div>
         ${top.length?`<div class="bxs">Top-5 picks</div>${top.map(row).join('')}`:''}
         ${rest.length?`<div class="bxs" style="margin-top:10px">Rest of the slate</div>${rest.map(row).join('')}`:''}
       </div></details>`;
