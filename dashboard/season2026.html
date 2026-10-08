@@ -671,7 +671,7 @@ function parseHash(){
   return { view: parts[0]||'rankings', arg: parts[1], params };
 }
 const NAV = [
-  {id:'rankings', label:'Rankings', views:['rankings','epa','stats','pff','history','team','trends','matchup'], items:[
+  {id:'rankings', label:'Research', views:['rankings','epa','stats','pff','history','team','trends','matchup'], items:[
     ['Power Rankings','#/rankings'],['Unit EPA Map','#/epa'],['League Stats','#/stats'],
     ['PFF vs Model','#/pff'],['History','#/history'],['Team Profile','#/team'],['Trends','#/trends'],['Matchup','#/matchup']]},
   // Kalshi is hidden from the nav for now (the view still answers at #/kalshi)
@@ -1128,7 +1128,7 @@ async function viewTeam(team){
   const INJ_NOTE=_nInj?` <span class="st mini st-Out">O</span> Out · <span class="st mini st-Doubtful">D</span> Doubtful · <span class="st mini st-Questionable">Q</span> Questionable · <span class="st mini st-DNP">DNP</span>/<span class="st mini st-LP">LP</span> practice only · <span class="st mini st-IR">IR</span>/<span class="st mini st-PUP">PUP</span> reserve list — ${_in.week?`report ${_in.season} wk${_in.week}`:`no ${_in.season||''} report published yet`}.`:'';
   app().innerHTML = `<div class="pad">
     <div class="viewhead">
-      <div class="ttl">Team Profile <span>pick a team, or click one in Rankings</span></div>
+      <div class="ttl">Team Profile <span>pick a team, or click one in Power Rankings</span></div>
       <select id="teamPick" class="pick">${teamOptions(d.team)}</select>
     </div>
     <div class="grid2 tophalf">
