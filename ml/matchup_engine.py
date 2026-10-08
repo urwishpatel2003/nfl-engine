@@ -369,13 +369,16 @@ def project_game(home: str, away: str, neutral: bool = False, unit_adj: dict = N
         away_pts = (total - final_margin) / 2
         wp = float(1 / (1 + np.exp(-final_margin / 13.5 * np.pi / np.sqrt(3))))
 
-        def edges(off, deff):
-            return {"pass_off": round(float(u.loc[off, "z_off_pass"]), 2),
-                    "rush_off": round(float(u.loc[off, "z_off_rush"]), 2),
-                    "pass_def": round(float(-u.loc[deff, "z_def_pass"]), 2),
-                    "rush_def": round(float(-u.loc[deff, "z_def_rush"]), 2),
-                    "st": round(float(u.loc[off, "z_st"]), 2),
-                    "coach": round(float(u.loc[off, "z_coaching"]), 2)}
+        def edges(team):
+            """The TEAM'S OWN six units, good = high (defense flipped from the EPA-allowed
+            convention). This used to report the OPPONENT's defense under each team — the
+            matchup page then showed the Rams' elite pass defense as Buffalo's."""
+            return {"pass_off": round(float(u.loc[team, "z_off_pass"]), 2),
+                    "rush_off": round(float(u.loc[team, "z_off_rush"]), 2),
+                    "pass_def": round(float(-u.loc[team, "z_def_pass"]), 2),
+                    "rush_def": round(float(-u.loc[team, "z_def_rush"]), 2),
+                    "st": round(float(u.loc[team, "z_st"]), 2),
+                    "coach": round(float(u.loc[team, "z_coaching"]), 2)}
 
         # "Where the margin comes from": every non-HFA piece is shrunk by the market
         # calibration (final = hfa + cal·(raw − hfa)), HFA is carried whole; the pieces sum
@@ -391,7 +394,7 @@ def project_game(home: str, away: str, neutral: bool = False, unit_adj: dict = N
             "raw_margin": round(raw_margin, 1), "raw_total": round(raw_total, 1), "total_source": total_src,
             "calibration": round(cal, 3), "total_calibration": round(c["total"], 3),
             "home_win_prob": round(wp, 3), "away_win_prob": round(1 - wp, 3),
-            "units": {home: edges(home, away), away: edges(away, home)},
+            "units": {home: edges(home), away: edges(away)},
             "components": comps,
         }
 
