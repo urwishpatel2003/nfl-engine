@@ -1676,7 +1676,11 @@ def _rank_top5(games: list, taken: list) -> None:
             g["pick_rank"] = None; g["pick_tier"] = None
     pool = [g for g in games if not g.get("locked") and not g.get("early")
             and g.get("cover_prob") is not None and g.get("edge") is not None]
-    edge = sorted([g for g in pool if abs(g["edge"]) >= MIN_EDGE], key=lambda x: -x["cover_prob"])
+    # Cover probability comes from an empirical margin distribution on whole numbers, so two
+    # games whose model margins differ by a few tenths often price to the SAME cover prob.
+    # Ties go to the larger edge (then the earlier kickoff) — before this, a tie fell to
+    # schedule order, which put NE −3.5 (2.5-pt edge) on the board over PIT −2.5 (2.6).
+    edge = sorted([g for g in pool if abs(g["edge"]) >= MIN_EDGE], key=lambda x: (-x["cover_prob"], -abs(x["edge"])))
     fill = sorted([g for g in pool if abs(g["edge"]) < MIN_EDGE], key=lambda x: (-abs(x["edge"]), -x["cover_prob"]))
     for g, r in zip(edge + fill, free):
         g["pick_rank"] = r
