@@ -538,7 +538,8 @@ def _coaching():
 # matchup engine), the player-card ratings, and the rookie/depth preseason blends. If this
 # philosophy changes, change THIS constant — do not fork per-layer weights again.
 PFF_W = 0.80
-PFF_UNIT_W = PFF_W
+# (there used to be a PFF_UNIT_W alias bound at import; it meant setting PFF_W at runtime did
+# not reach the unit blend — one name, read where it is used)
 # unit → (PFF positions, grade column, top-N of roster to average)
 _PFF_UNIT_AGG = {
     "qb":       ({"QB"}, "grades_offense", 1),
@@ -644,7 +645,7 @@ def squad_ratings(breakdown: bool = False) -> pd.DataFrame:
         for unit in _PFF_UNIT_AGG:
             if unit in pff.columns and pff[unit].notna().sum() >= 24:   # need real league coverage
                 zp = _z(pff[unit].fillna(pff[unit].median()))
-                z[unit] = (1 - PFF_UNIT_W) * z[unit] + PFF_UNIT_W * zp
+                z[unit] = (1 - PFF_W) * z[unit] + PFF_W * zp
                 g[unit] = z[unit]        # breakdown consumers (matchup engine z-units, the
                                          # dashboard off/def split) inherit the blended signal
 

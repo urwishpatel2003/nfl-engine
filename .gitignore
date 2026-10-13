@@ -23,6 +23,7 @@ data_seed/
 data/raw/pff/*
 !data/raw/pff/README.md
 data/processed/pff_*.parquet
+data/processed/pff_history/           # dated copies of each weekly pull (licensed; week-over-week movers)
 
 # Claude Code local settings
 .claude/settings.local.json

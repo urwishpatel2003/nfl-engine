@@ -26,3 +26,6 @@ data/raw/pff/
 
 # explicit un-ignore (covers CLI versions that also apply .gitignore)
 !data/processed/pff_*.parquet
+
+# dated weekly PFF copies stay on the laptop (movers analysis only)
+data/processed/pff_history/

@@ -81,11 +81,23 @@ def main():
     ap.add_argument("--players", nargs="*", default=[], help="captured player-roster chunk files")
     ap.add_argument("--teams", default=None, help="captured team-overview file")
     ap.add_argument("--season", type=int, default=2026)
+    ap.add_argument("--week", type=int, default=None,
+                    help="last week played: also keeps a dated copy in data/processed/pff_history/ "
+                         "so next week's pull can be compared (movers / losers)")
     args = ap.parse_args()
     if args.players:
         assemble_players(args.players)
     if args.teams:
         assemble_teams(args.teams, args.season)
+    if args.week is not None:
+        import shutil
+        hist = OUT_PATH.parent / "pff_history"
+        hist.mkdir(parents=True, exist_ok=True)
+        for src, stem in ((OUT_PATH, "pff_grades"), (TEAM_OUT, "pff_team_grades")):
+            if src.exists():
+                dst = hist / f"{stem}_{args.season}_wk{args.week:02d}.parquet"
+                shutil.copy2(src, dst)
+                print(f"kept {dst.name}")
     if not args.players and not args.teams:
         print("nothing to do — pass --players and/or --teams")
 
