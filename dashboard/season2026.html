@@ -2541,9 +2541,9 @@ async function viewPropsRecord(params){
     const good = t.pct!=null && t.pct >= beat, cls = t.pct==null?'':(good?'g':'b');
     return `<div class="rtile"><div class="rt-ttl">${title}<span>${sub}</span></div>
       <div class="rt-rec ${cls}">${t.w}-${t.l}${t.p?'-'+t.p:''}</div>
-      <div class="rt-sub"><span class="${cls}">${fP(t.pct)}</span> win · <span class="${t.units>0?'g':t.units<0?'b':''}">${fU(t.units)}</span> · ROI ${t.roi==null?'—':(t.roi>0?'+':'')+Math.round(t.roi*100)+'%'}${t.void?` · ${t.void} void`:''}</div></div>`;
+      <div class="rt-sub"><span class="${cls}">${fP(t.pct)}</span> win · <span class="${t.units>0?'g':t.units<0?'b':''}">${fU(t.units)}</span> · ROI ${t.roi==null?'—':(t.roi>0?'+':'')+Math.round(t.roi*100)+'%'}</div></div>`;
   };
-  const intro = `<div class="note intro" onclick="this.classList.toggle('open')" style="margin-bottom:12px">A row is written for every market the book priced on the props board — the model's side, the line and the price at the time — provisional until the Saturday 9am ET lock, frozen after, never after kickoff. "Best" = the model beat the vig-free book price by ${minE}+ points (the board's strip). Graded on the official box score from play-by-play; a player who did not appear is void, like the book. Units at the book's price. ${d.n_rows} rows · ${d.n_best} best · ${d.n_graded} graded · ${d.n_pending} pending.</div>`;
+  const intro = `<div class="note intro" onclick="this.classList.toggle('open')" style="margin-bottom:12px">A row is written for every market the book priced on the props board — the model's side, the line and the price at the time — provisional until the Saturday 9am ET lock, frozen after, never after kickoff. "Best" = the model beat the vig-free book price by ${minE}+ points (the board's strip). Graded on the official box score from play-by-play; a player who did not appear is not counted, like the book. Units at the book's price. ${d.n_rows} rows · ${d.n_best} best · ${d.n_graded} graded · ${d.n_pending} pending.</div>`;
   const P = d.by_pos||{};
   const tiles = `<div class="rtiles">
     ${tile('Best props', `edge ≥ ${minE} pts vs the vig-free price`, S.best, be)}
