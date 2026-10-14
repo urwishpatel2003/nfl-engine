@@ -145,7 +145,9 @@ of the week, model props per player (`ml/props.py`), live book lines merged per 
 of markets where the model beats the vig-free book price by ≥5 pts. A cold week builds in a
 background thread (the route answers 202 + progress; the page polls) because 16 box scores
 exceed the gunicorn timeout; the refresh job pre-warms the current week (`warm_props_slate`).
-Props are leans, not graded picks — there is no props ledger.
+Every book-lined market on the board is written to `ml/props_ledger.py` before kickoff
+(provisional until the Saturday lock, frozen after; late-posting markets added once) and
+graded on the play-by-play box score; `/api/props_record` feeds Betting > Props Record.
 
 ## Kalshi (Betting > Kalshi tab)
 

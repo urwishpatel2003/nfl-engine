@@ -2772,7 +2772,8 @@ def _priced_props(season: int, week: int, key: tuple, want_lines: bool, live: bo
                     # a near-zero projection (a back-up the book still lists) prices "under" at
                     # ~100% — that is the model having no role for him, not an edge
                     thin = (m["dist"] == "poisson" and m["proj"] < 0.5) or (m["dist"] == "normal" and m["proj"] < 5) \
-                        or (m["dist"] == "prob" and m["proj"] < 0.05)
+                        or (m["dist"] == "prob" and m["proj"] < 0.05) \
+                        or (m.get("line") is not None and float(m["line"]) <= 0)   # a non-positive line is not a market
                     if thin:
                         m["thin"] = True                       # the record skips these too
                     if m.get("edge") is not None and not g.get("started") and not thin:
