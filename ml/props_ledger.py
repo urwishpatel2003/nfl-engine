@@ -210,6 +210,15 @@ def grade(season: int) -> dict:
     bx = box.set_index(["game_id", "player_id"]) if len(box) else None
     now = datetime.now(timezone.utc)
 
+    # Rows priced off a malformed book price (|odds| < 100 — the old raw-median consensus
+    # produced −14 / −1 when books straddled ±100, and the edge was computed from it) are
+    # not a real market: left out of every tally and the log.
+    if "book_odds" in led.columns and len(led):
+        bad = pd.to_numeric(led["book_odds"], errors="coerce").abs() < 100
+        n_bad = int(bad.sum())
+        led = led[~bad]
+    else:
+        n_bad = 0
     rows = []
     for r in led.to_dict("records"):
         row = {k: (None if (isinstance(v, float) and np.isnan(v)) else v) for k, v in r.items()}
@@ -284,6 +293,7 @@ def grade(season: int) -> dict:
     log = gdf[gdf["tier"] == "best"].sort_values(["week", "kickoff_utc", "edge"], ascending=[False, False, False]) \
         if len(gdf) else gdf
     return {"season": season, "n_rows": int(len(gdf)), "n_best": int((gdf["tier"] == "best").sum()) if len(gdf) else 0,
+            "n_malformed": n_bad,
             "n_graded": int(len(fin)), "n_pending": int((gdf["res"].isna()).sum()) if len(gdf) else 0,
             "summary": summary, "by_pos": by_pos, "by_market": by_market, "weeks": weeks,
             "log": log.head(400).to_dict("records") if len(log) else [],

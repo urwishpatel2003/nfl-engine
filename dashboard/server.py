@@ -2561,7 +2561,7 @@ def _price_market(m: dict) -> None:
     if m["dist"] == "prob":
         p = float(m["proj"])
         m.update({"side": "YES", "prob": round(p, 3), "fair": fair_odds(p)})
-        if book and book.get("yes_odds") is not None:
+        if book and _valid_odds(book.get("yes_odds")):
             implied = _implied(book["yes_odds"])
             m["book_prob"] = round(implied, 3)
             m["edge"] = round(p - implied, 3)
@@ -2576,7 +2576,7 @@ def _price_market(m: dict) -> None:
     m.update({"line": float(line), "side": "OVER" if over_side else "UNDER",
               "prob": round(prob, 3), "fair": fair_odds(prob), "push": r["push"],
               "p_over": r["over"], "p_under": r["under"]})
-    if book and book.get("over_odds") is not None and book.get("under_odds") is not None:
+    if book and _valid_odds(book.get("over_odds")) and _valid_odds(book.get("under_odds")):
         po, pu = _implied(book["over_odds"]), _implied(book["under_odds"])
         novig = po / (po + pu)
         edge_o, edge_u = r["over"] - novig, r["under"] - (1 - novig)
@@ -2591,6 +2591,14 @@ def _price_market(m: dict) -> None:
 def _implied(odds) -> float:
     o = float(odds)
     return (-o) / ((-o) + 100) if o < 0 else 100 / (o + 100)
+
+
+def _valid_odds(o) -> bool:
+    """American odds live outside the ±100 gap; anything else is a malformed price."""
+    try:
+        return o is not None and abs(float(o)) >= 100
+    except (TypeError, ValueError):
+        return False
 
 
 _PROPS_BUILD = {"key": None, "done": 0, "total": 0, "thread": None, "error": None}

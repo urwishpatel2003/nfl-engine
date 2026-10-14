@@ -60,6 +60,29 @@ def _get(url):
     return r.json(), r.headers.get("x-requests-remaining")
 
 
+def _imp(odds) -> float:
+    """American odds → implied probability (with the book's vig)."""
+    o = float(odds)
+    return -o / (-o + 100) if o < 0 else 100 / (o + 100)
+
+
+def _amer(p: float) -> int:
+    """Implied probability → American odds (never inside the ±100 gap)."""
+    p = min(max(float(p), 0.001), 0.999)
+    return int(round(-100 * p / (1 - p))) if p >= 0.5 else int(round(100 * (1 - p) / p))
+
+
+def consensus_price(prices) -> int | None:
+    """The consensus of several books' American prices. American odds are not linear across
+    ±100 (−110 and +100 are a hair apart, but their arithmetic mean is −5), so the median is
+    taken in PROBABILITY space and converted back. Taking the median of the raw prices gave
+    nonsense like −14 or −1 whenever books straddled the gap."""
+    ps = [_imp(x) for x in prices if x is not None and abs(float(x)) >= 100]
+    if not ps:
+        return None
+    return _amer(st.median(ps))
+
+
 def clear():
     global _EVENTS, _PROPS, _GAMES
     _EVENTS = {"t": 0.0, "data": None}
@@ -184,9 +207,9 @@ def event_props(home_full, away_full):
     out = {}
     for pk, d in agg.items():
         if pk[1] == "anytime_td":
-            ys = [x for x in d.get("yes", []) if x is not None]
-            if ys:
-                out[pk] = {"yes_odds": int(st.median(ys))}
+            yo = consensus_price(d.get("yes", []))
+            if yo is not None:
+                out[pk] = {"yes_odds": yo}
         else:
             lines = d["lines"]
             pts = [l[0] for l in lines]
@@ -196,9 +219,9 @@ def event_props(home_full, away_full):
             overs = [l[2] for l in lines if l[1] == "over" and abs(l[0] - med) < 1e-6 and l[2] is not None]
             unders = [l[2] for l in lines if l[1] == "under" and abs(l[0] - med) < 1e-6 and l[2] is not None]
             out[pk] = {"line": med,
-                       "over_odds": int(st.median(overs)) if overs else None,
-                       "under_odds": int(st.median(unders)) if unders else None,
-                       "books": len({l[0] for l in lines})}
+                       "over_odds": consensus_price(overs),
+                       "under_odds": consensus_price(unders),
+                       "books": len([l for l in lines if l[1] == "over"])}
     meta = {"event_id": eid, "commence": ev.get("commence_time"),
             "remaining_credits": remaining, "markets": len(out)}
     _PROPS[eid] = {"t": time.time(), "data": out, "meta": meta}

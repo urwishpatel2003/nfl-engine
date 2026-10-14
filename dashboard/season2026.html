@@ -537,6 +537,10 @@
   .ppbadge.lean-n{background:var(--panel2);color:var(--muted);border:1px solid var(--line)}
   /* props board (one <details> per game) */
   .ppgames{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+  .gcard.ptile{cursor:default;padding:12px}
+  .gcard.ptile .gc-tm img{width:26px;height:26px}
+  .gcard.ptile .tbl.rec td,.gcard.ptile .tbl.rec th{font-size:11.5px;padding:4px 6px}
+  .sched:has(.ptile){grid-template-columns:repeat(auto-fill,minmax(420px,1fr))}
   .ppgame{background:var(--panel);border:1px solid var(--line);border-radius:12px}
   .ppgame[open]{border-color:#2f4a78}
   .ppgame summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:14px;padding:12px 14px;flex-wrap:wrap}
@@ -2189,10 +2193,30 @@ async function viewProps(params){
       <td class="r">${fOdds(x.book_odds)}</td>
       <td class="r muted">${fOdds(x.fair)}</td>
       <td class="r muted">${x.books||''}</td></tr>`;
+  // one tile per game (like Schedule & Picks), each holding that game's best props as a table
+  const byGame = {}; best.forEach(x=>(byGame[x.game_id]=byGame[x.game_id]||[]).push(x));
+  const gameRow = x => `<tr onclick="go('#/matchup?home=${x.home}&away=${x.away}')">
+      <td class="r pr">${x.rank}</td>
+      <td><b>${esc(x.player)}</b> <span class="muted">${x.pos} · ${x.team}</span></td>
+      <td><b>${x.side==='YES'?'Anytime TD':`${x.side==='OVER'?'Over':'Under'} ${x.line}`}</b> ${x.side==='YES'?'':esc(x.label)}</td>
+      <td class="r">${Math.round(x.prob*100)}%</td>
+      <td class="r muted">${Math.round((x.book_prob||0)*100)}%</td>
+      <td class="r"><span class="ppbadge lean-${x.side==='UNDER'?'u':'o'}" style="margin:0">+${(x.edge*100).toFixed(0)}%</span></td>
+      <td class="r">${fOdds(x.book_odds)}</td></tr>`;
+  const gameTile = g => { const rows=(byGame[g.game_id]||[]).sort((a,b)=>a.rank-b.rank);
+    const pred = g.pred ? `${g.away} ${Math.round(g.pred.away)} — ${Math.round(g.pred.home)} ${g.home}` : '';
+    return `<div class="gcard ptile">
+      <div class="gc-tms"><div class="gc-tm"><img src="${g.away_logo}" onerror="this.style.visibility='hidden'"><div class="gc-ab">${g.away}</div></div><div class="gc-mid">@</div><div class="gc-tm"><img src="${g.home_logo}" onerror="this.style.visibility='hidden'"><div class="gc-ab">${g.home}</div></div></div>
+      <div class="gc-row"><span>${esc(g.gameday||'')} ${esc(g.gametime||'')}</span><span>model ${pred}${g.lines?' · <span style="color:var(--good)">● lines</span>':''}</span></div>
+      ${rows.length?`<div class="tblwrap" style="margin-top:8px"><table class="tbl rec log"><thead><tr><th class="r">#</th><th>Player</th><th>Lean</th><th class="r" title="model probability">Model</th><th class="r" title="book's vig-free probability">Book</th><th class="r">Edge</th><th class="r">Price</th></tr></thead><tbody>${rows.map(gameRow).join('')}</tbody></table></div>`
+        :`<div class="mnote" style="margin-top:8px">${g.started?'kicked off':g.lines?'no market clears the edge floor':'no book lines yet'}</div>`}
+      <div class="gc-row" style="margin-top:6px"><span></span><a href="#/matchup?home=${g.home}&away=${g.away}" style="font-size:11px">matchup ›</a></div>
+    </div>`; };
+  const withEdges = d.games.filter(g=>(byGame[g.game_id]||[]).length), without = d.games.filter(g=>!(byGame[g.game_id]||[]).length);
   const table = best.length ? `<div class="card" style="padding:14px">
-      <h2 style="margin:0 0 10px">🎯 Best props <span>${best.length} markets where the model beats the vig-free price by ${minE}+ pts · ranked by edge · ${nOpen} of ${d.games.length} games still to kick off</span></h2>
-      <div class="tblwrap"><table class="tbl rec log"><thead><tr><th class="r">#</th><th>Player</th><th>Team · game</th><th>Kickoff</th><th>Lean</th><th class="r" title="model probability on the lean">Model</th><th class="r" title="book's vig-free probability">Book</th><th class="r">Edge</th><th class="r" title="consensus book price for the lean">Price</th><th class="r" title="fair odds at the model's probability">Fair</th><th class="r" title="books posting the market">Bk</th></tr></thead>
-      <tbody>${best.map(row).join('')}</tbody></table></div>
+      <h2 style="margin:0 0 10px">🎯 Best props <span>${best.length} markets where the model beats the vig-free price by ${minE}+ pts · ranked by edge · ${withEdges.length} of ${d.games.length} games carry an edge · ${nOpen} still to kick off</span></h2>
+      <div class="sched">${withEdges.map(gameTile).join('')}</div>
+      ${without.length?`<div class="mnote" style="margin-top:10px">No edges: ${without.map(g=>`${g.away}@${g.home}${g.started?' (played)':g.lines?'':' (no lines yet)'}`).join(' · ')}</div>`:''}
       <div style="color:var(--muted);font-size:11px;margin-top:10px">Edge = the model's probability on that side minus the book's vig-free probability. Props are priced from the same opponent-adjusted, availability-aware box scores as the matchup page, with league-typical game-to-game variance — a credible line, not a proven market-beater. These rows are written to the <a href="#/props_record">Props Record</a> before kickoff and graded on the box score; anytime-TD edges keep the book's vig (one-sided market) so they read low. Full projected box scores for every player are on each game's matchup page.</div>
     </div>`
     : (lines && os.events ? `<div class="card" style="padding:14px"><h2 style="margin:0 0 6px">🎯 Best props <span>none clear the ${minE}-pt floor</span></h2><div class="note" style="margin:0">The model and the books agree on every lined market this week within ${minE} points of probability.</div></div>`
