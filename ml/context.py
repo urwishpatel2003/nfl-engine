@@ -33,6 +33,9 @@ def _nfl_coords() -> dict:
 
 
 # Coordinates for international / neutral venues (2026 slate + regulars).
+# venues a team treats as its own: home field kept, no travel charged (see game_context)
+SECOND_HOME = {"JAX": {"Wembley Stadium", "Tottenham Hotspur Stadium", "Tottenham Stadium"}}
+
 INTL_VENUES = {
     "Tottenham Hotspur Stadium": (51.6043, -0.0665),
     "Wembley Stadium": (51.5560, -0.2796),
@@ -74,7 +77,23 @@ def game_context(home: str, away: str, row) -> dict:
     stadium = row.get("stadium", "") or ""
     neutral = loc.lower() != "home"
 
-    if neutral:
+    # A team's SECOND HOME: Jacksonville plays a London series every year as the designated
+    # home side (two straight weeks there in 2026, weeks 5-6). The schedule marks the venue
+    # "Neutral", but the Jaguars keep their home-field credit there and are not charged
+    # travel — they are already in London; only the visitor flies in (owner decision
+    # 2026-10-14). Anyone else's international game stays neutral.
+    if neutral and stadium in SECOND_HOME.get(home, ()):
+        neutral = False
+        notes.append(f"{stadium} — {home}'s second home (home field kept, no travel)")
+        venue = INTL_VENUES.get(stadium)
+        if venue and away in coords:
+            ac = coords[away][:2]
+            dist = haversine(ac, venue)
+            tz_east = max(0.0, (venue[1] - ac[1]) / 15.0)
+            pen = min(1.5, dist / 2500.0 * 0.8 + tz_east * 0.3)
+            ad -= pen
+            notes.append(f"{away} travels {dist:,.0f} mi" + (f", {tz_east:.0f} TZ east" if tz_east >= 1 else ""))
+    elif neutral:
         notes.append(f"Neutral site — {stadium}" if stadium else "Neutral site")
         venue = INTL_VENUES.get(stadium)
         if venue and home in coords and away in coords:

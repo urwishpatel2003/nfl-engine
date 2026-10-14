@@ -230,9 +230,17 @@ def grade(season: int) -> dict:
                     else:
                         over = act > line
                         row["res"] = "W" if (over == (row["side"] == "OVER")) else "L"
+                # American odds are <= -100 or >= +100; anything else (0, a missing price
+                # stored as 0, a decimal slipped through) is malformed → price it at -110
                 odds = row.get("book_odds")
+                try:
+                    odds = float(odds)
+                    if not (abs(odds) >= 100):
+                        odds = -110.0
+                except (TypeError, ValueError):
+                    odds = -110.0
                 if row["res"] in ("W", "L"):
-                    row["units"] = units(odds, row["res"] == "W") if odds is not None else (1.0 if row["res"] == "W" else -1.0)
+                    row["units"] = units(odds, row["res"] == "W")
         elif gid in final:
             row["status"] = "final"                            # scored, play-by-play not pulled yet
         else:
