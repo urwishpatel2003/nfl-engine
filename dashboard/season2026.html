@@ -535,12 +535,18 @@
   .ppbadge{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;margin-left:6px}
   .ppbadge.lean-o{background:#0f2a1c;color:#7fe3ad}.ppbadge.lean-u{background:#2a1620;color:#f2a1bb}
   .ppbadge.lean-n{background:var(--panel2);color:var(--muted);border:1px solid var(--line)}
+  .ppbadge.eb1{background:#13233f;color:#8fc0ff}      /* 5–9 pts: a lean */
+  .ppbadge.eb2{background:#3a2a0a;color:#fcd34d}      /* 10–19 pts: a real disagreement */
+  .ppbadge.eb3{background:#0f2a1c;color:#7fe3ad}      /* 20+ pts: the model is far from the book — check it */
   /* props board (one <details> per game) */
   .ppgames{display:flex;flex-direction:column;gap:10px;margin-top:12px}
   .gcard.ptile{cursor:pointer;padding:12px}
   .gcard.ptile .pt-body{display:none;cursor:default}
   .gcard.ptile.open{grid-column:1 / -1;border-color:var(--accent)}
-  .gcard.ptile.open .pt-body{display:block}
+  .gcard.ptile.open .pt-body{display:grid;grid-template-columns:repeat(auto-fit,minmax(470px,1fr));gap:4px 18px;align-items:start;margin-top:8px}   /* wide enough that a group's table never scrolls */
+  .gcard.ptile.open .pt-foot{grid-column:1 / -1}
+  .gcard.ptile.open .gc-tms{grid-template-columns:auto auto auto;justify-content:center;gap:24px}   /* compact header when wide */
+  .gcard.ptile .pt-grp .tbl{width:100%}
   .gcard.ptile.open .pt-more{display:none}
   .gcard.ptile .tbl.rec td,.gcard.ptile .tbl.rec th{font-size:11.5px;padding:4px 6px}
   .ppgame{background:var(--panel);border:1px solid var(--line);border-radius:12px}
@@ -2046,6 +2052,8 @@ function ftBreakouts(rows){
 
 // ── VIEW: player props ──────────────────────────────────────────────
 let PP_ROWS = [];
+// edge badge coloured by SIZE of the edge (not over/under): 5–9 pts blue, 10–19 amber, 20+ green
+function edgeBadge(e){ const p=Math.round((e||0)*100), c=p>=20?'eb3':p>=10?'eb2':'eb1'; return `<span class="ppbadge ${c}" style="margin:0" title="model probability minus the book's vig-free probability">+${p}%</span>`; }
 function ppErf(x){ const t=1/(1+0.3275911*Math.abs(x));
   const y=1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-0.284496736)*t+0.254829592)*t*Math.exp(-x*x);
   return x>=0?y:-y; }
@@ -2203,7 +2211,7 @@ async function viewProps(params){
       <td><b>${x.side==='YES'?'Anytime TD':`${x.side==='OVER'?'Over':'Under'} ${x.line}`}</b> ${x.side==='YES'?'':esc(x.label)}</td>
       <td class="r">${Math.round(x.prob*100)}%</td>
       <td class="r muted">${Math.round((x.book_prob||0)*100)}%</td>
-      <td class="r"><span class="ppbadge lean-${x.side==='UNDER'?'u':'o'}" style="margin:0">+${(x.edge*100).toFixed(0)}%</span></td>
+      <td class="r">${edgeBadge(x.edge)}</td>
       <td class="r">${fOdds(x.book_odds)}</td></tr>`;
   // tile = game score + how many props by type (like a picks card); click to expand the
   // props grouped by type; click again to fold
@@ -2213,9 +2221,11 @@ async function viewProps(params){
     const pred = g.pred ? `${g.away} ${Math.round(g.pred.away)} — ${Math.round(g.pred.home)} ${g.home}` : '';
     const groups = {}; rows.forEach(x=>(groups[TYPE(x.market)]=groups[TYPE(x.market)]||[]).push(x));
     const counts = TYPES.filter(t=>groups[t]).map(t=>`<span class="chip" style="padding:2px 9px;font-size:11px"><b>${groups[t].length}</b> ${t}</span>`).join('');
-    const body = rows.length ? TYPES.filter(t=>groups[t]).map(t=>`<div class="bxs" style="margin-top:10px">${t} · ${groups[t].length}</div>
-        <div class="tblwrap"><table class="tbl rec log"><thead><tr><th class="r">#</th><th>Player</th><th>Lean</th><th class="r" title="model probability">Model</th><th class="r" title="book's vig-free probability">Book</th><th class="r">Edge</th><th class="r">Price</th></tr></thead><tbody>${groups[t].map(gameRow).join('')}</tbody></table></div>`).join('')
-      : `<div class="mnote" style="margin-top:8px">${g.started?'kicked off':g.lines?'no market clears the edge floor':'no book lines yet'}</div>`;
+    // expanded: the type groups sit side by side (each a heading + table) so a wide card
+    // is filled instead of one narrow table down the left
+    const body = rows.length ? TYPES.filter(t=>groups[t]).map(t=>`<div class="pt-grp"><div class="bxs" style="margin-top:4px">${t} · ${groups[t].length}</div>
+        <div class="tblwrap"><table class="tbl rec log"><thead><tr><th class="r">#</th><th>Player</th><th>Lean</th><th class="r" title="model probability">Model</th><th class="r" title="book's vig-free probability">Book</th><th class="r">Edge</th><th class="r">Price</th></tr></thead><tbody>${groups[t].map(gameRow).join('')}</tbody></table></div></div>`).join('')
+      : `<div class="mnote pt-grp" style="margin-top:8px">${g.started?'kicked off':g.lines?'no market clears the edge floor':'no book lines yet'}</div>`;
     return `<div class="gcard ptile" onclick="this.classList.toggle('open')" title="click to show the props">
       <div class="gc-tms">
         <div class="gc-tm"><img src="${g.away_logo}" onerror="this.style.visibility='hidden'"><div class="gc-ab">${g.away}</div><div class="gc-sc">${g.pred?Math.round(g.pred.away):'–'}</div></div>
@@ -2225,7 +2235,7 @@ async function viewProps(params){
       <div class="gc-row"><span>${esc(g.gameday||'')} ${esc(g.gametime||'')}</span><span>${g.started?'kicked off':g.lines?'<span style="color:var(--good)">● book lines</span>':'no lines yet'}</span></div>
       <div class="gc-edge" style="justify-content:flex-start;gap:6px;flex-wrap:wrap"><span>${rows.length?`<b>${rows.length}</b> prop${rows.length===1?'':'s'}`:'<span style="color:var(--muted)">no props</span>'}</span>${counts}</div>
       <div class="pt-body" onclick="event.stopPropagation()">${body}
-        <div class="gc-row" style="margin-top:6px"><span></span><a href="#/matchup?home=${g.home}&away=${g.away}" style="font-size:11px">full matchup ›</a></div></div>
+        <div class="gc-row pt-foot" style="margin-top:2px"><span></span><a href="#/matchup?home=${g.home}&away=${g.away}" style="font-size:11px">full matchup ›</a></div></div>
       <div class="gc-row pt-more" style="margin-top:6px"><span></span><span>props ›</span></div>
     </div>`; };
   const withEdges = d.games.filter(g=>(byGame[g.game_id]||[]).length), without = d.games.filter(g=>!(byGame[g.game_id]||[]).length);
@@ -2624,7 +2634,7 @@ async function viewPropsRecord(params){
       <td>${line}</td>
       <td class="r">${fP(r.prob)}</td>
       <td class="r muted">${fP(r.book_prob)}</td>
-      <td class="r">+${Math.round(r.edge*100)}%</td>
+      <td class="r">${edgeBadge(r.edge)}</td>
       <td class="r">${fOdds(r.book_odds)}</td>
       <td class="r">${st}</td>
       <td class="r">${r.res?`<span class="rb ${r.res==='W'?'w':r.res==='L'?'l':'p'}">${r.res}</span>`:'<span class="rb pend">—</span>'}</td>
