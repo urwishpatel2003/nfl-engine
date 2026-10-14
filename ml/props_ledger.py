@@ -17,8 +17,10 @@ record(season, week, games)
         post Saturday/Sunday morning, so a hard "nothing after the lock" rule would record
         almost nothing;
       • nothing is ever written once the game has kicked off.
-    tier = "best" when the model beats the vig-free book price by >= MIN_EDGE (the board's
-    strip), else "lined" (every other market the book priced — the "all games" analogue).
+    Only the BEST tier is kept: the model beats the vig-free book price by >= MIN_EDGE. The
+    other lined markets are priced for the matchup page but not recorded (owner decision
+    2026-10-14: "only show and keep the best props"). Rows from before that date may carry
+    tier "lined"; grade() reports the best tier.
 
 grade(season)
     Join the ledger with the season's play-by-play (per game, per player box score: passing /
@@ -96,6 +98,8 @@ def record(season: int, week: int, games: list, now: datetime | None = None, str
                     book = m.get("book")
                     if not book or m.get("edge") is None or m.get("thin"):
                         continue
+                    if m["edge"] < MIN_EDGE:              # only the best tier is kept (owner decision 2026-10-14)
+                        continue
                     key = f"{gid}|{m['market']}|{pl.get('player_id') or pl['name']}"
                     if key in keep:
                         continue                                # frozen board: never overwrite
@@ -114,9 +118,9 @@ def record(season: int, week: int, games: list, now: datetime | None = None, str
     if not rows:
         return 0
     new = pd.DataFrame(rows, columns=COLS)
-    # strip rank: the board's top-N best props by edge (over the rows written in this call)
+    # board rank: every best prop by edge (over the rows written in this call)
     best = new.index[new["tier"] == "best"]
-    order = new.loc[best].sort_values("edge", ascending=False).index[:strip_n]
+    order = new.loc[best].sort_values("edge", ascending=False).index
     new.loc[order, "rank"] = range(1, len(order) + 1)
     if len(old):
         old = old[~old["key"].isin(new["key"])]
@@ -263,10 +267,12 @@ def grade(season: int) -> dict:
         for pos in POSITIONS:
             by_pos[pos] = {"all": _tally(_sub(fin["pos"] == pos)), "best": _tally(_sub(best & (fin["pos"] == pos)))}
         for mk, g in fin.groupby("market"):
+            gb = g[g["tier"] == "best"]
             by_market.append({"market": mk, "label": g["label"].iloc[0], "all": _tally(g),
-                              "best": _tally(g[g["tier"] == "best"]),
-                              "over": _tally(g[g["side"].isin(["OVER", "YES"])]), "under": _tally(g[g["side"] == "UNDER"])})
-        by_market.sort(key=lambda x: -x["all"]["n"])
+                              "best": _tally(gb),
+                              "over": _tally(g[g["side"].isin(["OVER", "YES"])]), "under": _tally(g[g["side"] == "UNDER"]),
+                              "over_best": _tally(gb[gb["side"].isin(["OVER", "YES"])]), "under_best": _tally(gb[gb["side"] == "UNDER"])})
+        by_market.sort(key=lambda x: -x["best"]["n"])
     if len(gdf):
         for wk, g in gdf.groupby("week"):
             f = g[g["res"].notna()]

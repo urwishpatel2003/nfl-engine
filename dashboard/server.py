@@ -2785,7 +2785,11 @@ def _priced_props(season: int, week: int, key: tuple, want_lines: bool, live: bo
                                       "book_odds": m.get("book_odds", (m.get("book") or {}).get("yes_odds")),
                                       "edge": m["edge"], "books": (m.get("book") or {}).get("books")})
     leans.sort(key=lambda x: -x["edge"])
-    best = [x for x in leans if x["edge"] >= PROPS_MIN_EDGE][:PROPS_STRIP_N]
+    # the board shows and the record keeps ONLY the best tier (edge >= PROPS_MIN_EDGE);
+    # every other lined market is priced for the per-matchup page but not surfaced
+    best = [x for x in leans if x["edge"] >= PROPS_MIN_EDGE]
+    for i, x in enumerate(best):
+        x["rank"] = i + 1
     recorded = 0
     if live and odds_status.get("events"):
         try:
