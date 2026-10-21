@@ -187,8 +187,11 @@ def event_props(home_full, away_full):
     except Exception as e:
         return {}, {"error": f"odds fetch failed: {str(e)[:100]}"}
 
+    # per book as well as the consensus: a single book sitting a point or two off the market
+    # is a line-shopping edge in its own right, and the board names the best price per side
     agg = {}
     for bk in data.get("bookmakers", []):
+        bname = bk.get("title") or bk.get("key") or "?"
         for mk in bk.get("markets", []):
             ourm = _REV.get(mk.get("key"))
             if not ourm:
@@ -196,20 +199,28 @@ def event_props(home_full, away_full):
             for oc in mk.get("outcomes", []):
                 if ourm == "anytime_td":
                     pk = (_namekey(oc.get("description") or oc.get("name")), ourm)
-                    agg.setdefault(pk, {"yes": []})["yes"].append(oc.get("price"))
+                    a = agg.setdefault(pk, {"yes": [], "per_book": {}})
+                    a["yes"].append(oc.get("price"))
+                    if oc.get("price") is not None:
+                        a["per_book"][bname] = {"yes": oc.get("price")}
                 else:
                     player, pt, price = oc.get("description"), oc.get("point"), oc.get("price")
                     side = (oc.get("name") or "").lower()
                     if player is None or pt is None:
                         continue
-                    agg.setdefault((_namekey(player), ourm), {"lines": []})["lines"].append((pt, side, price))
+                    a = agg.setdefault((_namekey(player), ourm), {"lines": [], "per_book": {}})
+                    a["lines"].append((pt, side, price))
+                    pb = a["per_book"].setdefault(bname, {"line": pt})
+                    if side in ("over", "under") and price is not None:
+                        pb["line"] = pt                       # the book's own line (over/under share it)
+                        pb[side] = price
 
     out = {}
     for pk, d in agg.items():
         if pk[1] == "anytime_td":
             yo = consensus_price(d.get("yes", []))
             if yo is not None:
-                out[pk] = {"yes_odds": yo}
+                out[pk] = {"yes_odds": yo, "per_book": d["per_book"]}
         else:
             lines = d["lines"]
             pts = [l[0] for l in lines]
@@ -221,7 +232,8 @@ def event_props(home_full, away_full):
             out[pk] = {"line": med,
                        "over_odds": consensus_price(overs),
                        "under_odds": consensus_price(unders),
-                       "books": len([l for l in lines if l[1] == "over"])}
+                       "books": len([l for l in lines if l[1] == "over"]),
+                       "per_book": d["per_book"]}
     meta = {"event_id": eid, "commence": ev.get("commence_time"),
             "remaining_credits": remaining, "markets": len(out)}
     _PROPS[eid] = {"t": time.time(), "data": out, "meta": meta}

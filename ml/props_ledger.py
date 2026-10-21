@@ -68,6 +68,29 @@ CALIB_COLS = ["key", "game_id", "season", "week", "kickoff_utc", "locked_at", "f
 CALIB_MIN_N = 100          # graded rows a market needs before its measured weight replaces the default
 
 
+# The record starts here. Rows before this week were priced by the pre-2026-10-20 model (fixed
+# CV spreads, no market anchor) and the owner asked for them removed so the record measures
+# the current model only ("measure it going forward from week 6"). Earlier rows are dropped
+# from the file the first time it is loaded after the deploy, on both the record and the
+# calibration log. Change the week here to move the start; never edit the parquet by hand.
+RECORD_START = {2026: 6}            # season -> first week kept
+
+
+def _since(df: pd.DataFrame, path: Path) -> pd.DataFrame:
+    if not len(df) or "season" not in df.columns:
+        return df
+    drop = pd.Series(False, index=df.index)
+    for season, wk in RECORD_START.items():
+        drop |= (df["season"] == season) & (df["week"] < wk)
+    if drop.any():
+        df = df[~drop].copy()
+        try:
+            df.to_parquet(path, index=False)              # physically gone, not just filtered
+        except Exception:
+            pass
+    return df
+
+
 def load() -> pd.DataFrame:
     if LEDGER.exists():
         try:
@@ -75,7 +98,7 @@ def load() -> pd.DataFrame:
             for c in COLS:
                 if c not in df.columns:
                     df[c] = False if c == "frozen" else None
-            return df
+            return _since(df, LEDGER)
         except Exception:
             pass
     return pd.DataFrame(columns=COLS)
@@ -164,7 +187,7 @@ def calib_load() -> pd.DataFrame:
             for c in CALIB_COLS:
                 if c not in df.columns:
                     df[c] = False if c == "frozen" else None
-            return df
+            return _since(df, CALIB)
         except Exception:
             pass
     return pd.DataFrame(columns=CALIB_COLS)
@@ -409,4 +432,5 @@ def grade(season: int) -> dict:
             "summary": summary, "by_pos": by_pos, "by_market": by_market, "weeks": weeks,
             "log": log.head(400).to_dict("records") if len(log) else [],
             "anchor": anchor_weights(season), "calib_min_n": CALIB_MIN_N,
+            "since_week": RECORD_START.get(season),
             "rules": {"min_edge": MIN_EDGE, "positions": list(POSITIONS)}}

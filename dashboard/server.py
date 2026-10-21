@@ -2577,8 +2577,10 @@ def _price_market(m: dict, weights: dict | None = None) -> None:
             implied = _implied(book["yes_odds"])
             w = anchor_weight("anytime_td", weights)
             p = (1.0 - w) * p + w * implied
-            m.update({"book_mean": round(implied, 3), "anchor_w": round(w, 2), "proj": round(p, 3),
-                      "book_prob": round(implied, 3), "edge": round(p - implied, 3)})
+            m.update({"side": "YES", "book_mean": round(implied, 3), "anchor_w": round(w, 2), "proj": round(p, 3),
+                      "book_prob": round(implied, 3), "edge": round(p - implied, 3),
+                      "edge_px": round(p - implied, 3), "book_odds": book["yes_odds"]})
+            _shop_and_why(m, p)
         m.update({"side": "YES", "prob": round(p, 3), "fair": fair_odds(p)})
         return
     line = book.get("line") if book else None
@@ -2604,6 +2606,64 @@ def _price_market(m: dict, weights: dict | None = None) -> None:
         else:
             m.update({"side": "UNDER", "prob": r["under"], "fair": fair_odds(r["under"]),
                       "book_prob": round(1 - novig, 3), "book_odds": book["under_odds"], "edge": round(edge_u, 3)})
+        # win probability gained at the consensus PRICE (vig included) — Sam's-style edge, breakeven 0
+        m["edge_px"] = round(m["prob"] - _implied(m["book_odds"]), 3)
+        _shop_and_why(m, m["prob"])
+
+
+def _shop_and_why(m: dict, p_side: float) -> None:
+    """Line shopping + the one-sentence reason. From the per-book prices the board carries,
+    pick the book that gives the model's side the most win probability over its own price
+    (each book's OWN line is priced under the anchored distribution — a book 2 points off
+    the market is an edge regardless of the model) and say why the prop is on the board:
+    the gap to the consensus when one book is off the market, else the model-vs-market
+    disagreement and the weight it was priced at."""
+    from ml.props import prob_over
+    book = m.get("book") or {}
+    side, per_book = m.get("side"), book.get("per_book") or {}
+    best, lines = None, []
+    if m["dist"] == "prob":
+        for name, b in per_book.items():
+            if _valid_odds(b.get("yes")):
+                imp = _implied(b["yes"])
+                cand = {"book": name, "line": None, "odds": b["yes"], "p": round(p_side, 3), "edge_px": round(p_side - imp, 3), "gap": 0.0}
+                if best is None or cand["edge_px"] > best["edge_px"]:
+                    best = cand
+    else:
+        cons = float(m["line"])
+        key = "over" if side == "OVER" else "under"
+        for name, b in per_book.items():
+            bl = b.get("line")
+            if bl is None:
+                continue
+            lines.append(float(bl))
+            if not _valid_odds(b.get(key)):
+                continue
+            r = prob_over(m, float(bl))
+            p = r["over"] if side == "OVER" else r["under"]
+            imp = _implied(b[key])
+            gap = (cons - float(bl)) if side == "OVER" else (float(bl) - cons)   # + = this book's line favours our side
+            cand = {"book": name, "line": float(bl), "odds": b[key], "p": round(p, 3), "edge_px": round(p - imp, 3), "gap": round(gap, 1)}
+            if best is None or cand["edge_px"] > best["edge_px"]:
+                best = cand
+    m["apart"] = bool(lines) and (max(lines) - min(lines)) >= 1.0      # books disagree on the number
+    if best:
+        m["shop"] = best
+    # the reason, in one sentence
+    mp, bm, pr = m.get("model_proj"), m.get("book_mean"), m.get("proj")
+    pct_model = int(round((1 - float(m.get("anchor_w") or 0)) * 100))
+    lean = "Anytime TD" if side == "YES" else f"{side.title()} {m['line']:g}"
+    if m["dist"] == "prob":
+        if bm is not None:
+            m["why"] = (f"Model {round(float(mp) * 100)}% to score vs market {round(float(bm) * 100)}%; priced at "
+                        f"{round(float(pr) * 100)}% ({pct_model}% model) against the book's {round(float(m['book_prob']) * 100)}%.")
+        return
+    if best and best["gap"] >= 1.0:
+        m["why"] = (f"{best['book']} is {best['gap']:g} off the market ({best['line']:g} against a consensus "
+                    f"{float(m['line']):g}), and the model's {float(mp):g} leans the same way.")
+    elif bm is not None:
+        m["why"] = (f"Model {float(mp):g} vs market {float(bm):g}; priced from {float(pr):g} ({pct_model}% model), "
+                    f"{lean} is {round(float(m['prob']) * 100)}% against a fair {round(float(m['book_prob']) * 100)}%.")
 
 
 def _implied(odds) -> float:
@@ -2813,6 +2873,7 @@ def _priced_props(season: int, week: int, key: tuple, want_lines: bool, live: bo
                     if thin:
                         m["thin"] = True                       # the record skips these too
                     if m.get("edge") is not None and not g.get("started") and not thin:
+                        g["n_apart"] = g.get("n_apart", 0) + (1 if m.get("apart") else 0)
                         leans.append({"game_id": g["game_id"], "home": g["home"], "away": g["away"],
                                       "team": team, "opp": opp, "player": pl["name"], "pos": pl["pos"],
                                       "market": m["market"], "label": m["label"], "side": m["side"],
@@ -2820,13 +2881,20 @@ def _priced_props(season: int, week: int, key: tuple, want_lines: bool, live: bo
                                       "book_mean": m.get("book_mean"), "anchor_w": m.get("anchor_w"),
                                       "prob": m["prob"], "fair": m["fair"], "book_prob": m.get("book_prob"),
                                       "book_odds": m.get("book_odds", (m.get("book") or {}).get("yes_odds")),
-                                      "edge": m["edge"], "books": (m.get("book") or {}).get("books")})
+                                      "edge": m["edge"], "edge_px": m.get("edge_px"), "apart": m.get("apart", False),
+                                      "shop": m.get("shop"), "why": m.get("why"),
+                                      "books": (m.get("book") or {}).get("books")})
     leans.sort(key=lambda x: -x["edge"])
     # the board shows and the record keeps ONLY the best tier (edge >= PROPS_MIN_EDGE);
     # every other lined market is priced for the per-matchup page but not surfaced
     best = [x for x in leans if x["edge"] >= PROPS_MIN_EDGE]
     for i, x in enumerate(best):
         x["rank"] = i + 1
+    for g in games:                                              # per-game summary line
+        g["n_best"] = sum(1 for x in best if x["game_id"] == g["game_id"])
+    from ml.props import _MARKETS, anchor_weight
+    # how much of each priced number is the model (1 − anchor weight): shown on the board header
+    model_weight = {mk: round(1 - anchor_weight(mk, weights), 2) for mk in _MARKETS}
     recorded = 0
     if live and odds_status.get("events"):
         try:
@@ -2835,8 +2903,16 @@ def _priced_props(season: int, week: int, key: tuple, want_lines: bool, live: bo
         except Exception as e:
             print(f"[props ledger] record failed {season} wk{week}: {e}", flush=True)
     return {"season": season, "week": week, "games": games, "best": best, "n_lined": len(leans),
-            "rules": {"min_edge": PROPS_MIN_EDGE, "strip_n": PROPS_STRIP_N},
+            "rules": {"min_edge": PROPS_MIN_EDGE, "strip_n": PROPS_STRIP_N,
+                      "hidden_markets": PROPS_HIDDEN_MARKETS, "model_weight": model_weight,
+                      "labels": {mk: v[0] for mk, v in _MARKETS.items()}},
             "anchor": weights, "odds_status": odds_status, "recorded": recorded}
+
+
+# Markets the board hides by default (a toggle shows them): the walk-forward backtest's
+# anchored pick rule was weakest on passing TDs (56 %) and interceptions (57 %) — thin,
+# noisy counts where the model adds least. They are still priced and recorded.
+PROPS_HIDDEN_MARKETS = ["pass_td", "int"]
 
 
 PROPS_RECORD_LEAD_H = float(os.environ.get("PROPS_RECORD_LEAD_HOURS", 0))   # hours before the lock
