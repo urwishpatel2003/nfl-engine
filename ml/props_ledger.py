@@ -70,10 +70,11 @@ CALIB_MIN_N = 100          # graded rows a market needs before its measured weig
 
 # The record starts here. Rows before this week were priced by the pre-2026-10-20 model (fixed
 # CV spreads, no market anchor) and the owner asked for them removed so the record measures
-# the current model only ("measure it going forward from week 6"). Earlier rows are dropped
-# from the file the first time it is loaded after the deploy, on both the record and the
-# calibration log. Change the week here to move the start; never edit the parquet by hand.
-RECORD_START = {2026: 6}            # season -> first week kept
+# the current model only: week 7 is the first week the anchored model priced before kickoff.
+# Earlier rows are dropped from the file the first time it is loaded after the deploy, on both
+# the record and the calibration log. Change the week here to move the start; never edit the
+# parquet by hand.
+RECORD_START = {2026: 7}            # season -> first week kept
 
 
 def _since(df: pd.DataFrame, path: Path) -> pd.DataFrame:
