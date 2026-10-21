@@ -2059,9 +2059,14 @@ function ppErf(x){ const t=1/(1+0.3275911*Math.abs(x));
   return x>=0?y:-y; }
 function ppNormCdf(z){ return 0.5*(1+ppErf(z/Math.SQRT2)); }
 function ppPoisCdf(k,lam){ if(k<0)return 0; let s=0,term=Math.exp(-lam); for(let i=0;i<=k;i++){ if(i>0)term*=lam/i; s+=term;} return Math.min(1,s); }
+// negative binomial (receptions: variance = phi × mean): [pmf(k), cdf(k)]
+function ppNbPmfCdf(k,mean,phi){ if(k<0)return [0,0]; const m=Math.max(1e-9,mean), r=m/Math.max(1e-6,phi-1), p=m/(r+m);
+  let term=Math.pow(1-p,r), s=term; for(let i=0;i<k;i++){ term*=(i+r)/(i+1)*p; s+=term; } return [term,Math.min(1,s)]; }
 function ppOver(m,line){
   if(m.dist==='prob') return {over:m.proj,push:0};
   if(m.dist==='normal'){ return {over:1-ppNormCdf((line-m.proj)/Math.max(1e-6,m.sd)),push:0}; }
+  if(m.dist==='nbinom'){ const isI=Math.abs(line-Math.round(line))<1e-9, [pmf,cdf]=ppNbPmfCdf(Math.floor(line),m.lam,m.phi||1.5);
+    return {over:1-cdf,push:isI?pmf:0}; }
   const lam=m.lam, isInt=Math.abs(line-Math.round(line))<1e-9;
   if(isInt){ let push=Math.exp(-lam); for(let i=1;i<=line;i++)push*=lam/i; return {over:1-ppPoisCdf(line,lam),push}; }
   return {over:1-ppPoisCdf(Math.floor(line),lam),push:0};
@@ -2104,7 +2109,7 @@ function ppRows(players){
       html+=`<tr${first?' style="border-top:2px solid #26324d"':''}>
         <td class="plr">${first?esc(pl.name)+' <span class="mk" style="font-weight:400">'+pl.pos+'</span>':''}</td>
         <td class="mk">${esc(m.label)}</td>
-        <td class="r">${isProb?Math.round(m.proj*100)+'%':m.proj}</td>
+        <td class="r"${m.book_mean!=null?` title="model ${isProb?Math.round(m.model_proj*100)+'%':m.model_proj} · market ${isProb?Math.round(m.book_mean*100)+'%':m.book_mean} · priced from the blend (weight on market ${m.anchor_w})"`:''}>${isProb?Math.round(m.proj*100)+'%':m.proj}${m.book_mean!=null?'<span class="mk">*</span>':''}</td>
         ${lineCell}
         <td id="pp-${idx}"></td></tr>`;
     });

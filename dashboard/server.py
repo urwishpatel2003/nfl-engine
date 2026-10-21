@@ -2534,6 +2534,11 @@ def api_props():
             an = meta.get(away, {}).get('team_name', away)
             props_map, status = event_props(hn, an)
             data["odds_status"] = status
+            try:
+                from ml.props_ledger import anchor_weights
+                weights = anchor_weights(int(schedules_df()["season"].max()))
+            except Exception:
+                weights = {}
             for team in (home, away):
                 for pl in data["teams"].get(team, []):
                     pk = _namekey(pl["name"])
@@ -2541,6 +2546,7 @@ def api_props():
                         book = props_map.get((pk, m["market"]))
                         if book:
                             m["book"] = book
+                            _price_market(m, weights)       # same anchored number the board prices from
     return jsonify(_native(data))
 
 
@@ -2549,36 +2555,48 @@ PROPS_MIN_EDGE = 0.05   # model prob must beat the vig-free book price by 5 pts 
 PROPS_STRIP_N = 12      # how many leans the strip carries
 
 
-def _price_market(m: dict) -> None:
+def _price_market(m: dict, weights: dict | None = None) -> None:
     """Attach the model's side, probability and fair odds to a market row — and, when the book
     has a line, the vig-free book probability and the model's edge against it. Edge is the
     same number the single-matchup page shows (+EV badge), computed once here so the whole
-    slate can be ranked. Over/Under markets price the book's line; anytime TD prices the
-    straight yes price (one-sided market, so its edge keeps the book's vig and reads a little
-    low — conservative on purpose)."""
-    from ml.props import prob_over, fair_odds
+    slate can be ranked.
+
+    With a book price the mean is first ANCHORED toward the market (ml.props.anchor_to_book):
+    `model_proj` keeps the raw model number, `book_mean` the market-implied one, and `proj` —
+    the number everything below prices from — is the weighted blend. `weights` are the measured
+    per-market anchor weights (ml.props_ledger.anchor_weights), falling back to the defaults.
+    Over/Under markets price the book's line; anytime TD anchors the probability itself to the
+    book's implied yes price (one-sided market, so its edge keeps the book's vig and reads a
+    little low — conservative on purpose)."""
+    from ml.props import prob_over, fair_odds, anchor_to_book, anchor_weight
     book = m.get("book")
+    m.setdefault("model_proj", m["proj"])                  # the thin rule and the record read the raw number
     if m["dist"] == "prob":
-        p = float(m["proj"])
-        m.update({"side": "YES", "prob": round(p, 3), "fair": fair_odds(p)})
+        p = float(m["model_proj"])
         if book and _valid_odds(book.get("yes_odds")):
             implied = _implied(book["yes_odds"])
-            m["book_prob"] = round(implied, 3)
-            m["edge"] = round(p - implied, 3)
+            w = anchor_weight("anytime_td", weights)
+            p = (1.0 - w) * p + w * implied
+            m.update({"book_mean": round(implied, 3), "anchor_w": round(w, 2), "proj": round(p, 3),
+                      "book_prob": round(implied, 3), "edge": round(p - implied, 3)})
+        m.update({"side": "YES", "prob": round(p, 3), "fair": fair_odds(p)})
         return
     line = book.get("line") if book else None
     if line is None:                                     # no book line: price the model's own half-point line
         line = round(float(m["proj"]) * 2) / 2
         m["line"] = line
+    priced = bool(book and _valid_odds(book.get("over_odds")) and _valid_odds(book.get("under_odds")))
+    if priced:
+        po, pu = _implied(book["over_odds"]), _implied(book["under_odds"])
+        novig = po / (po + pu)
+        anchor_to_book(m, float(line), novig, anchor_weight(m["market"], weights))
     r = prob_over(m, float(line))
     over_side = r["over"] >= r["under"]
     prob = r["over"] if over_side else r["under"]
     m.update({"line": float(line), "side": "OVER" if over_side else "UNDER",
               "prob": round(prob, 3), "fair": fair_odds(prob), "push": r["push"],
               "p_over": r["over"], "p_under": r["under"]})
-    if book and _valid_odds(book.get("over_odds")) and _valid_odds(book.get("under_odds")):
-        po, pu = _implied(book["over_odds"]), _implied(book["under_odds"])
-        novig = po / (po + pu)
+    if priced:
         edge_o, edge_u = r["over"] - novig, r["under"] - (1 - novig)
         if edge_o >= edge_u:
             m.update({"side": "OVER", "prob": r["over"], "fair": fair_odds(r["over"]),
@@ -2769,18 +2787,28 @@ def _priced_props(season: int, week: int, key: tuple, want_lines: bool, live: bo
             elif missing:
                 odds_status["missing"] = missing
 
-    # price every market and collect the slate-wide leans (book-lined markets only)
+    # price every market and collect the slate-wide leans (book-lined markets only). The anchor
+    # weights are the measured ones when the calibration log has enough graded rows, else the
+    # documented defaults (ml.props.ANCHOR_DEFAULT*).
+    try:
+        from ml.props_ledger import anchor_weights
+        weights = anchor_weights(season)
+    except Exception as e:
+        print(f"[props] anchor weights unavailable: {e}", flush=True)
+        weights = {}
     leans = []
     for g in games:
         for team, pls in g.get("teams", {}).items():
             opp = g["away"] if team == g["home"] else g["home"]
             for pl in pls:
                 for m in pl["markets"]:
-                    _price_market(m)
-                    # a near-zero projection (a back-up the book still lists) prices "under" at
-                    # ~100% — that is the model having no role for him, not an edge
-                    thin = (m["dist"] == "poisson" and m["proj"] < 0.5) or (m["dist"] == "normal" and m["proj"] < 5) \
-                        or (m["dist"] == "prob" and m["proj"] < 0.05) \
+                    _price_market(m, weights)
+                    # a near-zero RAW projection (a back-up the book still lists) prices "under" at
+                    # ~100% — that is the model having no role for him, not an edge. Judged on the
+                    # model's own number: the anchor would drag a zero halfway to the book's line.
+                    raw = float(m.get("model_proj", m["proj"]))
+                    thin = (m["dist"] in ("poisson", "nbinom") and raw < 0.5) or (m["dist"] == "normal" and raw < 5) \
+                        or (m["dist"] == "prob" and raw < 0.05) \
                         or (m.get("line") is not None and float(m["line"]) <= 0)   # a non-positive line is not a market
                     if thin:
                         m["thin"] = True                       # the record skips these too
@@ -2788,8 +2816,9 @@ def _priced_props(season: int, week: int, key: tuple, want_lines: bool, live: bo
                         leans.append({"game_id": g["game_id"], "home": g["home"], "away": g["away"],
                                       "team": team, "opp": opp, "player": pl["name"], "pos": pl["pos"],
                                       "market": m["market"], "label": m["label"], "side": m["side"],
-                                      "line": m.get("line"), "proj": m["proj"], "prob": m["prob"],
-                                      "fair": m["fair"], "book_prob": m.get("book_prob"),
+                                      "line": m.get("line"), "proj": m["proj"], "model_proj": m.get("model_proj"),
+                                      "book_mean": m.get("book_mean"), "anchor_w": m.get("anchor_w"),
+                                      "prob": m["prob"], "fair": m["fair"], "book_prob": m.get("book_prob"),
                                       "book_odds": m.get("book_odds", (m.get("book") or {}).get("yes_odds")),
                                       "edge": m["edge"], "books": (m.get("book") or {}).get("books")})
     leans.sort(key=lambda x: -x["edge"])
@@ -2807,7 +2836,7 @@ def _priced_props(season: int, week: int, key: tuple, want_lines: bool, live: bo
             print(f"[props ledger] record failed {season} wk{week}: {e}", flush=True)
     return {"season": season, "week": week, "games": games, "best": best, "n_lined": len(leans),
             "rules": {"min_edge": PROPS_MIN_EDGE, "strip_n": PROPS_STRIP_N},
-            "odds_status": odds_status, "recorded": recorded}
+            "anchor": weights, "odds_status": odds_status, "recorded": recorded}
 
 
 PROPS_RECORD_LEAD_H = float(os.environ.get("PROPS_RECORD_LEAD_HOURS", 0))   # hours before the lock

@@ -52,8 +52,20 @@ POSITIONS = ("QB", "RB", "WR", "TE")
 
 COLS = ["key", "game_id", "season", "week", "home", "away", "kickoff_utc", "locked_at", "frozen",
         "team", "opp", "player", "player_id", "pos", "market", "label", "dist",
-        "side", "line", "proj", "prob", "fair", "book_prob", "book_odds", "edge", "tier", "rank", "books"]
-NUM = ["line", "proj", "prob", "fair", "book_prob", "book_odds", "edge", "rank", "books"]
+        "side", "line", "proj", "model_proj", "book_mean", "anchor_w",
+        "prob", "fair", "book_prob", "book_odds", "edge", "tier", "rank", "books"]
+NUM = ["line", "proj", "model_proj", "book_mean", "anchor_w", "prob", "fair", "book_prob", "book_odds", "edge", "rank", "books"]
+
+# ── calibration log ───────────────────────────────────────────────────
+# EVERY book-lined, non-thin market (not just the best tier) with the raw model mean, the
+# market-implied mean and the book's vig-free over price, so the anchor weight can be
+# MEASURED against the box score instead of assumed (ml.props.ANCHOR_DEFAULT is the prior).
+# Same lifecycle as the record: provisional until the Saturday lock, frozen after. Never shown.
+CALIB = PROC / "props_calib.parquet"
+CALIB_COLS = ["key", "game_id", "season", "week", "kickoff_utc", "locked_at", "frozen",
+              "team", "player", "player_id", "pos", "market", "dist", "line", "sd",
+              "model_proj", "book_mean", "book_over_prob", "book_odds"]
+CALIB_MIN_N = 100          # graded rows a market needs before its measured weight replaces the default
 
 
 def load() -> pd.DataFrame:
@@ -83,7 +95,7 @@ def record(season: int, week: int, games: list, now: datetime | None = None, str
             old.loc[wk, "frozen"] = True                       # first post-lock call: stamp the board
             old.to_parquet(LEDGER, index=False)
         keep = set(old.loc[wk, "key"])
-    rows = []
+    rows, calib = [], []
     for g in games:
         gid = g.get("game_id")
         if not gid or g.get("final"):
@@ -98,9 +110,20 @@ def record(season: int, week: int, games: list, now: datetime | None = None, str
                     book = m.get("book")
                     if not book or m.get("edge") is None or m.get("thin"):
                         continue
+                    key = f"{gid}|{m['market']}|{pl.get('player_id') or pl['name']}"
+                    if key not in keep and m.get("book_mean") is not None:
+                        calib.append({
+                            "key": key, "game_id": gid, "season": int(season), "week": int(week),
+                            "kickoff_utc": ko.isoformat(), "locked_at": now.isoformat(), "frozen": frozen,
+                            "team": team, "player": pl["name"], "player_id": pl.get("player_id"), "pos": pl["pos"],
+                            "market": m["market"], "dist": m["dist"], "line": m.get("line"), "sd": m.get("sd"),
+                            "model_proj": m.get("model_proj", m["proj"]), "book_mean": m.get("book_mean"),
+                            "book_over_prob": m.get("book_prob") if m["side"] in ("OVER", "YES") else (
+                                None if m.get("book_prob") is None else round(1 - m["book_prob"], 3)),
+                            "book_odds": m.get("book_odds", book.get("yes_odds")),
+                        })
                     if m["edge"] < MIN_EDGE:              # only the best tier is kept (owner decision 2026-10-14)
                         continue
-                    key = f"{gid}|{m['market']}|{pl.get('player_id') or pl['name']}"
                     if key in keep:
                         continue                                # frozen board: never overwrite
                     rows.append({
@@ -109,12 +132,14 @@ def record(season: int, week: int, games: list, now: datetime | None = None, str
                         "kickoff_utc": ko.isoformat(), "locked_at": now.isoformat(), "frozen": frozen,
                         "team": team, "opp": opp, "player": pl["name"], "player_id": pl.get("player_id"),
                         "pos": pl["pos"], "market": m["market"], "label": m["label"], "dist": m["dist"],
-                        "side": m["side"], "line": m.get("line"), "proj": m["proj"], "prob": m["prob"],
-                        "fair": m["fair"], "book_prob": m.get("book_prob"),
+                        "side": m["side"], "line": m.get("line"), "proj": m["proj"],
+                        "model_proj": m.get("model_proj"), "book_mean": m.get("book_mean"), "anchor_w": m.get("anchor_w"),
+                        "prob": m["prob"], "fair": m["fair"], "book_prob": m.get("book_prob"),
                         "book_odds": m.get("book_odds", book.get("yes_odds")),
                         "edge": m["edge"], "tier": "best" if m["edge"] >= MIN_EDGE else "lined",
                         "rank": None, "books": book.get("books"),
                     })
+    _calib_write(calib, season, week, frozen)
     if not rows:
         return 0
     new = pd.DataFrame(rows, columns=COLS)
@@ -130,6 +155,92 @@ def record(season: int, week: int, games: list, now: datetime | None = None, str
     PROC.mkdir(parents=True, exist_ok=True)
     out.to_parquet(LEDGER, index=False)
     return len(rows)
+
+
+def calib_load() -> pd.DataFrame:
+    if CALIB.exists():
+        try:
+            df = pd.read_parquet(CALIB)
+            for c in CALIB_COLS:
+                if c not in df.columns:
+                    df[c] = False if c == "frozen" else None
+            return df
+        except Exception:
+            pass
+    return pd.DataFrame(columns=CALIB_COLS)
+
+
+def _calib_write(rows: list, season: int, week: int, frozen: bool) -> int:
+    """Upsert this call's calibration rows. Before the lock every row is overwritten by the next
+    call (the line moves); after it the week's rows are stamped frozen and kept, and only
+    markets not yet on file are added (late-posting lines)."""
+    old = calib_load()
+    if len(old):
+        wk = (old["season"] == int(season)) & (old["week"] == int(week))
+        if frozen and wk.any():
+            if not old.loc[wk, "frozen"].fillna(False).astype(bool).all():
+                old.loc[wk, "frozen"] = True
+                old.to_parquet(CALIB, index=False)
+            keep = set(old.loc[wk, "key"])
+            rows = [r for r in rows if r["key"] not in keep]
+    if not rows:
+        return 0
+    new = pd.DataFrame(rows, columns=CALIB_COLS)
+    if len(old):
+        old = old[~old["key"].isin(new["key"])]
+    out = pd.concat([old, new], ignore_index=True)
+    for c in ("line", "sd", "model_proj", "book_mean", "book_over_prob", "book_odds"):
+        out[c] = pd.to_numeric(out[c], errors="coerce")
+    PROC.mkdir(parents=True, exist_ok=True)
+    out.to_parquet(CALIB, index=False)
+    return len(rows)
+
+
+_ANCHOR_CACHE = {}     # season -> (calib mtime, pbp mtime, weights)
+
+
+def anchor_weights(season: int) -> dict:
+    """Per-market anchor weight MEASURED from the calibration log: over graded rows the
+    least-squares w for actual ≈ (1−w)·model + w·book_mean, i.e. w = Σ(d·r)/Σ(d²) with
+    d = book − model and r = actual − model. A market needs CALIB_MIN_N graded rows; until
+    then its entry carries the default and n, so the record page can show the state.
+    Returns {market: {"w": float|None, "n": int, "default": float, "mae_model", "mae_book",
+    "mae_blend"}}; ml.props.anchor_weight() falls back to the default when "w" is None."""
+    from ml.props import ANCHOR_DEFAULT, ANCHOR_DEFAULT_BY_MARKET, ANCHOR_MIN, ANCHOR_MAX
+    cm = CALIB.stat().st_mtime if CALIB.exists() else 0
+    pb = RAW / f"pbp_{season}.parquet"
+    pm = pb.stat().st_mtime if pb.exists() else 0
+    c = _ANCHOR_CACHE.get(season)
+    if c and c[0] == cm and c[1] == pm:
+        return c[2]
+    out = {}
+    df = calib_load()
+    df = df[df["season"] == int(season)] if len(df) else df
+    box, present = game_boxes(season) if len(df) else (pd.DataFrame(), set())
+    if len(df) and len(box):
+        bx = box.set_index(["game_id", "player_id"])
+        df = df[df["game_id"].isin(present) & df["player_id"].notna()].copy()
+        idx = list(zip(df["game_id"], df["player_id"]))
+        hit = np.array([i in bx.index for i in idx], dtype=bool)      # a plain list would select COLUMNS when empty
+        df = df[hit].copy() if len(df) else df
+        df["actual"] = [float(bx.loc[i, mk]) for i, mk in zip(list(zip(df["game_id"], df["player_id"])), df["market"])]
+        for mk, g in df.groupby("market"):
+            g = g.dropna(subset=["model_proj", "book_mean", "actual"])
+            n = len(g)
+            d = (g["book_mean"] - g["model_proj"]).to_numpy(dtype=float)
+            r = (g["actual"] - g["model_proj"]).to_numpy(dtype=float)
+            default = ANCHOR_DEFAULT_BY_MARKET.get(mk, ANCHOR_DEFAULT)
+            w = None
+            if n >= CALIB_MIN_N and float((d * d).sum()) > 0:
+                w = float(min(ANCHOR_MAX, max(ANCHOR_MIN, (d * r).sum() / (d * d).sum())))
+            we = w if w is not None else default
+            blend = (1 - we) * g["model_proj"] + we * g["book_mean"]
+            out[mk] = {"w": None if w is None else round(w, 3), "n": int(n), "default": default,
+                       "mae_model": round(float((g["actual"] - g["model_proj"]).abs().mean()), 2) if n else None,
+                       "mae_book": round(float((g["actual"] - g["book_mean"]).abs().mean()), 2) if n else None,
+                       "mae_blend": round(float((g["actual"] - blend).abs().mean()), 2) if n else None}
+    _ANCHOR_CACHE[season] = (cm, pm, out)
+    return out
 
 
 # ── box scores from play-by-play ──────────────────────────────────────
@@ -297,4 +408,5 @@ def grade(season: int) -> dict:
             "n_graded": int(len(fin)), "n_pending": int((gdf["res"].isna()).sum()) if len(gdf) else 0,
             "summary": summary, "by_pos": by_pos, "by_market": by_market, "weeks": weeks,
             "log": log.head(400).to_dict("records") if len(log) else [],
+            "anchor": anchor_weights(season), "calib_min_n": CALIB_MIN_N,
             "rules": {"min_edge": MIN_EDGE, "positions": list(POSITIONS)}}

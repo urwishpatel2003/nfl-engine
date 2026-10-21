@@ -149,6 +149,18 @@ Every book-lined market on the board is written to `ml/props_ledger.py` before k
 (provisional until the Saturday lock, frozen after; late-posting markets added once) and
 graded on the play-by-play box score; `/api/props_record` feeds Betting > Props Record.
 
+Props pricing (`ml/props.py`, `_price_market` in `dashboard/server.py`): spreads are FITTED
+(`_SD_FIT`, game-log sd = a·mean^k × a projection-error scale k from `backtest_props.py`;
+receptions are negative binomial, `REC_PHI`), and with a book price the mean is ANCHORED toward
+the market-implied mean (`anchor_to_book`: `model_proj` raw, `book_mean` market, `proj` = the
+blend that is priced). The weight is `ANCHOR_DEFAULT` (0.65; TD/INT markets higher) until the
+calibration log `data/processed/props_calib.parquet` (every lined market + box score, refresh-
+managed, git-ignored) has ≥ `CALIB_MIN_N` graded rows for a market — then `anchor_weights()`
+measures it by least squares and the server uses that. `python backtest_props.py` is the
+walk-forward 2022-25 backtest (mean quality, spread calibration, pick rule vs a naive market;
+section D runs against real closing lines once `fetch_prop_history.py` has pulled them from
+the Odds API's historical endpoints — paid plan, ~110 credits per game, 2023 season onward).
+
 ## Kalshi (Betting > Kalshi tab)
 
 Ported from the tennis engine. Four modules under `ml/`, one boundary:

@@ -35,6 +35,7 @@ _REFRESH_NAMES = {"injuries.parquet", "schedules.parquet", "situational_stats.pa
                   "last_refresh.json", "season_2026.json",
                   "picks_ledger.parquet",      # the site's own pre-kickoff pick record — never clobber
                   "props_ledger.parquet",      # the player-prop record (ml/props_ledger.py) — same rule
+                  "props_calib.parquet",       # every lined prop + box score: measures the anchor weight
                   "kalshi_exposure.jsonl"}     # confirmed Kalshi orders: a cap that forgets is not a cap
 
 
