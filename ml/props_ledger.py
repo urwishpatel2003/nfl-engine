@@ -47,7 +47,10 @@ PROC = Path(__file__).parent.parent / "data" / "processed"
 RAW = Path(__file__).parent.parent / "data" / "raw"
 LEDGER = PROC / "props_ledger.parquet"
 
-MIN_EDGE = 0.05          # model prob − vig-free book prob for a row to be a "best" prop (board strip)
+# model prob − vig-free book prob for a row to be a "best" prop (the board and this record).
+# Raised from 0.05 to 0.15 on 2026-10-20 (owner: "cap the props edge to 15%, anything below it
+# should not show up"). With the market anchor a 15-pt edge is rare, so the board is small.
+MIN_EDGE = 0.15
 POSITIONS = ("QB", "RB", "WR", "TE")
 
 COLS = ["key", "game_id", "season", "week", "home", "away", "kickoff_utc", "locked_at", "frozen",

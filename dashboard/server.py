@@ -2551,7 +2551,7 @@ def api_props():
 
 
 _PROPS_SLATE = {}       # (season, week, availability signature) -> per-game model props; cleared on refresh
-PROPS_MIN_EDGE = 0.05   # model prob must beat the vig-free book price by 5 pts to make the "best props" strip
+from ml.props_ledger import MIN_EDGE as PROPS_MIN_EDGE   # one floor for the board AND the record (ml/props_ledger.py)
 PROPS_STRIP_N = 12      # how many leans the strip carries
 
 

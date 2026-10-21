@@ -2076,8 +2076,8 @@ function ftBreakouts(rows){
 
 // ── VIEW: player props ──────────────────────────────────────────────
 let PP_ROWS = [];
-// edge badge coloured by SIZE of the edge (not over/under): 5–9 pts blue, 10–19 amber, 20+ green
-function edgeBadge(e){ const p=Math.round((e||0)*100), c=p>=20?'eb3':p>=10?'eb2':'eb1'; return `<span class="ppbadge ${c}" style="margin:0" title="model probability minus the book's vig-free probability">+${p}%</span>`; }
+// edge badge coloured by SIZE of the edge (not over/under): 15–19 pts blue, 20–29 amber, 30+ green (floor is 15)
+function edgeBadge(e){ const p=Math.round((e||0)*100), c=p>=30?'eb3':p>=20?'eb2':'eb1'; return `<span class="ppbadge ${c}" style="margin:0" title="model probability minus the book's vig-free probability">+${p}%</span>`; }
 function ppErf(x){ const t=1/(1+0.3275911*Math.abs(x));
   const y=1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-0.284496736)*t+0.254829592)*t*Math.exp(-x*x);
   return x>=0?y:-y; }
