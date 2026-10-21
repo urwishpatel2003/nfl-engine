@@ -48,9 +48,21 @@ RAW = Path(__file__).parent.parent / "data" / "raw"
 LEDGER = PROC / "props_ledger.parquet"
 
 # model prob − vig-free book prob for a row to be a "best" prop (the board and this record).
-# Raised from 0.05 to 0.15 on 2026-10-20 (owner: "cap the props edge to 15%, anything below it
-# should not show up"). With the market anchor a 15-pt edge is rare, so the board is small.
-MIN_EDGE = 0.15
+# SET FROM THE BACKTEST (backtest_props.py section C, anchored model, walk-forward 2022-25,
+# 48k markets against a naive trailing-average market, breakeven 52.4 % at −110):
+#     claimed edge   5-7.5   7.5-10   10-12.5   12.5-15   15-20   20+
+#     hit rate       55 %    60 %     63 %      62 %      68 %    85 %
+# The claimed edge is calibrated against that naive market (realised ≈ claimed), but a real
+# book is sharper, so plan on roughly half of it surviving: a 10-pt claimed edge still clears
+# the vig with margin, a 5-pt one is breakeven. 15 pts is safe but leaves ~10 picks a week.
+# Rushing markets are weaker (carries 59 %, rush yds 54 %, rush+rec 54 % in the 10-15 bucket)
+# and need 15. Owner history: 0.05 at launch → 0.15 on 2026-10-20 → this table the same day.
+MIN_EDGE = 0.10                                       # default floor
+MIN_EDGE_BY_MARKET = {"rush_yds": 0.15, "carries": 0.15, "rushrec_yds": 0.15}
+
+
+def min_edge(market: str) -> float:
+    return MIN_EDGE_BY_MARKET.get(market, MIN_EDGE)
 POSITIONS = ("QB", "RB", "WR", "TE")
 
 COLS = ["key", "game_id", "season", "week", "home", "away", "kickoff_utc", "locked_at", "frozen",
@@ -149,7 +161,7 @@ def record(season: int, week: int, games: list, now: datetime | None = None, str
                                 None if m.get("book_prob") is None else round(1 - m["book_prob"], 3)),
                             "book_odds": m.get("book_odds", book.get("yes_odds")),
                         })
-                    if m["edge"] < MIN_EDGE:              # only the best tier is kept (owner decision 2026-10-14)
+                    if m["edge"] < min_edge(m["market"]):  # only the best tier is kept (owner decision 2026-10-14)
                         continue
                     if key in keep:
                         continue                                # frozen board: never overwrite
@@ -163,7 +175,7 @@ def record(season: int, week: int, games: list, now: datetime | None = None, str
                         "model_proj": m.get("model_proj"), "book_mean": m.get("book_mean"), "anchor_w": m.get("anchor_w"),
                         "prob": m["prob"], "fair": m["fair"], "book_prob": m.get("book_prob"),
                         "book_odds": m.get("book_odds", book.get("yes_odds")),
-                        "edge": m["edge"], "tier": "best" if m["edge"] >= MIN_EDGE else "lined",
+                        "edge": m["edge"], "tier": "best" if m["edge"] >= min_edge(m["market"]) else "lined",
                         "rank": None, "books": book.get("books"),
                     })
     _calib_write(calib, season, week, frozen)
@@ -437,4 +449,4 @@ def grade(season: int) -> dict:
             "log": log.head(400).to_dict("records") if len(log) else [],
             "anchor": anchor_weights(season), "calib_min_n": CALIB_MIN_N,
             "since_week": RECORD_START.get(season),
-            "rules": {"min_edge": MIN_EDGE, "positions": list(POSITIONS)}}
+            "rules": {"min_edge": MIN_EDGE, "min_edge_by_market": MIN_EDGE_BY_MARKET, "positions": list(POSITIONS)}}

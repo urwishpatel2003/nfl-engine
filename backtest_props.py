@@ -421,7 +421,7 @@ def section_c(df: pd.DataFrame):
         over_side = po >= (1 - po) if True else None
         prob = np.where(po >= 0.5, po, 1 - po)
         book = np.where(po >= 0.5, d["book_p"], 1 - d["book_p"])
-        e = d.assign(edge=prob - book, side_over=po >= 0.5)
+        e = d.assign(edge=prob - book, prob=prob, side_over=po >= 0.5)
         e["won"] = np.where(e["side_over"], won_over, ~won_over)
         e = e[(e["dist"] != "prob") | e["side_over"]]           # anytime TD: YES bets only, like the board
         e = e[e["edge"] >= 0.05]
@@ -431,6 +431,26 @@ def section_c(df: pd.DataFrame):
         print(f"\n— {name} —  ({len(e)} picks at edge ≥ 5 pts out of {len(d)} markets)")
         print(tally(e, "bucket").to_string())
         print(tally(e, "market").to_string())
+        if mc == "mean_anch":
+            # THE FLOOR TABLE: where to set ml.props_ledger.MIN_EDGE. Fine buckets of the claimed
+            # edge with the realised hit rate and the claimed probability beside it (calibration),
+            # then per market. Plan on about half the claimed edge surviving against a real book.
+            print("\n  floor table (anchored): fine buckets, hit % vs claimed %  — breakeven 52.4 % at −110")
+            f = e.assign(fine=pd.cut(e["edge"], [0.05, 0.075, 0.10, 0.125, 0.15, 0.20, 0.25, 1.0], right=False))
+            t = f.groupby("fine", observed=True).agg(n=("won", "size"), hit=("won", "mean"), claimed=("prob", "mean"), units=("units", "sum"))
+            t["hit%"] = (t["hit"] * 100).round(1); t["claimed%"] = (t["claimed"] * 100).round(1); t["roi%"] = (t["units"] / t["n"] * 100).round(1)
+            print(t[["n", "hit%", "claimed%", "roi%"]].to_string())
+            print("\n  per market, hit % (n) by claimed-edge bucket:")
+            rows = []
+            for mk, g in e.groupby("market"):
+                r = {"market": mk}
+                for lo, hi, lab in [(.05, .10, "5-10"), (.10, .15, "10-15"), (.15, .20, "15-20"), (.20, 1, "20+")]:
+                    s = g[(g["edge"] >= lo) & (g["edge"] < hi)]
+                    r[lab] = f"{s['won'].mean() * 100:.0f}% ({len(s)})" if len(s) >= 20 else f"— ({len(s)})"
+                rows.append(r)
+            print(pd.DataFrame(rows).set_index("market").to_string())
+            x, y = e["prob"] - 0.5, e["won"].astype(float) - 0.5
+            print(f"\n  realised / claimed edge (slope, edge ≥ 5): {float((x * y).sum() / (x * x).sum()):.2f}  (1.0 = calibrated vs this naive market)")
 
 
 def section_d(df: pd.DataFrame, names: pd.Series):

@@ -142,8 +142,10 @@ The dashboard (`dashboard/season2026.html`) is a hash-routed SPA: Rankings, Team
 Betting > Player Props (`/api/props_slate`) is schedule-driven like Schedule & Picks: every game
 of the week, model props per player (`ml/props.py`), live book lines merged per event
 (`ml/odds.event_props`, one Odds-API request per game, cached 30 min), and a "best props" strip
-of markets where the model beats the vig-free book price by ≥ `MIN_EDGE` (15 pts, one constant
-in `ml/props_ledger.py`, shared by the board and the record). A cold week builds in a
+of markets where the model beats the vig-free book price by the floor (`MIN_EDGE` 10 pts,
+`MIN_EDGE_BY_MARKET` 15 on the rushing markets — one table in `ml/props_ledger.py` shared by
+the board and the record, SET FROM `backtest_props.py`'s floor table; re-run it before
+changing). A cold week builds in a
 background thread (the route answers 202 + progress; the page polls) because 16 box scores
 exceed the gunicorn timeout; the refresh job pre-warms the current week (`warm_props_slate`).
 Every book-lined market on the board is written to `ml/props_ledger.py` before kickoff

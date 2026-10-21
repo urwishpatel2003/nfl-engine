@@ -2551,7 +2551,8 @@ def api_props():
 
 
 _PROPS_SLATE = {}       # (season, week, availability signature) -> per-game model props; cleared on refresh
-from ml.props_ledger import MIN_EDGE as PROPS_MIN_EDGE   # one floor for the board AND the record (ml/props_ledger.py)
+from ml.props_ledger import MIN_EDGE as PROPS_MIN_EDGE, MIN_EDGE_BY_MARKET as PROPS_MIN_EDGE_BY_MARKET, min_edge as _props_min_edge
+# one floor table for the board AND the record (ml/props_ledger.py; set from backtest_props.py)
 PROPS_STRIP_N = 12      # how many leans the strip carries
 
 
@@ -2905,7 +2906,7 @@ def _priced_props(season: int, week: int, key: tuple, want_lines: bool, live: bo
     leans.sort(key=lambda x: -x["edge"])
     # the board shows and the record keeps ONLY the best tier (edge >= PROPS_MIN_EDGE);
     # every other lined market is priced for the per-matchup page but not surfaced
-    best = [x for x in leans if x["edge"] >= PROPS_MIN_EDGE]
+    best = [x for x in leans if x["edge"] >= _props_min_edge(x["market"])]
     for i, x in enumerate(best):
         x["rank"] = i + 1
     for g in games:                                              # per-game summary line
@@ -2921,7 +2922,7 @@ def _priced_props(season: int, week: int, key: tuple, want_lines: bool, live: bo
         except Exception as e:
             print(f"[props ledger] record failed {season} wk{week}: {e}", flush=True)
     return {"season": season, "week": week, "games": games, "best": best, "n_lined": len(leans),
-            "rules": {"min_edge": PROPS_MIN_EDGE, "strip_n": PROPS_STRIP_N,
+            "rules": {"min_edge": PROPS_MIN_EDGE, "min_edge_by_market": PROPS_MIN_EDGE_BY_MARKET, "strip_n": PROPS_STRIP_N,
                       "hidden_markets": PROPS_HIDDEN_MARKETS, "model_weight": model_weight,
                       "labels": {mk: v[0] for mk, v in _MARKETS.items()}},
             "anchor": weights, "odds_status": odds_status, "recorded": recorded}

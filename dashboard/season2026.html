@@ -2076,8 +2076,8 @@ function ftBreakouts(rows){
 
 // ── VIEW: player props ──────────────────────────────────────────────
 let PP_ROWS = [];
-// edge badge coloured by SIZE of the edge (not over/under): 15–19 pts blue, 20–29 amber, 30+ green (floor is 15)
-function edgeBadge(e){ const p=Math.round((e||0)*100), c=p>=30?'eb3':p>=20?'eb2':'eb1'; return `<span class="ppbadge ${c}" style="margin:0" title="model probability minus the book's vig-free probability">+${p}%</span>`; }
+// edge badge coloured by SIZE of the edge (not over/under): 10–14 pts blue, 15–24 amber, 25+ green (floor 10, 15 on rushing)
+function edgeBadge(e){ const p=Math.round((e||0)*100), c=p>=25?'eb3':p>=15?'eb2':'eb1'; return `<span class="ppbadge ${c}" style="margin:0" title="model probability minus the book's vig-free probability">+${p}%</span>`; }
 function ppErf(x){ const t=1/(1+0.3275911*Math.abs(x));
   const y=1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-0.284496736)*t+0.254829592)*t*Math.exp(-x*x);
   return x>=0?y:-y; }
@@ -2207,6 +2207,9 @@ async function viewProps(params){
   if(d.error){ body.innerHTML=`<div class="note warn">${esc(d.error)}</div>`; return; }
   if(!d.games||!d.games.length){ body.innerHTML=`<div class="note warn">No games found for this week.</div>`; return; }
   const os=d.odds_status||{}, best=d.best||[], minE=Math.round(((d.rules||{}).min_edge||0.05)*100);
+  // the floor table (ml/props_ledger.py, set from the backtest): default + the markets that need more
+  const floorBy=(d.rules||{}).min_edge_by_market||{}, floorTxt = (()=>{ const by={}; Object.keys(floorBy).forEach(k=>(by[Math.round(floorBy[k]*100)]=by[Math.round(floorBy[k]*100)]||[]).push(((d.rules||{}).labels||{})[k]||k));
+    return `${minE}+ pts${Object.keys(by).length?` (${Object.keys(by).map(p=>`${p} on ${by[p].join(', ')}`).join('; ')})`:''}`; })();
   const credits = os.remaining_credits!=null?` · ${esc(''+os.remaining_credits)} credits left`:'';
   const oddsBar = !lines
     ? `<div class="note" style="margin:0 0 12px">Model lines only. <a href="#/props?season=${d.season}&week=${d.week}">Load live book lines</a> (one odds-API request per game, cached 30 min).</div>`
@@ -2284,15 +2287,15 @@ async function viewProps(params){
     const wSummary = (()=>{ const v=wks.map(k=>Math.round(mw[k]*100)); const mode=v.sort((a,b)=>v.filter(x=>x===a).length-v.filter(x=>x===b).length).pop();
       const odd=wks.filter(k=>Math.round(mw[k]*100)!==mode).map(k=>`${Math.round(mw[k]*100)}% ${esc(labels[k]||k)}`); return `<b>${mode}%</b> model on most markets${odd.length?` (${odd.join(', ')})`:''}`; })();
     const strip = Object.keys(mw).length ? `<div class="mnote" style="margin:0 0 10px;line-height:1.7"><span class="only-wide">Model weight by market — the rest of each priced number is the market: ${wks.map(k=>`<span class="chip" style="padding:1px 8px;font-size:11px"><b>${Math.round(mw[k]*100)}%</b> ${esc(labels[k]||k)}</span>`).join(' ')}</span><span class="only-narrow">Model weight: ${wSummary}; the rest is the market.</span>
-        <span style="display:block;margin-top:4px">Edge = model probability − the market's vig-free probability (floor ${minE} pts). "Gained" = win probability over the actual price, breakeven 0; at −110 you need +2.4 to break even.</span></div>` : '';
+        <span style="display:block;margin-top:4px">Edge = model probability − the market's vig-free probability (floor ${floorTxt}, set from the 2022-25 backtest). "Gained" = win probability over the actual price, breakeven 0; at −110 you need +2.4 to break even.</span></div>` : '';
     const toggle = hidden.length ? `<label class="mnote" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin:0 0 10px"><input type="checkbox" id="ppShowAll" ${showAll?'checked':''} onchange="PP_RENDER()"> show ${hidden.map(k=>esc(labels[k]||k)).join(' / ')} markets${nHidden?` (${nHidden} hidden — weakest in the backtest)`:''}</label>` : '';
     const table = shown.length ? `<div class="card" style="padding:14px">
-        <h2 style="margin:0 0 10px">🎯 Best props <span>${shown.length} markets where the model beats the vig-free price by ${minE}+ pts · ranked by edge · ${withEdges.length} of ${d.games.length} games carry an edge · ${nOpen} still to kick off</span></h2>
+        <h2 style="margin:0 0 10px">🎯 Best props <span>${shown.length} markets where the model beats the vig-free price by ${floorTxt} · ranked by edge · ${withEdges.length} of ${d.games.length} games carry an edge · ${nOpen} still to kick off</span></h2>
         ${strip}${toggle}
         <div class="sched">${d.games.map(gameTile).join('')}</div>
         <div style="color:var(--muted);font-size:11px;margin-top:10px">Each number is priced from a blend of the model's projection and the market-implied mean (weights above; measured from graded results once the record is large enough). "Priced apart" counts markets where books disagree on the line by a point or more — the best price names the book and its own line. These rows are written to the <a href="#/props_record">Props Record</a> before kickoff and graded on the box score; anytime-TD edges keep the book's vig (one-sided market) so they read low. Full projected box scores for every player are on each game's matchup page.</div>
       </div>`
-      : (lines && os.events ? `<div class="card" style="padding:14px"><h2 style="margin:0 0 6px">🎯 Best props <span>none clear the ${minE}-pt floor</span></h2>${strip}${toggle}<div class="note" style="margin:0">The model and the books agree on every lined market this week within ${minE} points of probability.</div></div>`
+      : (lines && os.events ? `<div class="card" style="padding:14px"><h2 style="margin:0 0 6px">🎯 Best props <span>none clear the floor (${floorTxt})</span></h2>${strip}${toggle}<div class="note" style="margin:0">The model and the books agree on every lined market this week within the floor.</div></div>`
          : `<div class="card" style="padding:14px"><h2 style="margin:0 0 6px">🎯 Best props <span>need live book lines</span></h2><div class="note" style="margin:0">Props are only surfaced against a book line. Books post player props close to game day; the board fills in as they appear. Projected box scores for every player are on each game's matchup page.</div></div>`);
     const b=document.getElementById('ppBody'); if(b) b.innerHTML = oddsBar + table;
   };
@@ -2650,6 +2653,7 @@ async function viewPropsRecord(params){
   if(d.error){ body.innerHTML = `<div class="note warn">${esc(d.error)}</div>`; return; }
   if(d.since_week){ const t=document.querySelector('.viewhead .ttl span'); if(t) t.textContent = `measured from week ${d.since_week} (the current model) · every best prop frozen before kickoff · graded on the play-by-play box score`; }
   const S = d.summary||{}, be = 110/210, minE = Math.round((d.rules.min_edge||0.05)*100);
+  const floorBy = d.rules.min_edge_by_market||{}, floorTxt = `${minE}+ pts${Object.keys(floorBy).length?` (${[...new Set(Object.values(floorBy).map(v=>Math.round(v*100)))].map(p=>`${p} on ${Object.keys(floorBy).filter(k=>Math.round(floorBy[k]*100)===p).map(k=>({rush_yds:'Rush Yds',carries:'Carries',rushrec_yds:'Rush+Rec Yds'})[k]||k).join(', ')}`).join('; ')})`:''}`;
   const tile = (title, sub, t, beat)=>{
     if(!t || !t.n) return `<div class="rtile"><div class="rt-ttl">${title}<span>${sub}</span></div><div class="rt-rec muted">no graded props yet</div></div>`;
     const good = t.pct!=null && t.pct >= beat, cls = t.pct==null?'':(good?'g':'b');
@@ -2657,10 +2661,10 @@ async function viewPropsRecord(params){
       <div class="rt-rec ${cls}">${t.w}-${t.l}${t.p?'-'+t.p:''}</div>
       <div class="rt-sub"><span class="${cls}">${fP(t.pct)}</span> win · <span class="${t.units>0?'g':t.units<0?'b':''}">${fU(t.units)}</span> · ROI ${t.roi==null?'—':(t.roi>0?'+':'')+Math.round(t.roi*100)+'%'}</div></div>`;
   };
-  const intro = `<div class="note intro" onclick="this.classList.toggle('open')" style="margin-bottom:12px">Only the best props are kept: markets where the model beat the vig-free book price by ${minE}+ points on the props board — the side, the line and the price at the time — provisional until the Saturday 9am ET lock, frozen after, never after kickoff. Graded on the official box score from play-by-play; a player who did not appear is not counted, like the book. Units at the book's price. ${d.n_best} props · ${d.n_graded} graded · ${d.n_pending} pending.</div>`;
+  const intro = `<div class="note intro" onclick="this.classList.toggle('open')" style="margin-bottom:12px">Only the best props are kept: markets where the model beat the vig-free book price by the floor (${floorTxt}, set from the 2022-25 backtest) on the props board — the side, the line and the price at the time — provisional until the Saturday 9am ET lock, frozen after, never after kickoff. Graded on the official box score from play-by-play; a player who did not appear is not counted, like the book. Units at the book's price. ${d.n_best} props · ${d.n_graded} graded · ${d.n_pending} pending.</div>`;
   const P = d.by_pos||{};
   const tiles = `<div class="rtiles">
-    ${tile('All best props', `edge ≥ ${minE} pts vs the vig-free price`, S.best, be)}
+    ${tile('All best props', `edge ≥ ${floorTxt} vs the vig-free price`, S.best, be)}
     ${['QB','RB','WR','TE'].map(p=>tile(p, 'best props at the position', (P[p]||{}).best, be)).join('')}
   </div>`;
   const bm = (d.by_market||[]).filter(m=>m.best&&m.best.n);
