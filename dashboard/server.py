@@ -2734,12 +2734,18 @@ def _start_props_build(season: int, week: int, key: tuple) -> dict:
     """Kick off the background build for `key` unless one is already running; return progress."""
     with _PROPS_LOCK:
         t = _PROPS_BUILD.get("thread")
-        if not (t and t.is_alive()):
+        alive = bool(t and t.is_alive())
+        # a build that FAILED for this key is not restarted on every poll (the page would spin
+        # at 0/N forever while the server re-failed every 2.5 s): the error is returned until
+        # the next refresh clears it (clear_caches) or another week is asked for
+        failed = (not alive) and _PROPS_BUILD.get("key") == key and bool(_PROPS_BUILD.get("error"))
+        if not alive and not failed:
             _PROPS_BUILD.update(key=key, done=0, total=0, error=None)
             th = threading.Thread(target=_build_props_slate, args=(season, week, key), daemon=True)
             _PROPS_BUILD["thread"] = th
             th.start()
-        return {"done": _PROPS_BUILD["done"], "total": _PROPS_BUILD["total"], "error": _PROPS_BUILD.get("error")}
+        return {"done": _PROPS_BUILD["done"], "total": _PROPS_BUILD["total"],
+                "error": _PROPS_BUILD.get("error") if failed else None}
 
 
 def warm_props_slate() -> str:
@@ -2754,8 +2760,17 @@ def warm_props_slate() -> str:
         key = (season, week, _avail_sig())
         if key in _PROPS_SLATE:
             return f"cached {season} wk{week}"
-        _build_props_slate(season, week, key)
-        return f"built {season} wk{week} ({_PROPS_BUILD['done']} games)"
+        # ONE build at a time, shared with page requests: start it through the same gate the
+        # API uses (a build already running for this key is reused, not duplicated) and wait
+        # for it. Two builds of the same week once ran side by side after a deploy — they
+        # shared one progress counter, reset it to 0 and doubled the time.
+        _start_props_build(season, week, key)
+        th = _PROPS_BUILD.get("thread")
+        if th and th.is_alive():
+            th.join()
+        if key in _PROPS_SLATE:
+            return f"built {season} wk{week} ({_PROPS_BUILD['done']} games)"
+        return f"busy (another week was building): {_PROPS_BUILD.get('error') or 'retry on next refresh'}"
     except Exception as e:
         return f"error: {str(e)[:120]}"
 
@@ -2792,6 +2807,9 @@ def api_props_slate():
         # Railway — so the build runs in a background thread and the page polls the progress
         # (same pattern as the refresh). The daily refresh pre-warms the current week.
         st = _start_props_build(season, week, key)
+        if st.get("error"):                                   # 200 on purpose: the page renders `error`
+            return jsonify({"season": season, "week": week, "seasons": seasons, "weeks": weeks,
+                            "error": f"props build failed: {st['error']}"})
         return jsonify(_native({"season": season, "week": week, "seasons": seasons, "weeks": weeks,
                                 "building": True, "done": st["done"], "total": st["total"]})), 202
     out = _priced_props(season, week, key, want_lines, live=(season == seasons[-1]))
@@ -3036,6 +3054,7 @@ def clear_caches(scope: str = "full"):
     _DEPTH_CACHE.clear()
     _PROJ_CACHE.clear()
     _PROPS_SLATE.clear()
+    _PROPS_BUILD["error"] = None                         # a failed build gets retried after a refresh
     _SCHED_PRED.clear()
     for mod, attr in [("ml.matchup_engine", "_UNITS"), ("ml.matchup_engine", "_CAL"), ("ml.matchup_engine", "_MT_CACHE"),
                       ("ml.squad", "_PCT_CACHE"),
