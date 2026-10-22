@@ -50,10 +50,15 @@ Requires a **Business or Creator** Instagram account linked to a **Facebook Page
 1. developers.facebook.com → create an app (type Business) → add the **Instagram Graph API** product.
 2. Graph API Explorer: select the app, generate a user token with `instagram_basic`,
    `instagram_content_publish`, `pages_show_list`, `pages_read_engagement`.
-3. Exchange it for a long-lived token (60 days):
-   `GET https://graph.facebook.com/v21.0/oauth/access_token?grant_type=fb_exchange_token&client_id=APP_ID&client_secret=APP_SECRET&fb_exchange_token=SHORT_TOKEN`
-4. Find the Instagram user id: `GET /me/accounts` → page id → `GET /{page-id}?fields=instagram_business_account`.
-5. Set `IG_USER_ID` and `IG_ACCESS_TOKEN` on Railway. Refresh the long-lived token before it expires (same exchange call with the current token).
+3. On the laptop, in PowerShell inside the repo (App ID and App Secret are under the app's Settings → Basic):
+   ```powershell
+   $env:IG_APP_ID = "<app id>"; $env:IG_APP_SECRET = "<app secret>"; $env:IG_SHORT_TOKEN = "<token from the explorer>"
+   python -m social.ig_auth
+   ```
+   It exchanges the token for a long-lived one (60 days), finds the Instagram account linked to
+   your Page, and prints `IG_USER_ID` and `IG_ACCESS_TOKEN`.
+4. Set those two on Railway. Before the 60 days are up, run the helper again with the current
+   long-lived token as `IG_SHORT_TOKEN` and update the variable.
 
 Instagram downloads the media from a public URL, which is why the dashboard serves
 `/social/<season>_wk<NN>/picks.png` and `picks.mp4`. Content publishing is limited to 100 posts per 24 h.
