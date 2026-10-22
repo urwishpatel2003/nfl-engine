@@ -1630,6 +1630,23 @@ def _finalize_slate(base_games):
                     g["line_source"] = "nflverse"
     except Exception:
         odds_status = None
+    # Pinned contest lines (ml/line_overrides.py) win over BOTH the live feed and nflverse: the
+    # owner's picks are graded against the Circa Million sheet, not the market, in those weeks.
+    try:
+        from ml.line_overrides import get as _overrides
+        if games:
+            gid0 = games[0].get("game_id") or ""
+            season_, week_ = gid0.split("_")[0], gid0.split("_")[1]
+            ov = _overrides(int(season_), int(week_)) if season_.isdigit() and week_.isdigit() else {}
+            for g in games:
+                o = ov.get(g.get("game_id"))
+                if o and not g.get("final"):
+                    if g.get("line_source") != o.get("source", "circa"):
+                        g["market_spread"] = g.get("vegas_spread")   # what the book/nflverse had
+                    g["vegas_spread"] = float(o["spread"])
+                    g["line_source"] = o.get("source", "circa")
+    except Exception:
+        pass
     w = blend_weight()                               # optimal market-anchored ensemble weight
     scored = [g for g in games if g.get("pred_margin") is not None and g.get("vegas_spread") is not None]
     for g in scored:

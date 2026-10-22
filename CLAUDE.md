@@ -102,6 +102,14 @@ This was inverted across the entire ATS/picks layer at one point, which faked an
 backtest cover rate (true OOS rate is ~49%). `tests/test_spread_convention.py` guards it —
 run `python tests/test_spread_convention.py` after touching any spread/cover logic.
 
+**Pinned contest lines.** The owner's real picks go into the Circa Million contest, whose
+spreads are fixed on Wednesday. `ml/line_overrides.py` pins a week's sheet
+(`python -m ml.line_overrides --season 2026 --week 7 --source circa CHI:-3 NO:+3 …`, tokens
+in the TEAM'S own perspective; the sheet lists the visitor first) into the git-managed
+`data/processed/line_overrides.json`; `_finalize_slate` applies them over both the live
+Odds-API line and nflverse (`line_source` "circa"), so the slate, top-5, ledger and social post
+all grade against the contest numbers. Thursday/pre-lock games are never in the top five.
+
 ## Gotchas
 
 - **Standalone build scripts**: `coaching_metrics.py` and `update_styles_2025.py` are run directly

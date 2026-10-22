@@ -1,0 +1,62 @@
+{
+ "2026": {
+  "7": {
+   "2026_07_CIN_BAL": {
+    "source": "circa",
+    "spread": 1.5
+   },
+   "2026_07_CLE_TEN": {
+    "source": "circa",
+    "spread": -2.5
+   },
+   "2026_07_DAL_PHI": {
+    "source": "circa",
+    "spread": -3.5
+   },
+   "2026_07_DEN_ARI": {
+    "source": "circa",
+    "spread": -4.5
+   },
+   "2026_07_GB_DET": {
+    "source": "circa",
+    "spread": 3.0
+   },
+   "2026_07_IND_MIN": {
+    "source": "circa",
+    "spread": 6.5
+   },
+   "2026_07_KC_SEA": {
+    "source": "circa",
+    "spread": 2.5
+   },
+   "2026_07_LA_LV": {
+    "source": "circa",
+    "spread": -4.0
+   },
+   "2026_07_MIA_NYJ": {
+    "source": "circa",
+    "spread": 4.0
+   },
+   "2026_07_NE_CHI": {
+    "source": "circa",
+    "spread": 3.0
+   },
+   "2026_07_NYG_HOU": {
+    "source": "circa",
+    "spread": 10.0
+   },
+   "2026_07_PIT_NO": {
+    "source": "circa",
+    "spread": -3.0
+   },
+   "2026_07_SF_ATL": {
+    "source": "circa",
+    "spread": -2.5
+   },
+   "2026_07_TB_CAR": {
+    "source": "circa",
+    "spread": 3.0
+   }
+  }
+ }
+}
