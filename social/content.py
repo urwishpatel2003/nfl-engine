@@ -90,15 +90,16 @@ def captions(c: dict) -> dict:
     rec = _rec_txt(c["record"])
     best = c["picks"][0] if c["picks"] else None
     hook = f"The number one spell is {round((best['cover_prob'] or 0) * 100)}% to cover." if best else ""
+    # the dashboard URL is deliberately NOT in any post (owner, 2026-10-22: "hide the application url")
     body = f"Week {wk} — five spells against the spread, from the {BRAND}\n\n" + "\n".join(lines) \
-        + (f"\n\n{rec}" if rec else "") + f"\n\nThe full spellbook, matchup breakdowns and the graded record: {SITE}\n\n{DISCLAIMER}"
+        + (f"\n\n{rec}" if rec else "") + f"\n\nFollow {HANDLE} for the graded record every week.\n\n{DISCLAIMER}"
     yt_tags = hashtags(c, "youtube")
     ig_tags = hashtags(c, "instagram")
     x_tags = hashtags(c, "x")
     # X: 280 characters. Picks first, record if it fits, tags last.
     x = f"Week {wk} spells — the Prince's top 5 ATS\n" + "\n".join(
         f"{p['rank']}. {p['line']} ({round((p['cover_prob'] or 0) * 100)}%)" for p in c["picks"])
-    for extra in ((f"\n{rec}" if rec else ""), f"\n{SITE}", "\n" + " ".join(x_tags)):
+    for extra in ((f"\n{rec}" if rec else ""), "\n" + " ".join(x_tags)):
         if len(x) + len(extra) <= 275:
             x += extra
     return {

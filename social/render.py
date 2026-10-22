@@ -171,8 +171,8 @@ def render_image(c: dict, path: str, size=(1080, 1350)) -> str:
         d.text((W - 96, y + 126), "to cover", font=_font(24), fill=MUTED, anchor="ra")
     y = top + 5 * (row_h + gap) + 14
     d.text((60, y), _rec_line(c.get("record")), font=_font(32), fill=TXT)
-    from social.content import SITE, DISCLAIMER, HANDLE
-    d.text((60, y + 50), f"{HANDLE}  ·  {SITE.replace('https://', '')}", font=_font(26), fill=ACCENT)
+    from social.content import DISCLAIMER, HANDLE
+    d.text((60, y + 50), f"follow {HANDLE} for the graded record", font=_font(26), fill=ACCENT)
     d.text((60, H - 64), DISCLAIMER, font=_font(22), fill=MUTED)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     im.save(path, quality=92)
@@ -231,9 +231,9 @@ def _card_outro(c, W, H):
         d.text((W - 160, y + 6), _pct(p.get("cover_prob")), font=_font(48), fill=GOOD if (p.get("cover_prob") or 0) >= 0.55 else AMBER, anchor="ra")
         y += 96
     d.text((W / 2, y + 60), _rec_line(c.get("record")), font=_font(40), fill=TXT, anchor="mm")
-    from social.content import SITE, DISCLAIMER, HANDLE
+    from social.content import DISCLAIMER, HANDLE
     d.text((W / 2, y + 140), f"follow {HANDLE}", font=_font(44), fill=ACCENT, anchor="mm")
-    d.text((W / 2, y + 200), SITE.replace("https://", ""), font=_font(34), fill=MUTED, anchor="mm")
+    d.text((W / 2, y + 200), "the graded record, every week", font=_font(34), fill=MUTED, anchor="mm")
     d.text((W / 2, H - 140), DISCLAIMER, font=_font(30), fill=MUTED, anchor="mm")
     return im
 
