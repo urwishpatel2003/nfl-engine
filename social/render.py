@@ -13,6 +13,7 @@ that ships in the imageio-ffmpeg wheel (libx264, yuv420p, faststart) — no syst
 """
 
 import io
+import math
 import subprocess
 from pathlib import Path
 
@@ -21,14 +22,55 @@ from PIL import Image, ImageDraw, ImageFont
 PROC = Path(__file__).parent.parent / "data" / "processed"
 LOGOS = PROC / "social" / "logos"
 
-BG = (11, 18, 32)
-PANEL = (17, 27, 46)
-LINE = (38, 50, 77)
-TXT = (232, 237, 245)
-MUTED = (140, 152, 176)
-ACCENT = (76, 140, 255)
-GOOD = (52, 199, 120)
-AMBER = (245, 183, 73)
+# Half Blood Betting Prince — wizard theme: deep plum night, gold accents, emerald for a strong cover
+BG = (16, 9, 34)
+PANEL = (30, 19, 60)
+LINE = (74, 54, 120)
+TXT = (242, 236, 255)
+MUTED = (172, 160, 205)
+ACCENT = (224, 184, 74)        # gold
+GOOD = (72, 212, 138)          # emerald
+AMBER = (240, 170, 80)
+
+
+def _star(d: ImageDraw.ImageDraw, cx, cy, r, fill, inner=0.38):
+    """A four-point sparkle."""
+    pts = []
+    for k in range(8):
+        a = k * math.pi / 4 - math.pi / 2
+        rr = r if k % 2 == 0 else r * inner
+        pts.append((cx + rr * math.cos(a), cy + rr * math.sin(a)))
+    d.polygon(pts, fill=fill)
+
+
+def _sparkles(im: Image.Image, n: int = 28, seed: int = 11, avoid=None) -> None:
+    """Scatter small gold sparkles over the background (deterministic), keeping clear of `avoid`
+    boxes so they never sit on text."""
+    import random
+    rnd = random.Random(seed)
+    d = ImageDraw.Draw(im)
+    W, H = im.size
+    placed = 0
+    for _ in range(n * 6):
+        if placed >= n:
+            break
+        x, y = rnd.randint(30, W - 30), rnd.randint(30, H - 30)
+        if any(bx0 <= x <= bx1 and by0 <= y <= by1 for bx0, by0, bx1, by1 in (avoid or [])):
+            continue
+        r = rnd.choice([5, 6, 8, 10, 13])
+        tone = rnd.choice([(224, 184, 74), (200, 160, 60), (160, 130, 220)])   # gold, dim gold, lilac
+        _star(d, x, y, r, tone)
+        placed += 1
+
+
+def _brand(d: ImageDraw.ImageDraw, cx, y, size=30):
+    from social.content import BRAND
+    f = _font(size)
+    t = BRAND.upper()
+    w = d.textlength(t, font=f)
+    d.text((cx, y), t, font=f, fill=ACCENT, anchor="mm")
+    _star(d, cx - w / 2 - size * 0.9, y, size * 0.42, ACCENT)
+    _star(d, cx + w / 2 + size * 0.9, y, size * 0.42, ACCENT)
 
 
 def _font(size: int):
@@ -105,10 +147,12 @@ def _rounded(d: ImageDraw.ImageDraw, box, r, fill, outline=None):
 def render_image(c: dict, path: str, size=(1080, 1350)) -> str:
     W, H = size
     im = Image.new("RGB", (W, H), BG)
+    # sparkles only in the top band around the brand line and the bottom-right corner, never on text
+    _sparkles(im, n=18, seed=c["week"], avoid=[(40, 86, W - 40, H - 30), (250, 20, W - 250, 86)])
     d = ImageDraw.Draw(im)
-    d.text((60, 54), "NFL SIGNAL", font=_font(30), fill=ACCENT)
-    d.text((60, 96), f"WEEK {c['week']}  ·  TOP 5 AGAINST THE SPREAD", font=_font(44), fill=TXT)
-    d.text((60, 154), "the model's five highest-conviction covers · frozen before kickoff", font=_font(26), fill=MUTED)
+    _brand(d, W / 2, 58, 30)
+    d.text((60, 96), f"WEEK {c['week']}  ·  FIVE SPELLS AGAINST THE SPREAD", font=_font(42), fill=TXT)
+    d.text((60, 154), "the five strongest covers in the crystal ball · cast before kickoff, graded after", font=_font(25), fill=MUTED)
     top, row_h, gap = 216, 168, 14           # 5 rows end at 1126, leaving room for the record + site + disclaimer
     for i, p in enumerate(c["picks"][:5]):
         y = top + i * (row_h + gap)
@@ -127,8 +171,8 @@ def render_image(c: dict, path: str, size=(1080, 1350)) -> str:
         d.text((W - 96, y + 126), "to cover", font=_font(24), fill=MUTED, anchor="ra")
     y = top + 5 * (row_h + gap) + 14
     d.text((60, y), _rec_line(c.get("record")), font=_font(32), fill=TXT)
-    from social.content import SITE, DISCLAIMER
-    d.text((60, y + 50), SITE.replace("https://", ""), font=_font(26), fill=ACCENT)
+    from social.content import SITE, DISCLAIMER, HANDLE
+    d.text((60, y + 50), f"{HANDLE}  ·  {SITE.replace('https://', '')}", font=_font(26), fill=ACCENT)
     d.text((60, H - 64), DISCLAIMER, font=_font(22), fill=MUTED)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     im.save(path, quality=92)
@@ -138,18 +182,20 @@ def render_image(c: dict, path: str, size=(1080, 1350)) -> str:
 # ── the video ─────────────────────────────────────────────────────────
 def _card_intro(c, W, H):
     im = Image.new("RGB", (W, H), BG)
+    _sparkles(im, n=60, seed=c["week"] + 100, avoid=[(60, H * 0.28, W - 60, H * 0.66), (60, H - 360, W - 60, H - 120)])
     d = ImageDraw.Draw(im)
-    d.text((W / 2, H * 0.34), "NFL SIGNAL", font=_font(54), fill=ACCENT, anchor="mm")
+    _brand(d, W / 2, H * 0.33, 46)
     d.text((W / 2, H * 0.44), f"WEEK {c['week']}", font=_font(150), fill=TXT, anchor="mm")
-    d.text((W / 2, H * 0.53), "TOP 5 AGAINST THE SPREAD", font=_font(60), fill=TXT, anchor="mm")
-    d.text((W / 2, H * 0.60), "the model's picks, frozen before kickoff", font=_font(36), fill=MUTED, anchor="mm")
+    d.text((W / 2, H * 0.53), "FIVE SPELLS AGAINST THE SPREAD", font=_font(58), fill=TXT, anchor="mm")
+    d.text((W / 2, H * 0.60), "cast before kickoff · graded after", font=_font(36), fill=MUTED, anchor="mm")
     return im
 
 
 def _card_pick(c, p, W, H):
     im = Image.new("RGB", (W, H), BG)
+    _sparkles(im, n=34, seed=c["week"] * 10 + p["rank"], avoid=[(80, 100, W - 80, H - 80)])
     d = ImageDraw.Draw(im)
-    d.text((W / 2, 150), f"PICK {p['rank']} OF 5  ·  WEEK {c['week']}", font=_font(40), fill=ACCENT, anchor="mm")
+    d.text((W / 2, 150), f"SPELL {p['rank']} OF 5  ·  WEEK {c['week']}", font=_font(40), fill=ACCENT, anchor="mm")
     lg = _logo(p.get("logo"), p["team"], p.get("color"), 420)
     im.paste(lg, ((W - 420) // 2, 260), lg)
     d.text((W / 2, 780), p["line"], font=_font(170), fill=TXT, anchor="mm")
@@ -175,8 +221,9 @@ def _card_pick(c, p, W, H):
 
 def _card_outro(c, W, H):
     im = Image.new("RGB", (W, H), BG)
+    _sparkles(im, n=40, seed=c["week"] + 200, avoid=[(60, H * 0.26, W - 60, H - 100)])
     d = ImageDraw.Draw(im)
-    d.text((W / 2, H * 0.30), "THE BOARD", font=_font(54), fill=ACCENT, anchor="mm")
+    d.text((W / 2, H * 0.30), "THE SPELLBOOK", font=_font(54), fill=ACCENT, anchor="mm")
     y = int(H * 0.37)
     for p in c["picks"][:5]:
         d.text((160, y), f"{p['rank']}", font=_font(44), fill=MUTED)
@@ -184,8 +231,9 @@ def _card_outro(c, W, H):
         d.text((W - 160, y + 6), _pct(p.get("cover_prob")), font=_font(48), fill=GOOD if (p.get("cover_prob") or 0) >= 0.55 else AMBER, anchor="ra")
         y += 96
     d.text((W / 2, y + 60), _rec_line(c.get("record")), font=_font(40), fill=TXT, anchor="mm")
-    from social.content import SITE, DISCLAIMER
-    d.text((W / 2, y + 140), SITE.replace("https://", ""), font=_font(40), fill=ACCENT, anchor="mm")
+    from social.content import SITE, DISCLAIMER, HANDLE
+    d.text((W / 2, y + 140), f"follow {HANDLE}", font=_font(44), fill=ACCENT, anchor="mm")
+    d.text((W / 2, y + 200), SITE.replace("https://", ""), font=_font(34), fill=MUTED, anchor="mm")
     d.text((W / 2, H - 140), DISCLAIMER, font=_font(30), fill=MUTED, anchor="mm")
     return im
 

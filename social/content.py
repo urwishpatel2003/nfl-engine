@@ -17,7 +17,11 @@ import os
 from datetime import datetime, timezone
 
 SITE = os.environ.get("PUBLIC_BASE_URL", "https://nfl-engine-production.up.railway.app").rstrip("/")
-HASHTAGS = "#NFL #NFLPicks #ATS #SportsBetting #NFLWeek{week}"
+# the brand: the accounts are "Half Blood Betting Prince", wizard theme (owner, 2026-10-22).
+# Generic wizardry only (spells, wands, crystal ball) — no quotes or imagery from the books.
+BRAND = os.environ.get("BRAND_NAME", "Half Blood Betting Prince")
+HANDLE = os.environ.get("BRAND_HANDLE", "@HalfBloodBettingPrince")
+BRAND_TAG = "#" + "".join(ch for ch in BRAND if ch.isalnum())
 DISCLAIMER = "Model output for tracking. Not betting advice."
 
 
@@ -85,22 +89,22 @@ def captions(c: dict) -> dict:
              for p in c["picks"]]
     rec = _rec_txt(c["record"])
     best = c["picks"][0] if c["picks"] else None
-    hook = f"The model's number one play is {round((best['cover_prob'] or 0) * 100)}% to cover." if best else ""
-    body = f"Week {wk} — the model's top 5 against the spread\n\n" + "\n".join(lines) \
-        + (f"\n\n{rec}" if rec else "") + f"\n\nFull board, matchup breakdowns and the graded record: {SITE}\n\n{DISCLAIMER}"
+    hook = f"The number one spell is {round((best['cover_prob'] or 0) * 100)}% to cover." if best else ""
+    body = f"Week {wk} — five spells against the spread, from the {BRAND}\n\n" + "\n".join(lines) \
+        + (f"\n\n{rec}" if rec else "") + f"\n\nThe full spellbook, matchup breakdowns and the graded record: {SITE}\n\n{DISCLAIMER}"
     yt_tags = hashtags(c, "youtube")
     ig_tags = hashtags(c, "instagram")
     x_tags = hashtags(c, "x")
     # X: 280 characters. Picks first, record if it fits, tags last.
-    x = f"Week {wk} NFL picks — model's top 5 ATS\n" + "\n".join(
+    x = f"Week {wk} spells — the Prince's top 5 ATS\n" + "\n".join(
         f"{p['rank']}. {p['line']} ({round((p['cover_prob'] or 0) * 100)}%)" for p in c["picks"])
     for extra in ((f"\n{rec}" if rec else ""), f"\n{SITE}", "\n" + " ".join(x_tags)):
         if len(x) + len(extra) <= 275:
             x += extra
     return {
         # YouTube ranks Shorts on the first seconds + the title; hashtags in the description count
-        "youtube_title": f"Week {wk} NFL picks: 5 spreads the model loves (#1 is {round((best['cover_prob'] or 0) * 100)}% to cover) #Shorts"[:100] if best
-                         else f"Week {wk} NFL picks: the model's top 5 ATS #Shorts",
+        "youtube_title": f"Week {wk} NFL picks: 5 spells against the spread (#1 is {round((best['cover_prob'] or 0) * 100)}% to cover) #Shorts"[:100] if best
+                         else f"Week {wk} NFL picks: five spells against the spread #Shorts",
         "youtube_desc": (hook + "\n\n" if hook else "") + body + "\n\n" + " ".join(yt_tags),
         "youtube_tags": [t.lstrip("#") for t in yt_tags] + ["NFL picks", "sports betting", "against the spread"],
         "instagram": (body + "\n.\n.\n.\n" + " ".join(ig_tags))[:2190],

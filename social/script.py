@@ -47,14 +47,14 @@ def build_script(c: dict) -> list:
     # Every word costs a quarter second of a 45-second budget: "percent to cover" is said once
     # in the hook and once on the number one play; the picks in between are team, number,
     # opponent, percent.
-    hook = f"Five NFL spreads the model loves in week {wk}."
+    hook = f"Five spells against the spread for week {wk}, from the Half Blood Betting Prince."
     if best:
         hook += f" Number one is {_pct(best['cover_prob'])} percent to cover. Stay for it."
     segs.append({"key": "intro", "text": hook, "pick": None})
     for p in reversed(picks):                                  # countdown: 5 → 1
         where = "against" if p["at_home"] else "at"
         if p["rank"] == 1:
-            t = f"And number one. {nick(p['team_name'])} {line_words(p['line'])} {where} the {nick(p['opp_name'])}. " \
+            t = f"And the number one spell. {nick(p['team_name'])} {line_words(p['line'])} {where} the {nick(p['opp_name'])}. " \
                 f"{_pct(p['cover_prob'])} percent to cover."
             e = abs(float(p["edge"])) if p.get("edge") is not None else 0
             if e >= 3:
@@ -64,10 +64,10 @@ def build_script(c: dict) -> list:
                 f"{nick(p['opp_name'])}. {_pct(p['cover_prob'])} percent."
         segs.append({"key": f"pick{p['rank']}", "text": t, "pick": p})
     rec = c.get("record") or {}
-    close = "That's the board."
+    close = "That's the spellbook."
     if rec.get("n"):
         close += f" {rec['w']} and {rec['l']} on the top five this season."
-    close += " Follow for the graded record. Not betting advice."
+    close += " Follow the Prince for the graded record. Not betting advice."
     segs.append({"key": "outro", "text": close, "pick": None})
     return segs
 
@@ -81,9 +81,11 @@ _BASE = {
 
 
 def hashtags(c: dict, platform: str) -> list:
+    from social.content import BRAND_TAG
     wk = c["week"]
     base = list(_BASE.get(platform, _BASE["youtube"]))
     base.append(f"#NFLWeek{wk}" if platform != "instagram" else f"#nflweek{wk}")
+    base.insert(2, BRAND_TAG.lower() if platform == "instagram" else BRAND_TAG)   # the brand tag, always in
     teams = []
     for p in c["picks"][:5]:
         for name in (p.get("team_name"), p.get("opp_name")):
