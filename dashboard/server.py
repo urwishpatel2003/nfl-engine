@@ -3283,6 +3283,15 @@ def _daily_scheduler():
             print(f"[boot] last refresh {age:.1f}h old (>= {stale_h}h) — refreshing now")
             _t.sleep(15)                     # let gunicorn finish binding first
             _start_refresh(season)           # (warms the props board when it finishes)
+        elif age >= 1.5:
+            # Not stale enough for a full pull, but availability moves by the hour on a game
+            # day (IR moves, final injury designations): a LIGHT pull takes seconds and then
+            # locks the slate + warms the board itself. Without this a Thursday redeploy
+            # served a Tuesday injury report until the next 4-hourly slot (2026-10-22: Doubs
+            # on IR and Brown cleared were both missing from the TNF box score).
+            print(f"[boot] last refresh {age:.1f}h old — light availability pull now")
+            _t.sleep(15)
+            _start_refresh(season, light=True)
         else:
             # No refresh due: warm the engine now — the current week's slate (served from
             # the on-disk slate cache when the data and code have not moved, else rebuilt
@@ -3299,6 +3308,7 @@ def _daily_scheduler():
     # publish Wed–Fri afternoons ET and IR moves happen any day; a once-a-day pull left the
     # matchup box scores projecting players who had been ruled out hours earlier.
     light_h = float(os.environ.get("REFRESH_LIGHT_HOURS", 4))
+    gameday_h = float(os.environ.get("REFRESH_GAMEDAY_HOURS", 2))
     while True:
         now = datetime.now(timezone.utc)
         target = now.replace(hour=hour, minute=0, second=0, microsecond=0)
@@ -3307,13 +3317,40 @@ def _daily_scheduler():
             secs = (target - now).total_seconds() + 86400
         else:
             secs = (target - now).total_seconds()
-        nap = min(secs, light_h * 3600) if light_h > 0 else secs
+        # Light pulls sit on a FIXED clock grid anchored at REFRESH_HOUR (…, 13:00, 17:00,
+        # 21:00 UTC at the default 4 h), not "every 4 h since boot": a redeploy used to shift
+        # the whole schedule. Within 24 h of a kickoff the grid tightens to REFRESH_GAMEDAY_HOURS
+        # (default 2 h) so the final injury designations reach the box scores before the game.
+        cadence = gameday_h if (gameday_h > 0 and _kickoff_within(24)) else light_h
+        if cadence > 0:
+            step = cadence * 3600
+            since = ((now - target).total_seconds() + 86400 * 2) % step   # seconds into the current slot
+            nap = min(secs, step - since)
+        else:
+            nap = secs
         _t.sleep(max(60, nap))
         if nap >= secs - 1:                          # reached the daily slot → full refresh
             _start_refresh(season)
             _t.sleep(3600)                           # avoid double-firing within the same hour
         else:
             _start_refresh(season, light=True)
+
+
+def _kickoff_within(hours: float) -> bool:
+    """True when any unplayed game of the live season kicks off within `hours` from now."""
+    try:
+        from ml.ledger import kickoff_utc
+        from datetime import datetime, timezone, timedelta
+        s = schedules_df()
+        s = s[(s["season"] == s["season"].max()) & s["home_score"].isna()]
+        now = datetime.now(timezone.utc)
+        for _, g in s.iterrows():
+            ko = kickoff_utc(g.get("gameday"), g.get("gametime"))
+            if ko is not None and now - timedelta(hours=4) <= ko <= now + timedelta(hours=hours):
+                return True
+    except Exception:
+        pass
+    return False
 
 
 _kalshi_selftest()
