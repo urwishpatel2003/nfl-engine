@@ -15,3 +15,10 @@ requests>=2.31.0   # ml/refresh.py downloads nflverse release files directly (pa
 # Kalshi auth signs requests with RSA-PSS; stdlib has no RSA. Used only by ml/kalshi.py
 # (the Betting > Kalshi tab); the data refresh path never imports it.
 cryptography>=42.0.0
+# social/ (weekly picks posts): PIL draws the image/video frames (pillow is already pulled in
+# transitively but pinned here on purpose), imageio-ffmpeg ships a static ffmpeg binary so the
+# video encodes without a system ffmpeg, requests-oauthlib signs the X (OAuth 1.0a) calls.
+pillow>=10.1.0
+imageio-ffmpeg>=0.5.1
+requests-oauthlib>=1.3.1
+edge-tts>=6.1.0        # the video's voiceover (Microsoft Edge neural voices, no key); music is generated with numpy

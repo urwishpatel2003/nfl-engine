@@ -1,0 +1,263 @@
+"""
+social/render.py  —  the picks image and the vertical video
+===========================================================
+render_image(content, path)   1080×1350 (Instagram 4:5; X shows it as is)
+render_video(content, path)   1080×1920 vertical, 30 fps, ~20 s: intro card, one card per pick,
+                              outro with the record — YouTube Shorts / Instagram Reels
+
+Drawing is PIL only. Fonts: PIL ≥ 10.1 ships a scalable default (ImageFont.load_default(size)),
+so nothing has to be downloaded or vendored. Team logos are the ESPN PNGs nflverse links to,
+fetched once and cached under data/processed/social/logos/; when one cannot be fetched a disc in
+the team colour with the abbreviation stands in. Video frames are piped raw to the ffmpeg binary
+that ships in the imageio-ffmpeg wheel (libx264, yuv420p, faststart) — no system ffmpeg.
+"""
+
+import io
+import subprocess
+from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageFont
+
+PROC = Path(__file__).parent.parent / "data" / "processed"
+LOGOS = PROC / "social" / "logos"
+
+BG = (11, 18, 32)
+PANEL = (17, 27, 46)
+LINE = (38, 50, 77)
+TXT = (232, 237, 245)
+MUTED = (140, 152, 176)
+ACCENT = (76, 140, 255)
+GOOD = (52, 199, 120)
+AMBER = (245, 183, 73)
+
+
+def _font(size: int):
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:                                   # PIL < 10.1
+        for name in ("DejaVuSans-Bold.ttf", "arialbd.ttf", "arial.ttf"):
+            try:
+                return ImageFont.truetype(name, size)
+            except OSError:
+                continue
+        return ImageFont.load_default()
+
+
+def _hex(c: str, fallback=(51, 65, 85)):
+    try:
+        c = c.lstrip("#")
+        return tuple(int(c[i:i + 2], 16) for i in (0, 2, 4))
+    except Exception:
+        return fallback
+
+
+def _logo(url: str, team: str, color: str, size: int) -> Image.Image:
+    """The team logo at `size` px (cached), else a coloured disc with the abbreviation."""
+    LOGOS.mkdir(parents=True, exist_ok=True)
+    p = LOGOS / f"{team}.png"
+    img = None
+    if p.exists():
+        try:
+            img = Image.open(p).convert("RGBA")
+        except Exception:
+            img = None
+    if img is None and url:
+        try:
+            import requests
+            r = requests.get(url, timeout=10)
+            r.raise_for_status()
+            img = Image.open(io.BytesIO(r.content)).convert("RGBA")
+            img.save(p)
+        except Exception:
+            img = None
+    if img is None:
+        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        d.ellipse([0, 0, size - 1, size - 1], fill=_hex(color))
+        f = _font(int(size * 0.34))
+        d.text((size / 2, size / 2), team, font=f, fill=TXT, anchor="mm")
+        return img
+    img.thumbnail((size, size))
+    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    canvas.paste(img, ((size - img.width) // 2, (size - img.height) // 2), img)
+    return canvas
+
+
+def _pct(p) -> str:
+    return f"{round((p or 0) * 100)}%"
+
+
+def _rec_line(rec: dict) -> str:
+    if not rec or not rec.get("n"):
+        return "Season record builds from this week"
+    s = f"{rec['w']}-{rec['l']}" + (f"-{rec['p']}" if rec.get("p") else "")
+    pct = f" · {round(rec['pct'] * 100)}%" if rec.get("pct") is not None else ""
+    u = rec.get("units")
+    units = f" · {u:+.1f}u" if isinstance(u, (int, float)) else ""
+    return f"Top-5 ATS this season: {s}{pct}{units}"
+
+
+def _rounded(d: ImageDraw.ImageDraw, box, r, fill, outline=None):
+    d.rounded_rectangle(box, radius=r, fill=fill, outline=outline, width=2 if outline else 0)
+
+
+# ── the image ─────────────────────────────────────────────────────────
+def render_image(c: dict, path: str, size=(1080, 1350)) -> str:
+    W, H = size
+    im = Image.new("RGB", (W, H), BG)
+    d = ImageDraw.Draw(im)
+    d.text((60, 54), "NFL SIGNAL", font=_font(30), fill=ACCENT)
+    d.text((60, 96), f"WEEK {c['week']}  ·  TOP 5 AGAINST THE SPREAD", font=_font(44), fill=TXT)
+    d.text((60, 154), "the model's five highest-conviction covers · frozen before kickoff", font=_font(26), fill=MUTED)
+    top, row_h, gap = 216, 168, 14           # 5 rows end at 1126, leaving room for the record + site + disclaimer
+    for i, p in enumerate(c["picks"][:5]):
+        y = top + i * (row_h + gap)
+        _rounded(d, [60, y, W - 60, y + row_h], 22, PANEL, LINE)
+        # rank badge
+        _rounded(d, [84, y + 24, 84 + 64, y + 24 + 64], 16, ACCENT if p.get("tier") == "edge" else (60, 72, 100))
+        d.text((84 + 32, y + 24 + 32), str(p["rank"]), font=_font(36), fill=TXT, anchor="mm")
+        # logo
+        im.paste(_logo(p.get("logo"), p["team"], p.get("color"), 120), (172, y + 31), _logo(p.get("logo"), p["team"], p.get("color"), 120))
+        # pick + opponent
+        d.text((320, y + 34), p["line"], font=_font(62), fill=TXT)
+        where = "vs" if p["at_home"] else "at"
+        d.text((320, y + 112), f"{where} {p['opp_name']}  ·  {p['kickoff'][5:] if p.get('kickoff') else ''}", font=_font(27), fill=MUTED)
+        # cover probability
+        d.text((W - 96, y + 54), _pct(p.get("cover_prob")), font=_font(60), fill=GOOD if (p.get("cover_prob") or 0) >= 0.55 else AMBER, anchor="ra")
+        d.text((W - 96, y + 126), "to cover", font=_font(24), fill=MUTED, anchor="ra")
+    y = top + 5 * (row_h + gap) + 14
+    d.text((60, y), _rec_line(c.get("record")), font=_font(32), fill=TXT)
+    from social.content import SITE, DISCLAIMER
+    d.text((60, y + 50), SITE.replace("https://", ""), font=_font(26), fill=ACCENT)
+    d.text((60, H - 64), DISCLAIMER, font=_font(22), fill=MUTED)
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    im.save(path, quality=92)
+    return path
+
+
+# ── the video ─────────────────────────────────────────────────────────
+def _card_intro(c, W, H):
+    im = Image.new("RGB", (W, H), BG)
+    d = ImageDraw.Draw(im)
+    d.text((W / 2, H * 0.34), "NFL SIGNAL", font=_font(54), fill=ACCENT, anchor="mm")
+    d.text((W / 2, H * 0.44), f"WEEK {c['week']}", font=_font(150), fill=TXT, anchor="mm")
+    d.text((W / 2, H * 0.53), "TOP 5 AGAINST THE SPREAD", font=_font(60), fill=TXT, anchor="mm")
+    d.text((W / 2, H * 0.60), "the model's picks, frozen before kickoff", font=_font(36), fill=MUTED, anchor="mm")
+    return im
+
+
+def _card_pick(c, p, W, H):
+    im = Image.new("RGB", (W, H), BG)
+    d = ImageDraw.Draw(im)
+    d.text((W / 2, 150), f"PICK {p['rank']} OF 5  ·  WEEK {c['week']}", font=_font(40), fill=ACCENT, anchor="mm")
+    lg = _logo(p.get("logo"), p["team"], p.get("color"), 420)
+    im.paste(lg, ((W - 420) // 2, 260), lg)
+    d.text((W / 2, 780), p["line"], font=_font(170), fill=TXT, anchor="mm")
+    where = "vs" if p["at_home"] else "at"
+    d.text((W / 2, 900), f"{where} {p['opp_name']}", font=_font(56), fill=MUTED, anchor="mm")
+    ol = _logo(p.get("opp_logo"), p["opp"], None, 140)
+    im.paste(ol, ((W - 140) // 2, 960), ol)
+    cp = p.get("cover_prob") or 0
+    d.text((W / 2, 1230), _pct(cp), font=_font(190), fill=GOOD if cp >= 0.55 else AMBER, anchor="mm")
+    d.text((W / 2, 1360), "chance to cover", font=_font(44), fill=MUTED, anchor="mm")
+    if p.get("edge") is not None:
+        d.text((W / 2, 1440), f"{abs(float(p['edge'])):.1f} pts from the line", font=_font(38), fill=MUTED, anchor="mm")
+    if p.get("kickoff"):
+        d.text((W / 2, 1560), p["kickoff"], font=_font(36), fill=MUTED, anchor="mm")
+    # progress bar across the five picks (the video counts DOWN, 5 → 1, so pick 5 is step one)
+    done = 6 - p["rank"]
+    for k in range(5):
+        x0 = 140 + k * ((W - 280) // 5)
+        d.rounded_rectangle([x0, H - 60, x0 + (W - 280) // 5 - 14, H - 46], radius=7,
+                            fill=ACCENT if k < done else LINE)
+    return im
+
+
+def _card_outro(c, W, H):
+    im = Image.new("RGB", (W, H), BG)
+    d = ImageDraw.Draw(im)
+    d.text((W / 2, H * 0.30), "THE BOARD", font=_font(54), fill=ACCENT, anchor="mm")
+    y = int(H * 0.37)
+    for p in c["picks"][:5]:
+        d.text((160, y), f"{p['rank']}", font=_font(44), fill=MUTED)
+        d.text((240, y), p["line"], font=_font(54), fill=TXT)
+        d.text((W - 160, y + 6), _pct(p.get("cover_prob")), font=_font(48), fill=GOOD if (p.get("cover_prob") or 0) >= 0.55 else AMBER, anchor="ra")
+        y += 96
+    d.text((W / 2, y + 60), _rec_line(c.get("record")), font=_font(40), fill=TXT, anchor="mm")
+    from social.content import SITE, DISCLAIMER
+    d.text((W / 2, y + 140), SITE.replace("https://", ""), font=_font(40), fill=ACCENT, anchor="mm")
+    d.text((W / 2, H - 140), DISCLAIMER, font=_font(30), fill=MUTED, anchor="mm")
+    return im
+
+
+def _wrap(d: ImageDraw.ImageDraw, text: str, font, max_w: int) -> list:
+    words, lines, cur = text.split(), [], ""
+    for w in words:
+        t = (cur + " " + w).strip()
+        if d.textlength(t, font=font) <= max_w or not cur:
+            cur = t
+        else:
+            lines.append(cur); cur = w
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def _caption(im: Image.Image, text: str, y_top: int) -> None:
+    """The spoken line as an on-screen caption (most Shorts are watched muted)."""
+    d = ImageDraw.Draw(im)
+    f = _font(37)
+    lines = _wrap(d, text, f, im.width - 160)[:4]
+    y = y_top
+    for ln in lines:
+        w = d.textlength(ln, font=f)
+        d.rounded_rectangle([im.width / 2 - w / 2 - 16, y - 5, im.width / 2 + w / 2 + 16, y + 44], radius=11, fill=(0, 0, 0))
+        d.text((im.width / 2, y + 19), ln, font=f, fill=TXT, anchor="mm")
+        y += 53
+
+
+def render_video(c: dict, path: str, size=(1080, 1920), fps=30, segments=None, holds=None, audio=None) -> str:
+    """One card per script segment (intro, the picks as a countdown, outro), each held `holds[i]`
+    seconds with a 12-frame cross-fade, the spoken line captioned on the card, and the mixed
+    audio muxed in. Without a script: the five picks in rank order, silent, 3 s each."""
+    import imageio_ffmpeg
+    W, H = size
+    if segments is None:
+        segments = [{"key": "intro", "text": "", "pick": None}] + \
+                   [{"key": f"pick{p['rank']}", "text": "", "pick": p} for p in c["picks"][:5]] + \
+                   [{"key": "outro", "text": "", "pick": None}]
+        holds = [2.5] + [3.0] * (len(segments) - 2) + [3.5]
+    cards = []
+    for s, h in zip(segments, holds):
+        if s["key"] == "intro":
+            im = _card_intro(c, W, H)
+        elif s["key"] == "outro":
+            im = _card_outro(c, W, H)
+        else:
+            im = _card_pick(c, s["pick"], W, H)
+        if s.get("text"):
+            _caption(im, s["text"], H - 330 if s["key"] in ("intro", "outro") else 1630)
+        cards.append((im, h))
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    cmd = [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error",
+           "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(fps), "-i", "-"]
+    if audio:
+        cmd += ["-i", audio, "-map", "0:v", "-map", "1:a", "-c:a", "aac", "-b:a", "128k", "-shortest"]
+    cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20",
+            "-movflags", "+faststart", path]
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    fade = 12
+    prev = None
+    for im, secs in cards:
+        if prev is not None:
+            for k in range(1, fade + 1):
+                proc.stdin.write(Image.blend(prev, im, k / fade).tobytes())
+        frames = max(1, int(secs * fps) - (fade if prev is not None else 0))
+        raw = im.tobytes()
+        for _ in range(frames):
+            proc.stdin.write(raw)
+        prev = im
+    proc.stdin.close()
+    if proc.wait() != 0:
+        raise RuntimeError("ffmpeg failed to encode the video")
+    return path

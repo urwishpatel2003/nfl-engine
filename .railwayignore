@@ -29,3 +29,7 @@ data/raw/pff/
 
 # dated weekly PFF copies stay on the laptop (movers analysis only)
 data/processed/pff_history/
+
+# locally rendered social posts (the server renders its own on the volume)
+data/processed/social/
+data/processed/social_posts.jsonl

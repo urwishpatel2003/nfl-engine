@@ -35,3 +35,5 @@ Thumbs.db
 .idea/
 .vscode/
 *.log
+data/processed/social/                # rendered weekly picks posts (image/video), on the volume
+data/processed/social_posts.jsonl     # what was posted where (social/post.py)

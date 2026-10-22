@@ -164,6 +164,20 @@ walk-forward 2022-25 backtest (mean quality, spread calibration, pick rule vs a 
 section D runs against real closing lines once `fetch_prop_history.py` has pulled them from
 the Odds API's historical endpoints — paid plan, ~110 credits per game, 2023 season onward).
 
+## Social posts (social/)
+
+The weekly top-5 ATS picks go out as an image (1080×1350) and a vertical video (1080×1920,
+~21 s) to YouTube Shorts, Instagram and X. `social/content.py` reads the FROZEN board
+(`_slate` + `_overlay_locked`) and the season record; `social/render.py` draws with PIL and
+encodes through the ffmpeg binary in the `imageio-ffmpeg` wheel (no system ffmpeg);
+`social/publish.py` calls the official APIs with credentials from Railway variables
+(`YT_*`, `IG_*`, `X_*`, see `docs/SOCIAL_SETUP.md`); `social/post.py` renders, publishes once
+per platform per week (`data/processed/social_posts.jsonl`, refresh-managed on the volume) and
+is called from the refresh job (`post_if_due`, needs `SOCIAL_AUTO=1`) once the Saturday lock has
+passed. The rendered files are served publicly at `/social/<season>_wk<NN>/…` because Instagram
+fetches media by URL. Manual: `POST /api/social/post?week=&dry=1&platforms=` (REFRESH_TOKEN),
+`GET /api/social/status`; local: `python -m social.post --season 2026 --week 7 --dry-run`.
+
 ## Kalshi (Betting > Kalshi tab)
 
 Ported from the tennis engine. Four modules under `ml/`, one boundary:

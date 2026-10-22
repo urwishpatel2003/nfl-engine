@@ -3142,6 +3142,11 @@ def _run_refresh(season: int, light: bool = False):
         log(f"picks ledger: {lock_current_week()}")   # freeze this week's picks on fresh data
         log(f"props board: {warm_props_slate()}")     # pre-build the week's player props on fresh data
         log(f"props record: {record_props_now()}")    # lock-to-kickoff window: lines pulled + leans recorded
+        try:
+            from social.post import post_if_due
+            log(f"social: {post_if_due(season)}")      # the week's picks post, once, after the lock
+        except Exception as e:
+            log(f"social: error {str(e)[:120]}", "WARN")
         _release_memory()
         _REFRESH_STATE["running"] = False
 
@@ -3194,6 +3199,46 @@ def api_refresh_status():
         "last_refresh": R.last_status(),
         "log_tail": "\n".join(_REFRESH_STATE["log"][-12:]),
     })
+
+
+# ── social posts (social/) ───────────────────────────────────────────
+# The weekly top-5 ATS picks as an image + vertical video, posted to YouTube Shorts /
+# Instagram / X after the Saturday lock (social.post.post_if_due, called from the refresh job
+# when SOCIAL_AUTO=1). The rendered files are served publicly because Instagram fetches media
+# by URL. Manual trigger is owner-only (REFRESH_TOKEN), runs in a thread, and dry=1 renders only.
+@app.route('/social/<path:fname>')
+def social_file(fname):
+    import flask
+    from social.post import DIR
+    return flask.send_from_directory(str(DIR), fname, max_age=3600)
+
+
+@app.route('/api/social/post', methods=['POST'])
+def api_social_post():
+    tok = os.environ.get("REFRESH_TOKEN")
+    if not tok or (request.headers.get("X-Refresh-Token") or request.args.get("token") or "") != tok:
+        return jsonify({"error": "unauthorized"}), 403
+    from social import post as SP
+    if SP._LAST["running"]:
+        return jsonify({"error": "a social post is already running", **SP.status()}), 409
+    s = schedules_df()
+    season = int(request.args.get('season', s["season"].max()))
+    week = request.args.get('week')
+    week = int(week) if week else _current_week(season)
+    if week is None:
+        return jsonify({"error": "season complete"}), 400
+    dry = request.args.get('dry') == '1'
+    force = request.args.get('force') == '1'
+    platforms = [p for p in (request.args.get('platforms') or '').split(',') if p] or None
+    th = threading.Thread(target=SP.run_background, args=(season, week, dry, platforms, force), daemon=True)
+    th.start()
+    return jsonify({"started": True, "season": season, "week": week, "dry_run": dry, "platforms": platforms or list(SP.PLATFORMS)}), 202
+
+
+@app.route('/api/social/status')
+def api_social_status():
+    from social import post as SP
+    return jsonify(_native(SP.status()))
 
 
 def _daily_scheduler():
