@@ -53,14 +53,19 @@ def build_script(c: dict) -> list:
     segs.append({"key": "intro", "text": hook, "pick": None})
     for p in reversed(picks):                                  # countdown: 5 → 1
         where = "against" if p["at_home"] else "at"
-        if p["rank"] == 1:
-            t = f"And the number one spell. {nick(p['team_name'])} {line_words(p['line'])} {where} the {nick(p['opp_name'])}. " \
+        lead = "And the number one spell." if p["rank"] == 1 else f"{_ONES[p['rank']].capitalize()}."
+        if p.get("result"):                                      # already played (Thursday game on a Saturday post)
+            res = {"W": "already cashed", "L": "already missed", "P": "a push"}[p["result"]]
+            t = f"{lead} {nick(p['team_name'])} {line_words(p['line'])} {where} the {nick(p['opp_name'])}. " \
+                f"{_pct(p['cover_prob'])} percent to cover, and {res}" + (f", {p['score'].replace('-', ' to ')}." if p.get("score") else ".")
+        elif p["rank"] == 1:
+            t = f"{lead} {nick(p['team_name'])} {line_words(p['line'])} {where} the {nick(p['opp_name'])}. " \
                 f"{_pct(p['cover_prob'])} percent to cover."
             e = abs(float(p["edge"])) if p.get("edge") is not None else 0
             if e >= 3:
                 t += f" {round(e)} points off the line."
         else:
-            t = f"{_ONES[p['rank']].capitalize()}. {nick(p['team_name'])} {line_words(p['line'])} {where} the " \
+            t = f"{lead} {nick(p['team_name'])} {line_words(p['line'])} {where} the " \
                 f"{nick(p['opp_name'])}. {_pct(p['cover_prob'])} percent."
         segs.append({"key": f"pick{p['rank']}", "text": t, "pick": p})
     rec = c.get("record") or {}

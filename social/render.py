@@ -165,7 +165,13 @@ def render_image(c: dict, path: str, size=(1080, 1350)) -> str:
         # pick + opponent
         d.text((320, y + 34), p["line"], font=_font(62), fill=TXT)
         where = "vs" if p["at_home"] else "at"
-        d.text((320, y + 112), f"{where} {p['opp_name']}  ·  {p['kickoff'][5:] if p.get('kickoff') else ''}", font=_font(27), fill=MUTED)
+        if p.get("result"):                                     # already played: the result, not the kickoff
+            tail = {"W": f"covered  {p.get('score') or ''}", "L": f"missed  {p.get('score') or ''}", "P": f"push  {p.get('score') or ''}"}[p["result"]]
+            d.text((320, y + 112), f"{where} {p['opp_name']}  ·  ", font=_font(27), fill=MUTED)
+            d.text((320 + d.textlength(f"{where} {p['opp_name']}  ·  ", font=_font(27)), y + 112), tail, font=_font(27),
+                   fill=GOOD if p["result"] == "W" else (AMBER if p["result"] == "P" else (235, 95, 110)))
+        else:
+            d.text((320, y + 112), f"{where} {p['opp_name']}  ·  {p['kickoff'][5:] if p.get('kickoff') else ''}", font=_font(27), fill=MUTED)
         # cover probability
         d.text((W - 96, y + 54), _pct(p.get("cover_prob")), font=_font(60), fill=GOOD if (p.get("cover_prob") or 0) >= 0.55 else AMBER, anchor="ra")
         d.text((W - 96, y + 126), "to cover", font=_font(24), fill=MUTED, anchor="ra")
@@ -208,7 +214,10 @@ def _card_pick(c, p, W, H):
     d.text((W / 2, 1360), "chance to cover", font=_font(44), fill=MUTED, anchor="mm")
     if p.get("edge") is not None:
         d.text((W / 2, 1440), f"{abs(float(p['edge'])):.1f} pts from the line", font=_font(38), fill=MUTED, anchor="mm")
-    if p.get("kickoff"):
+    if p.get("result"):                                         # already played: the result, not the kickoff
+        tail = {"W": "COVERED", "L": "MISSED", "P": "PUSH"}[p["result"]] + (f"  ·  {p['score']}" if p.get("score") else "")
+        d.text((W / 2, 1560), tail, font=_font(40), fill=GOOD if p["result"] == "W" else (AMBER if p["result"] == "P" else (235, 95, 110)), anchor="mm")
+    elif p.get("kickoff"):
         d.text((W / 2, 1560), p["kickoff"], font=_font(36), fill=MUTED, anchor="mm")
     # progress bar across the five picks (the video counts DOWN, 5 → 1, so pick 5 is step one)
     done = 6 - p["rank"]

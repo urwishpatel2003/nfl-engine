@@ -48,7 +48,16 @@ def week_content(season: int, week: int) -> dict:
         team = g["ats_pick"]
         at_home = team == g["home"]
         opp = g["away"] if at_home else g["home"]
+        # a pick whose game is already final (the Thursday game on a Saturday post) carries its result
+        result, score = None, None
+        if g.get("final") and g.get("home_score") is not None and g.get("away_score") is not None and g.get("vegas_spread") is not None:
+            hs, as_ = float(g["home_score"]), float(g["away_score"])
+            margin = (hs - as_) if at_home else (as_ - hs)             # the pick's own margin
+            line = -float(g["vegas_spread"]) if at_home else float(g["vegas_spread"])   # the pick's own number
+            result = "P" if abs(margin + line) < 1e-9 else ("W" if margin + line > 0 else "L")
+            score = f"{int(as_ if not at_home else hs)}-{int(hs if not at_home else as_)}"   # pick's points first
         picks.append({
+            "result": result, "score": score,
             "rank": int(g["pick_rank"]), "tier": g.get("pick_tier"),
             "team": team, "team_name": g["home_name"] if at_home else g["away_name"],
             "opp": opp, "opp_name": g["away_name"] if at_home else g["home_name"],

@@ -1685,13 +1685,18 @@ def _rank_top5(games: list, taken: list) -> None:
     (tier 'edge'); if fewer than five clear the floor, the remaining slots are filled by
     the next-largest disagreements (tier 'fill'). The tier is stored and graded separately
     — the three-week review showed 4+ pt edges 8-4 and 1-2.5 pt picks 3-10, so the record
-    must be able to tell a forced fifth pick from a real one. Early (pre-lock) games never
-    qualify for either tier."""
+    must be able to tell a forced fifth pick from a real one.
+
+    Early (pre-lock: Thursday night, Friday/Saturday internationals) games ARE eligible since
+    2026-10-22 (owner: "give me top 5 with thursday included … socials as well"); their row
+    freezes at their own kickoff, so the pick is still on the record before the game. Set
+    TOP5_EXCLUDE_EARLY=1 to go back to the contest-deadline rule."""
     free = [r for r in range(1, 6) if r not in taken]
     for g in games:
         if not g.get("locked"):
             g["pick_rank"] = None; g["pick_tier"] = None
-    pool = [g for g in games if not g.get("locked") and not g.get("early")
+    exclude_early = os.environ.get("TOP5_EXCLUDE_EARLY") == "1"
+    pool = [g for g in games if not g.get("locked") and not (exclude_early and g.get("early"))
             and g.get("cover_prob") is not None and g.get("edge") is not None]
     # Cover probability comes from an empirical margin distribution on whole numbers, so two
     # games whose model margins differ by a few tenths often price to the SAME cover prob.
