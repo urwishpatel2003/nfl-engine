@@ -108,9 +108,10 @@ spreads are fixed on Wednesday. `ml/line_overrides.py` pins a week's sheet
 in the TEAM'S own perspective; the sheet lists the visitor first) into the git-managed
 `data/processed/line_overrides.json`; `_finalize_slate` applies them over both the live
 Odds-API line and nflverse (`line_source` "circa"), so the slate, top-5, ledger and social post
-all grade against the contest numbers. Thursday/pre-lock games ARE eligible for the top five
-(owner, 2026-10-22; `TOP5_EXCLUDE_EARLY=1` restores the contest-deadline rule); a pick whose
-game is already final shows its result on the social post instead of a kickoff.
+all grade against the contest numbers. The top five is the SATURDAY board: Thursday/pre-lock
+games are not eligible (owner, 2026-10-23, after a one-day trial of including them;
+`TOP5_INCLUDE_EARLY=1` lets them in), and `ml.ledger.unrank_early` strips any rank a frozen
+early row carries. A pick whose game is already final shows its result on the social post.
 
 ## Gotchas
 

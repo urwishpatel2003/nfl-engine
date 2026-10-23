@@ -126,6 +126,47 @@ def week_lock_time(games: list) -> datetime | None:
     return sat
 
 
+def unrank_early(season: int, week: int | None = None) -> int:
+    """Strip pick_rank / pick_tier from rows whose game kicked off BEFORE its week's lock
+    (Thursday night, Friday/Saturday internationals). The top five is the Saturday board; an
+    early game's row is frozen at its own kickoff and so could carry a rank from the time the
+    early-games-eligible rule was on (2026-10-22, one day). The pick, line and result stay —
+    only the rank goes, so the all-games record is untouched. `week` limits the sweep to one
+    week: the server passes the CURRENT week so the published record of earlier weeks is never
+    rewritten by a rule change (week 2's DET@BUF Thursday row carries a rank from before the
+    rule existed — the owner decides on that one). Idempotent. Returns rows changed."""
+    df = load()
+    if not len(df):
+        return 0
+    m = df["season"] == int(season)
+    if week is not None:
+        m &= df["week"] == int(week)
+    changed = 0
+    for wk, rows in df[m].groupby("week"):
+        kos = []
+        for k in rows["kickoff_utc"]:
+            try:
+                kos.append(datetime.fromisoformat(str(k)))
+            except Exception:
+                kos.append(None)
+        valid = [k for k in kos if k is not None]
+        if not valid:
+            continue
+        sundays = [k for k in valid if k.weekday() == 6]
+        anchor = min(sundays) if sundays else max(valid)
+        lock = (anchor - timedelta(days=1)).replace(hour=13, minute=0, second=0, microsecond=0)
+        if lock > anchor - timedelta(hours=2):
+            lock = anchor - timedelta(hours=2)
+        for idx, ko in zip(rows.index, kos):
+            if ko is not None and ko < lock and pd.notna(df.at[idx, "pick_rank"]):
+                df.at[idx, "pick_rank"] = None
+                df.at[idx, "pick_tier"] = None
+                changed += 1
+    if changed:
+        df.to_parquet(LEDGER, index=False)
+    return changed
+
+
 def record(season: int, week: int, games: list, now: datetime | None = None) -> int:
     """Upsert a computed slate into the ledger. Returns rows written.
 

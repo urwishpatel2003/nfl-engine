@@ -1687,15 +1687,17 @@ def _rank_top5(games: list, taken: list) -> None:
     — the three-week review showed 4+ pt edges 8-4 and 1-2.5 pt picks 3-10, so the record
     must be able to tell a forced fifth pick from a real one.
 
-    Early (pre-lock: Thursday night, Friday/Saturday internationals) games ARE eligible since
-    2026-10-22 (owner: "give me top 5 with thursday included … socials as well"); their row
-    freezes at their own kickoff, so the pick is still on the record before the game. Set
-    TOP5_EXCLUDE_EARLY=1 to go back to the contest-deadline rule."""
+    Early (pre-lock: Thursday night, Friday/Saturday internationals) games are NOT eligible:
+    the top five is the Saturday board — games that kick off after the Saturday 13:00 UTC lock
+    (the Sunday-morning London game included). Owner went back and forth on 2026-10-22/23 and
+    settled on "remove the thursday pick from top 5 and keep only games after saturday";
+    TOP5_INCLUDE_EARLY=1 lets early games in again. The early games stay on the slate and in
+    the all-games record; ml.ledger.unrank_early strips any rank a frozen early row carries."""
     free = [r for r in range(1, 6) if r not in taken]
     for g in games:
         if not g.get("locked"):
             g["pick_rank"] = None; g["pick_tier"] = None
-    exclude_early = os.environ.get("TOP5_EXCLUDE_EARLY") == "1"
+    exclude_early = os.environ.get("TOP5_INCLUDE_EARLY") != "1"
     pool = [g for g in games if not g.get("locked") and not (exclude_early and g.get("early"))
             and g.get("cover_prob") is not None and g.get("edge") is not None]
     # Cover probability comes from an empirical margin distribution on whole numbers, so two
@@ -1766,6 +1768,11 @@ def lock_current_week() -> str:
         slate = _slate(season, week)
         _overlay_locked(season, slate["games"])       # rank the live games around the frozen ones
         _lock_picks(season, week, slate["games"])
+        if os.environ.get("TOP5_INCLUDE_EARLY") != "1":
+            from ml.ledger import unrank_early
+            n = unrank_early(season, week)            # the Saturday-board rule, applied to this week's frozen early rows too
+            if n:
+                print(f"[ledger] unranked {n} pre-lock row(s)", flush=True)
         return f"locked {season} wk{week}"
     except Exception as e:
         return f"error: {str(e)[:120]}"
