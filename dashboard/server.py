@@ -3329,6 +3329,13 @@ def _daily_scheduler():
             _t.sleep(15)
             print(f"[boot] slate: {lock_current_week()}", flush=True)
             print(f"[boot] props board: {warm_props_slate()}", flush=True)
+            try:                                      # rule sweeps apply at boot too, not only after a refresh
+                from ml.props_ledger import prune_below_floor
+                wk_now = _current_week(season)
+                n = prune_below_floor(season, wk_now) if wk_now is not None else 0
+                print(f"[boot] props record: pruned {n} row(s) below the floor", flush=True)
+            except Exception as e:
+                print(f"[boot] props record prune failed: {e}", flush=True)
             _release_memory()
     except Exception as e:
         print(f"[boot] catch-up refresh check failed: {e}")
