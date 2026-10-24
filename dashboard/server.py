@@ -3185,6 +3185,15 @@ def _run_refresh(season: int, light: bool = False):
         log(f"props board: {warm_props_slate()}")     # pre-build the week's player props on fresh data
         log(f"props record: {record_props_now()}")    # lock-to-kickoff window: lines pulled + leans recorded
         try:
+            from ml.props_ledger import prune_below_floor
+            wk_now = _current_week(season)
+            if wk_now is not None:
+                n = prune_below_floor(season, wk_now)   # the floor is a rule: rows under it do not belong
+                if n:
+                    log(f"props record: pruned {n} row(s) below the floor")
+        except Exception as e:
+            log(f"props record prune: error {str(e)[:120]}", "WARN")
+        try:
             from social.post import post_if_due
             log(f"social: {post_if_due(season)}")      # the week's picks post, once, after the lock
         except Exception as e:

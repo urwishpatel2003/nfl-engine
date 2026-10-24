@@ -179,6 +179,23 @@ def record(season: int, week: int, games: list, now: datetime | None = None, str
                         "rank": None, "books": book.get("books"),
                     })
     _calib_write(calib, season, week, frozen)
+    # Before the lock a game's rows are PROVISIONAL and this pass is the truth for that game:
+    # drop its earlier provisional rows wholesale (a prop that cleared the floor at the last
+    # pricing and no longer does must disappear, not linger — the week-7 NE@CHI game froze
+    # with 20-odd rows written under a 5-pt floor that had since been raised to 10/15).
+    # Games already kicked off are not in `priced` (record() skips them) and stay as frozen.
+    priced = set()
+    for g in games:
+        gid = g.get("game_id")
+        ko = kickoff_utc(g.get("gameday"), g.get("gametime"))
+        if gid and not g.get("final") and ko is not None and now < ko:
+            priced.add(gid)
+    if len(old) and priced and not frozen:
+        stale = (old["season"] == int(season)) & (old["week"] == int(week)) & old["game_id"].isin(priced) \
+            & ~old["frozen"].fillna(False).astype(bool)
+        if stale.any():
+            old = old[~stale]
+            old.to_parquet(LEDGER, index=False)
     if not rows:
         return 0
     new = pd.DataFrame(rows, columns=COLS)
@@ -194,6 +211,26 @@ def record(season: int, week: int, games: list, now: datetime | None = None, str
     PROC.mkdir(parents=True, exist_ok=True)
     out.to_parquet(LEDGER, index=False)
     return len(rows)
+
+
+def prune_below_floor(season: int, week: int | None = None) -> int:
+    """Remove rows whose edge is below the CURRENT floor for their market (MIN_EDGE /
+    MIN_EDGE_BY_MARKET). The record is defined as the props that clear the floor; when the
+    floor moves (5 → 15 → 10/15 on 2026-10-20) rows written under the old one do not belong,
+    frozen or not — the floor is a rule, not a price. Idempotent. Returns rows removed."""
+    df = load()
+    if not len(df):
+        return 0
+    m = df["season"] == int(season)
+    if week is not None:
+        m &= df["week"] == int(week)
+    edge = pd.to_numeric(df["edge"], errors="coerce")
+    floor = df["market"].map(min_edge)
+    drop = m & (edge < floor - 1e-9)
+    n = int(drop.sum())
+    if n:
+        df[~drop].to_parquet(LEDGER, index=False)
+    return n
 
 
 def calib_load() -> pd.DataFrame:
@@ -222,6 +259,13 @@ def _calib_write(rows: list, season: int, week: int, frozen: bool) -> int:
                 old.to_parquet(CALIB, index=False)
             keep = set(old.loc[wk, "key"])
             rows = [r for r in rows if r["key"] not in keep]
+        elif rows:
+            # pre-lock: this pass replaces the provisional rows of the games it priced (same rule
+            # as the record — a market that dropped off the book must not linger)
+            priced = {r["game_id"] for r in rows}
+            stale = wk & old["game_id"].isin(priced) & ~old["frozen"].fillna(False).astype(bool)
+            if stale.any():
+                old = old[~stale]
     if not rows:
         return 0
     new = pd.DataFrame(rows, columns=CALIB_COLS)
