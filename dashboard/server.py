@@ -1602,6 +1602,7 @@ def api_matchup_full():
 
 
 _SCHED_PRED = {}   # (season, week) -> games list; cleared on refresh
+_SLATE_LOCKS = {}  # (season, week) -> Lock: serialises the cold prediction build (see _slate)
 
 
 def _finalize_slate(base_games):
@@ -1932,65 +1933,77 @@ def _slate_save(season: int, week: int, games: list) -> None:
         print(f"[slate] cache write failed {season} wk{week}: {e}", flush=True)
 
 
+def _predict_week(season: int, week: int, d: pd.DataFrame) -> list:
+    """The EXPENSIVE part of a week's slate: one model prediction per game (roster + injury
+    adjusted, context deltas applied, total anchored to the market). No lines, no picks —
+    those are overlaid fresh on every request by _finalize_slate."""
+    from ml.projections import unavailable_ids
+    from ml.context import game_context
+    dw = d[d["week"] == week]
+    sort_cols = [c for c in ["gameday", "gametime"] if c in dw.columns]
+    if sort_cols:
+        dw = dw.sort_values(sort_cols)
+    meta = team_meta()
+    unavail = unavailable_ids()
+    base = []
+    for _, g in dw.iterrows():
+        home, away = g.get("home_team"), g.get("away_team")
+        if not isinstance(home, str) or not isinstance(away, str):
+            continue
+        hm, am = meta.get(home, {}), meta.get(away, {})
+        played = pd.notna(g.get("home_score"))
+        ctx = game_context(home, away, g)
+        rec = {
+            "game_id": g.get("game_id"), "gameday": g.get("gameday"), "gametime": g.get("gametime"),
+            "home": home, "away": away,
+            "home_name": hm.get("team_name", home), "away_name": am.get("team_name", away),
+            "home_logo": hm.get("team_logo_espn", ""), "away_logo": am.get("team_logo_espn", ""),
+            "home_color": hm.get("team_color") or "#334155", "away_color": am.get("team_color") or "#334155",
+            "vegas_spread": safe_json(g.get("spread_line")), "vegas_total": safe_json(g.get("total_line")),
+            "home_ml": safe_json(g.get("home_moneyline")), "away_ml": safe_json(g.get("away_moneyline")),
+            "home_score": safe_json(g.get("home_score")), "away_score": safe_json(g.get("away_score")),
+            "final": bool(played),
+            "neutral": ctx["neutral"], "stadium": ctx["stadium"], "context_notes": ctx["notes"],
+        }
+        # neutral site removes home field (via project_game); travel/weather nudge each score
+        pred = _adjusted_prediction(home, away, neutral=ctx["neutral"], unavail=unavail)
+        if "error" not in pred:
+            hs = pred["pred_home_score"] + ctx["home_delta"]
+            as_ = pred["pred_away_score"] + ctx["away_delta"]
+            margin = round(hs - as_, 1)
+            # the context deltas (weather, travel, rest) may move the margin; the TOTAL
+            # stays anchored to the market line (see ml.matchup_engine.project_game)
+            if pd.notna(g.get("total_line")):
+                tot = float(g["total_line"])
+                hs, as_ = (tot + margin) / 2, (tot - margin) / 2
+            hs, as_ = round(hs, 1), round(as_, 1)
+            wp = float(1 / (1 + np.exp(-margin / 13.5 * np.pi / np.sqrt(3))))
+            rec.update({
+                "pred_home": hs, "pred_away": as_,
+                "pred_margin": margin, "pred_total": round(hs + as_, 1),
+                "home_win_prob": round(wp, 3),
+                "inj_home": pred["injury_impact"][home], "inj_away": pred["injury_impact"][away],
+                "context_delta": {"home": ctx["home_delta"], "away": ctx["away_delta"]},
+            })
+        base.append(rec)
+    return base
+
+
 def _slate(season: int, week: int) -> dict:
     """Predictions (cached in-process AND on disk) + fresh lines/picks for one week."""
-    from ml.projections import unavailable_ids
     d, _ = _reg_weeks(season)
-    if (season, week) not in _SCHED_PRED:
-        cached = _slate_load(season, week)
-        if cached is not None:
-            _SCHED_PRED[(season, week)] = cached
-    if (season, week) not in _SCHED_PRED:            # cache only the EXPENSIVE predictions (no lines/picks)
-        dw = d[d["week"] == week]
-        sort_cols = [c for c in ["gameday", "gametime"] if c in dw.columns]
-        if sort_cols:
-            dw = dw.sort_values(sort_cols)
-        from ml.context import game_context
-        meta = team_meta()
-        unavail = unavailable_ids()
-        base = []
-        for _, g in dw.iterrows():
-            home, away = g.get("home_team"), g.get("away_team")
-            if not isinstance(home, str) or not isinstance(away, str):
-                continue
-            hm, am = meta.get(home, {}), meta.get(away, {})
-            played = pd.notna(g.get("home_score"))
-            ctx = game_context(home, away, g)
-            rec = {
-                "game_id": g.get("game_id"), "gameday": g.get("gameday"), "gametime": g.get("gametime"),
-                "home": home, "away": away,
-                "home_name": hm.get("team_name", home), "away_name": am.get("team_name", away),
-                "home_logo": hm.get("team_logo_espn", ""), "away_logo": am.get("team_logo_espn", ""),
-                "home_color": hm.get("team_color") or "#334155", "away_color": am.get("team_color") or "#334155",
-                "vegas_spread": safe_json(g.get("spread_line")), "vegas_total": safe_json(g.get("total_line")),
-                "home_ml": safe_json(g.get("home_moneyline")), "away_ml": safe_json(g.get("away_moneyline")),
-                "home_score": safe_json(g.get("home_score")), "away_score": safe_json(g.get("away_score")),
-                "final": bool(played),
-                "neutral": ctx["neutral"], "stadium": ctx["stadium"], "context_notes": ctx["notes"],
-            }
-            # neutral site removes home field (via project_game); travel/weather nudge each score
-            pred = _adjusted_prediction(home, away, neutral=ctx["neutral"], unavail=unavail)
-            if "error" not in pred:
-                hs = pred["pred_home_score"] + ctx["home_delta"]
-                as_ = pred["pred_away_score"] + ctx["away_delta"]
-                margin = round(hs - as_, 1)
-                # the context deltas (weather, travel, rest) may move the margin; the TOTAL
-                # stays anchored to the market line (see ml.matchup_engine.project_game)
-                if pd.notna(g.get("total_line")):
-                    tot = float(g["total_line"])
-                    hs, as_ = (tot + margin) / 2, (tot - margin) / 2
-                hs, as_ = round(hs, 1), round(as_, 1)
-                wp = float(1 / (1 + np.exp(-margin / 13.5 * np.pi / np.sqrt(3))))
-                rec.update({
-                    "pred_home": hs, "pred_away": as_,
-                    "pred_margin": margin, "pred_total": round(hs + as_, 1),
-                    "home_win_prob": round(wp, 3),
-                    "inj_home": pred["injury_impact"][home], "inj_away": pred["injury_impact"][away],
-                    "context_delta": {"home": ctx["home_delta"], "away": ctx["away_delta"]},
-                })
-            base.append(rec)
-        _SCHED_PRED[(season, week)] = base
-        _slate_save(season, week, base)
+    # ONE cold build per week at a time: a page request that lands while the boot (or the
+    # refresh) is already predicting the same week waits for that build instead of starting a
+    # second copy on the same CPU — two builds in parallel took ~5 min where one takes ~2
+    # (2026-10-24, "schedule waiting to fetch").
+    with _SLATE_LOCKS.setdefault((season, week), threading.Lock()):
+        if (season, week) not in _SCHED_PRED:
+            cached = _slate_load(season, week)
+            if cached is not None:
+                _SCHED_PRED[(season, week)] = cached
+        if (season, week) not in _SCHED_PRED:        # cache only the EXPENSIVE predictions (no lines/picks)
+            _SCHED_PRED[(season, week)] = _predict_week(season, week, d)
+            _slate_save(season, week, _SCHED_PRED[(season, week)])
 
     # live Vegas lines + picks are applied fresh each request (cheap; predictions stay cached)
     games, odds_status = _finalize_slate(_SCHED_PRED[(season, week)])
