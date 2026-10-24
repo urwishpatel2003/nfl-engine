@@ -20,7 +20,7 @@ and the captions print to the terminal.
 |---|---|
 | `SOCIAL_AUTO` | `1` to post automatically after the Saturday lock |
 | `BRAND_NAME`, `BRAND_HANDLE` | default `Half Blood Betting Prince` / `@HalfBloodBettingPrince` — on the image, in the script, captions and the brand hashtag |
-| `PUBLIC_BASE_URL` | the site URL Instagram fetches media from (default `https://nfl-engine-production.up.railway.app`) |
+| `PUBLIC_BASE_URL` | the site URL Instagram fetches media from (default `https://halfbloodbettingprince.com`, the brand domain: Cloudflare-proxied CNAME → Railway, set on the service 2026-10-24) |
 | `YT_CLIENT_ID`, `YT_CLIENT_SECRET`, `YT_REFRESH_TOKEN` | YouTube Shorts |
 | `YT_PRIVACY` | `public` (default), `unlisted` or `private` |
 | `IG_USER_ID`, `IG_ACCESS_TOKEN` | Instagram image post |

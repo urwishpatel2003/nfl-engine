@@ -16,7 +16,7 @@ module can be imported by the server without a cycle.
 import os
 from datetime import datetime, timezone
 
-SITE = os.environ.get("PUBLIC_BASE_URL", "https://nfl-engine-production.up.railway.app").rstrip("/")
+SITE = os.environ.get("PUBLIC_BASE_URL", "https://halfbloodbettingprince.com").rstrip("/")   # the brand domain (Cloudflare → Railway)
 # the brand: the accounts are "Half Blood Betting Prince", wizard theme (owner, 2026-10-22).
 # Generic wizardry only (spells, wands, crystal ball) — no quotes or imagery from the books.
 BRAND = os.environ.get("BRAND_NAME", "Half Blood Betting Prince")
