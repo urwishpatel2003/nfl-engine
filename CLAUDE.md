@@ -130,10 +130,12 @@ early row carries. A pick whose game is already final shows its result on the so
 ## Hosting & data refresh (Railway)
 
 The Flask dashboard is deployed on Railway (`nfl-engine-production.up.railway.app`) via
-gunicorn, and is reached publicly at the brand domain **halfbloodbettingprince.com** (+ www):
-Cloudflare-proxied CNAMEs to the Railway custom-domain targets, Cloudflare SSL mode Full,
-added 2026-10-24 because the owner's work network (Zscaler) blocks every `*.up.railway.app`
-hostname at the TLS handshake. `PUBLIC_BASE_URL` on the service points at the brand domain.
+gunicorn, and is reached publicly at the brand domain **www.halfbloodbettingprince.com**
+(canonical; the bare apex redirects to www at Cloudflare's edge): CNAMEs to the Railway
+custom-domain targets, Cloudflare SSL mode Full, added 2026-10-24 because the owner's work
+network (Zscaler) blocks every `*.up.railway.app` hostname at the TLS handshake. Railway
+issued the www certificate; the apex one hit a Let's Encrypt rate limit, which is why www is
+canonical. `PUBLIC_BASE_URL` on the service points at www.
 Two hard rules for anything that runs ON the server:
 
 - **Never import `nfl_data_py` in the runtime path.** It pins `pandas<2`, which conflicts

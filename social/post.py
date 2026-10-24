@@ -82,7 +82,7 @@ def render_week(season: int, week: int) -> dict:
     c["duration_s"] = round(sum(holds), 1)
     c["files"] = {"image": str(render_image(c, str(out / "picks.png"))),
                   "video": str(render_video(c, str(out / "picks.mp4"), segments=segs, holds=holds, audio=audio))}
-    c["public"] = {k: f"{os.environ.get('PUBLIC_BASE_URL', 'https://halfbloodbettingprince.com').rstrip('/')}"
+    c["public"] = {k: f"{os.environ.get('PUBLIC_BASE_URL', 'https://www.halfbloodbettingprince.com').rstrip('/')}"
                       f"/social/{season}_wk{week:02d}/{Path(v).name}" for k, v in c["files"].items()}
     (out / "content.json").write_text(json.dumps(c, indent=1), encoding="utf-8")
     return c
