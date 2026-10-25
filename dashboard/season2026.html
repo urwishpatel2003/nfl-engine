@@ -1677,11 +1677,22 @@ function mNumber(r){
   }
   const gap=Math.abs(b.edge), toward=b.ats_side===r.home?r.home_name:r.away_name;
   const real=gap>=2.5;
+  const srcLbl={circa:'Circa line',live:'Live line',nflverse:'Vegas line'}[b.line_source]||'Vegas line';
+  const teamLine=(t,sp)=>`${t} ${t===r.home?(sp>0?'−':'+')+Math.abs(sp):(sp>0?'+':'−')+Math.abs(sp)}`;
+  // the picks board's own row: the number that is graded. After the Saturday lock the board is
+  // frozen while this page re-runs the model live, so the two are shown side by side when they differ.
+  const bd=r.board; let boardRow='';
+  if(bd&&bd.pred_margin!=null){
+    const moved=Math.abs(bd.pred_margin-r.pred_margin)>=0.5;
+    const rank=bd.pick_rank?`<b>#${bd.pick_rank}</b> on the top-5 board${bd.pick_tier==='fill'?' (fill)':''}`:(bd.early?'not eligible for the top 5 (kicks off before the Saturday lock)':'not in the top 5');
+    boardRow=`<div class="msent" style="margin-top:8px">${bd.week_frozen?'Picks board (frozen at the Saturday lock)':'Picks board (live until the Saturday lock)'}: <b>${mLine(r,bd.pred_margin)}</b> against <b>${mLine(r,bd.vegas_spread)}</b>${bd.ats_pick?` → <b>${teamLine(bd.ats_pick,bd.vegas_spread)}</b>${bd.cover_prob!=null?` at ${Math.round(bd.cover_prob*100)}% to cover`:''}`:''} · ${rank}.${moved?` <span style="color:var(--warn)">The model has moved since the board was set (injuries, roster, results feed the blend); the board number is the one graded.</span>`:''}</div>`;
+  }
   return `<div class="card"><h2>The number <span>model vs market</span></h2>
-    <div class="msent">The model makes this <b>${model}</b>. The market has it <b>${mLine(r,b.vegas_spread)}</b>${gap<0.05?', the same number.':`, a gap of <b>${gap.toFixed(1)} points</b> toward <b>${toward}</b>.`}
-      ${real?` That clears the 2.5-point floor the picks board uses, so <b>${b.ats_side} ${b.ats_side===r.home?(b.vegas_spread>0?'−':'+')+Math.abs(b.vegas_spread):(b.vegas_spread>0?'+':'−')+Math.abs(b.vegas_spread)}</b> is a qualifying play at a ${Math.round(b.cover_prob*100)}% cover probability.`:` Under the 2.5-point floor the picks board uses — a lean (${b.ats_side}, ${Math.round(b.cover_prob*100)}% to cover), not a play.`}</div>
+    <div class="msent">The model makes this <b>${model}</b>. The market has it <b>${mLine(r,b.vegas_spread)}</b>${b.line_source==='circa'?' (Circa contest sheet)':''}${gap<0.05?', the same number.':`, a gap of <b>${gap.toFixed(1)} points</b> toward <b>${toward}</b>.`}
+      ${real?` That clears the 2.5-point floor the picks board uses, so <b>${teamLine(b.ats_side,b.vegas_spread)}</b> is a qualifying play at a ${Math.round(b.cover_prob*100)}% cover probability.`:` Under the 2.5-point floor the picks board uses — a lean (${b.ats_side}, ${Math.round(b.cover_prob*100)}% to cover), not a play.`}</div>
+    ${boardRow}
     <div class="mnum">
-      <div><div class="k">Vegas line</div><div class="v">${mLine(r,b.vegas_spread)}</div></div>
+      <div><div class="k">${srcLbl}</div><div class="v">${mLine(r,b.vegas_spread)}</div></div>
       <div><div class="k">Model</div><div class="v">${model}</div></div>
       <div><div class="k">Difference</div><div class="v">${gap.toFixed(1)} <small>→ ${b.ats_side}</small></div></div>
       <div><div class="k">Cover prob</div><div class="v">${Math.round(b.cover_prob*100)}% <small>${b.ats_side}</small></div></div>
@@ -1700,7 +1711,7 @@ function mScore(r){
       <div class="h" style="width:${hp}%;background:${r.home_color};justify-content:flex-end;padding-right:10px">${hp}% ${r.home}</div></div></div>
     ${r.simulation?`<div class="mnote">Likely margin ${r.simulation.margin_p10} to ${r.simulation.margin_p90} (10th–90th percentile of comparable games) · likely total ${r.simulation.total_p10}–${r.simulation.total_p90}.</div>`:''}</div>`;
 }
-const M_COMP=[['roster','Roster talent','player-level ratings of the two current squads'],['base','Scoring baseline','points scored vs points allowed this season'],['pass','Passing matchup','pass offense vs pass defense (EPA, opponent-adjusted)'],['rush','Rushing matchup','rush offense vs run defense'],['hfa','Home field','team-specific home advantage'],['injuries','Injuries','ruled-out starters (QB dominates)'],['scheme','Scheme & coverage','play-caller matchup + man/zone clash'],['st','Special teams',''],['coaching','Coaching','']];
+const M_COMP=[['roster','Roster talent','player-level ratings of the two current squads'],['base','Scoring baseline','points scored vs points allowed this season'],['pass','Passing matchup','pass offense vs pass defense (EPA, opponent-adjusted)'],['rush','Rushing matchup','rush offense vs run defense'],['hfa','Home field','team-specific home advantage'],['injuries','Injuries','ruled-out starters (QB dominates)'],['scheme','Scheme & coverage','play-caller matchup + man/zone clash'],['context','Travel · rest · weather','from the schedule row: neutral-site travel, rest differential, cold/wind'],['st','Special teams',''],['coaching','Coaching','']];
 function mMargin(r){
   const c=r.components; if(!c) return '';
   const rows=M_COMP.filter(([k])=>c[k]!=null).map(([k,l,tip])=>({k,l,tip,v:c[k]})).sort((a,b)=>Math.abs(b.v)-Math.abs(a.v));
@@ -1711,7 +1722,7 @@ function mMargin(r){
   return `<div class="card"><h2>Where the margin comes from <span>each input's contribution to the projected margin, in points</span></h2>
     ${rows.map(bar).join('')}
     <div class="caxis"><span>← ${esc(r.away_name)}</span><span>${esc(r.home_name)} →</span></div>
-    <div class="mnote">Bars point toward the team each input favours and sum to <b>${Math.abs(sum).toFixed(1)} toward ${esc(fav)}</b>. Roster talent and the unit matchups are shrunk toward the market by the season's measured calibration (×${Number(r.calibration).toFixed(2)}); home field, injuries and scheme are carried whole.</div></div>`;
+    <div class="mnote">Bars point toward the team each input favours and sum to <b>${Math.abs(sum).toFixed(1)} toward ${esc(fav)}</b>. Roster talent and the unit matchups are shrunk toward the market by the season's measured calibration (×${Number(r.calibration).toFixed(2)}); home field, injuries, scheme and the travel/rest/weather context are carried whole.${r.context&&r.context.listed_neutral?' Listed neutral site: no home field for either team.':''}</div></div>`;
 }
 function mQBs(r){
   const q=r.qbs; if(!q) return '';
@@ -1883,7 +1894,8 @@ async function viewMatchup(home, away, neutral){
   const headline=`${esc(r.away_name)} at ${esc(r.home_name)}`;
   res.innerHTML = `<div class="result" style="display:block">
     <div class="mtitle">${headline}</div>
-    <div class="msub">${mWhen(r.conditions)||'not on the schedule · hypothetical matchup'}${neutral?' · neutral field':''} &nbsp;${mCondChips(r.conditions)}</div>
+    <div class="msub">${mWhen(r.conditions)||'not on the schedule · hypothetical matchup'}${r.context&&r.context.listed_neutral?' · 🌍 neutral site (no home field)':neutral?' · neutral field':''} &nbsp;${mCondChips(r.conditions)}</div>
+    ${r.context&&r.context.notes&&r.context.notes.length?`<div class="msub" style="margin-top:-4px">${r.context.listed_neutral?'🌍':'✈️'} ${esc(r.context.notes.join(' · '))}</div>`:''}
     <div class="mhero card">
       <div class="score">
         <div class="tm"><img src="${r.away_logo}" onerror="this.style.visibility='hidden'"><div class="nm">${esc(r.away_name)}</div><div class="rec">${mRec(r,r.away)}</div><div class="pts">${r.pred_away_score.toFixed(1)}</div></div>

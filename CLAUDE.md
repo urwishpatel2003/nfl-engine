@@ -113,6 +113,18 @@ games are not eligible (owner, 2026-10-23, after a one-day trial of including th
 `TOP5_INCLUDE_EARLY=1` lets them in), and `ml.ledger.unrank_early` strips any rank a frozen
 early row carries. A pick whose game is already final shows its result on the social post.
 
+## One game, one number
+
+Every page that predicts a SCHEDULED game (Schedule & Picks slate, Matchup page, the props
+board) goes through `_predict_scheduled` in `dashboard/server.py`: venue from the schedule row
+(a listed Neutral site removes home field), travel/rest/weather deltas, total anchored to the
+market line. Never call `_adjusted_prediction`/`project_game` directly for a game that is on
+the schedule — in week 7 2026 the Matchup page did, treated Steelers–Saints in Paris as a Saints
+home game, and leaned the opposite way to the board being graded. The Matchup page also shows
+the board's own row (`_board_row`: its line source and, after the Saturday lock, the frozen
+numbers). `python tests/test_matchup_slate_agree.py` (slow, builds the current week) fails if
+any page disagrees with the slate; run it after touching prediction routing.
+
 ## Gotchas
 
 - **Standalone build scripts**: `coaching_metrics.py` and `update_styles_2025.py` are run directly

@@ -1396,9 +1396,11 @@ def _head_to_head(home: str, away: str, limit: int = 6) -> dict:
             f"{home}_covers": h_cov, "ats_n": n_ats}
 
 
-def _scheduled_game(home: str, away: str) -> dict:
-    """The upcoming (or most recent) scheduled game for this exact home/away pairing, with
-    its Vegas line and venue conditions. None if these teams aren't paired in the schedule."""
+def _scheduled_row(home: str, away: str):
+    """The schedule row (pandas Series) of the upcoming — else most recent — game for this
+    exact home/away pairing, or None. The venue (location/stadium), rest days and weather on
+    it are what the slate predicts from, so every page that predicts a scheduled game must
+    read them from here rather than guess."""
     s = schedules_df()
     if not len(s):
         return None
@@ -1406,7 +1408,15 @@ def _scheduled_game(home: str, away: str) -> dict:
     if d.empty:
         return None
     fut = d[d["home_score"].isna()]
-    row = fut.sort_values(["season", "week"]).iloc[0] if len(fut) else d.sort_values(["season", "week"]).iloc[-1]
+    return fut.sort_values(["season", "week"]).iloc[0] if len(fut) else d.sort_values(["season", "week"]).iloc[-1]
+
+
+def _scheduled_game(home: str, away: str) -> dict:
+    """The upcoming (or most recent) scheduled game for this exact home/away pairing, with
+    its Vegas line and venue conditions. None if these teams aren't paired in the schedule."""
+    row = _scheduled_row(home, away)
+    if row is None:
+        return None
     return {
         "season": int(row["season"]), "week": int(row["week"]) if pd.notna(row["week"]) else None,
         "played": bool(pd.notna(row.get("home_score"))),
@@ -1418,6 +1428,7 @@ def _scheduled_game(home: str, away: str) -> dict:
         "gameday": str(row.get("gameday")) if pd.notna(row.get("gameday")) else None,
         "gametime": str(row.get("gametime")) if pd.notna(row.get("gametime")) else None,
         "game_id": safe_json(row.get("game_id")),
+        "location": safe_json(row.get("location")),
     }
 
 
@@ -1471,22 +1482,29 @@ def _matchup_qbs(home: str, away: str, unavail: set) -> dict:
     return out
 
 
-def _matchup_betting(res: dict, sched: dict) -> dict:
-    """Model line vs Vegas line, with the ATS lean + cover prob and total lean + O/U prob.
-    Uses the scheduled nflverse line; falls back to model-only when no line exists."""
+def _matchup_betting(res: dict, sched: dict, board: dict = None) -> dict:
+    """Model line vs the market line, with the ATS lean + cover prob and total lean + O/U prob.
+    The line is the one the picks BOARD prices against when the week is cached (pinned contest
+    sheet > live book > nflverse, see _finalize_slate), else the scheduled nflverse line;
+    model-only when no line exists."""
     from ml.spreads import ats_pick, total_prob
     out = {"model_margin": res["pred_margin"], "model_total": res["pred_total"], "has_line": False}
-    sp = sched.get("spread_line") if sched else None
+    sp, src = None, None
+    if board and board.get("vegas_spread") is not None:
+        sp, src = board["vegas_spread"], board.get("line_source") or "nflverse"
+    elif sched and sched.get("spread_line") is not None:
+        sp, src = sched["spread_line"], "nflverse"
     if sp is None:
         return out
     out["has_line"] = True
     out["vegas_spread"] = sp                          # home-perspective, >0 = home favored
+    out["line_source"] = src
     a = ats_pick(res["pred_margin"], sp)
     out["edge"] = a["edge"]
     out["ats_side"] = res["home"] if a["side"] == "home" else res["away"]
     out["cover_prob"] = a["cover_prob"]
     out["push_prob"] = a["push"]
-    tot = sched.get("total_line")
+    tot = board.get("vegas_total") if board and board.get("vegas_total") is not None else sched.get("total_line")
     if tot is not None and res.get("pred_total") is not None:
         out["vegas_total"] = tot
         tp = total_prob(res["pred_total"], tot)
@@ -1533,7 +1551,14 @@ def api_matchup_full():
     neutral = request.args.get('neutral', '0') == '1'
     if not home or not away or home == away:
         return jsonify({"error": "two different teams required"}), 400
-    res = _adjusted_prediction(home, away, neutral)
+    # A scheduled game is predicted from its schedule row — venue, travel, rest, weather,
+    # market total — through the SAME function as the Schedule & Picks slate. The checkbox
+    # only matters for a hypothetical pairing (or to strip home field from a listed home game).
+    row = _scheduled_row(home, away)
+    if row is not None:
+        _, res = _predict_scheduled(home, away, row, force_neutral=neutral)
+    else:
+        res = _adjusted_prediction(home, away, neutral)
     if "error" in res:
         return jsonify(res), 404
 
@@ -1580,13 +1605,24 @@ def api_matchup_full():
         res["schemes"]["league"] = {}
     res["form"] = {home: form(home), away: form(away)}
     res["injuries"] = {home: latest_injuries(home), away: latest_injuries(away)}
-    from ml.spreads import simulate
-    res["simulation"] = simulate(res["pred_margin"], res["pred_total"])
     # detailed analysis blocks
     sched = _scheduled_game(home, away)
+    # the picks-board row: the line the board prices against and, once frozen, the graded
+    # numbers. The fresh scores above are re-split on the board's total so the only thing
+    # that can differ between the two pages is a margin that moved after the Saturday lock.
+    board = _board_row(sched["season"], sched["week"], sched["game_id"]) \
+        if sched and sched.get("week") is not None and sched.get("game_id") else None
+    if board and board.get("vegas_total") is not None and res.get("total_source") == "market" \
+            and abs(float(board["vegas_total"]) - float(res["pred_total"])) >= 0.05:
+        tot, margin = float(board["vegas_total"]), float(res["pred_margin"])
+        res["pred_home_score"], res["pred_away_score"] = round((tot + margin) / 2, 1), round((tot - margin) / 2, 1)
+        res["pred_total"] = round(res["pred_home_score"] + res["pred_away_score"], 1)
+    res["board"] = board
+    from ml.spreads import simulate
+    res["simulation"] = simulate(res["pred_margin"], res["pred_total"])
     res["situational"] = _matchup_situational(home, away, season)
     res["h2h"] = _head_to_head(home, away)
-    res["betting"] = _matchup_betting(res, sched)
+    res["betting"] = _matchup_betting(res, sched, board)
     res["conditions"] = sched
     res["game_script"] = _game_script(res, _combined_pace(home, away, season))
     try:
@@ -1631,6 +1667,9 @@ def _finalize_slate(base_games):
                     g["line_source"] = "nflverse"
     except Exception:
         odds_status = None
+    for g in games:                                  # no live feed (no key / outage): the nflverse line, named as such
+        if g.get("vegas_spread") is not None and not g.get("line_source"):
+            g["line_source"] = "nflverse"
     # Pinned contest lines (ml/line_overrides.py) win over BOTH the live feed and nflverse: the
     # owner's picks are graded against the Circa Million sheet, not the market, in those weeks.
     try:
@@ -1965,28 +2004,84 @@ def _predict_week(season: int, week: int, d: pd.DataFrame) -> list:
             "final": bool(played),
             "neutral": ctx["neutral"], "stadium": ctx["stadium"], "context_notes": ctx["notes"],
         }
-        # neutral site removes home field (via project_game); travel/weather nudge each score
-        pred = _adjusted_prediction(home, away, neutral=ctx["neutral"], unavail=unavail)
-        if "error" not in pred:
-            hs = pred["pred_home_score"] + ctx["home_delta"]
-            as_ = pred["pred_away_score"] + ctx["away_delta"]
-            margin = round(hs - as_, 1)
-            # the context deltas (weather, travel, rest) may move the margin; the TOTAL
-            # stays anchored to the market line (see ml.matchup_engine.project_game)
-            if pd.notna(g.get("total_line")):
-                tot = float(g["total_line"])
-                hs, as_ = (tot + margin) / 2, (tot - margin) / 2
-            hs, as_ = round(hs, 1), round(as_, 1)
-            wp = float(1 / (1 + np.exp(-margin / 13.5 * np.pi / np.sqrt(3))))
-            rec.update({
-                "pred_home": hs, "pred_away": as_,
-                "pred_margin": margin, "pred_total": round(hs + as_, 1),
-                "home_win_prob": round(wp, 3),
-                "inj_home": pred["injury_impact"][home], "inj_away": pred["injury_impact"][away],
-                "context_delta": {"home": ctx["home_delta"], "away": ctx["away_delta"]},
-            })
+        fields, _ = _predict_scheduled(home, away, g, unavail=unavail, ctx=ctx)
+        if fields:
+            rec.update(fields)
         base.append(rec)
     return base
+
+
+def _predict_scheduled(home: str, away: str, g, unavail=None, ctx=None, force_neutral: bool = False):
+    """ONE prediction for a scheduled game, from its schedule row: venue (a listed neutral
+    site removes home field), travel, rest and weather deltas, the total anchored to the
+    row's market line. The Schedule & Picks slate AND the Matchup page both come through
+    here, so a game cannot carry two different numbers. (Week 7 2026, Steelers–Saints in
+    Paris: the Matchup page predicted it as a Saints home game, +1.4 pts of home field the
+    board had correctly removed, and showed the opposite lean to the board that is graded.)
+
+    Returns (slate_fields, pred): the slate's prediction fields (None on error) and the full
+    _adjusted_prediction result with its scores/margin/total/win prob REPLACED by the same
+    numbers and a 'context' block + 'context' component added. force_neutral is the Matchup
+    page's hypothetical "neutral field" checkbox on a game that is not listed neutral."""
+    from ml.context import game_context
+    if ctx is None:
+        ctx = game_context(home, away, g)
+    neutral = bool(ctx["neutral"] or force_neutral)
+    pred = _adjusted_prediction(home, away, neutral=neutral, unavail=unavail)
+    if "error" in pred:
+        return None, pred
+    hs = pred["pred_home_score"] + ctx["home_delta"]
+    as_ = pred["pred_away_score"] + ctx["away_delta"]
+    margin = round(hs - as_, 1)
+    # the context deltas (weather, travel, rest) may move the margin; the TOTAL
+    # stays anchored to the market line (see ml.matchup_engine.project_game)
+    if pd.notna(g.get("total_line")):
+        tot = float(g["total_line"])
+        hs, as_ = (tot + margin) / 2, (tot - margin) / 2
+    hs, as_ = round(hs, 1), round(as_, 1)
+    wp = float(1 / (1 + np.exp(-margin / 13.5 * np.pi / np.sqrt(3))))
+    fields = {
+        "pred_home": hs, "pred_away": as_,
+        "pred_margin": margin, "pred_total": round(hs + as_, 1),
+        "home_win_prob": round(wp, 3),
+        "inj_home": pred["injury_impact"][home], "inj_away": pred["injury_impact"][away],
+        "context_delta": {"home": ctx["home_delta"], "away": ctx["away_delta"]},
+    }
+    pred.update({"pred_home_score": hs, "pred_away_score": as_, "pred_margin": margin,
+                 "pred_total": round(hs + as_, 1), "home_win_prob": round(wp, 3), "away_win_prob": round(1 - wp, 3)})
+    pred["context"] = {"neutral": neutral, "listed_neutral": bool(ctx["neutral"]), "stadium": ctx["stadium"],
+                       "notes": ctx["notes"], "home_delta": ctx["home_delta"], "away_delta": ctx["away_delta"]}
+    if "components" in pred:                    # same home-positive convention; the pieces still sum
+        pred["components"]["context"] = round(ctx["home_delta"] - ctx["away_delta"], 2)
+    return fields, pred
+
+
+_BOARD_FIELDS = ("pred_home", "pred_away", "pred_margin", "pred_total", "home_win_prob",
+                 "vegas_spread", "vegas_total", "line_source", "market_spread", "ats_pick", "edge",
+                 "cover_prob", "push_prob", "pick_rank", "pick_tier", "early", "locked",
+                 "week_frozen", "week_lock_at", "final", "home_score", "away_score")
+
+
+def _board_row(season: int, week: int, game_id: str):
+    """The Schedule & Picks row for one game — the line it is priced against (pinned contest
+    sheet, live book or nflverse) and, once the week is frozen, the numbers on the record.
+    Never triggers a cold prediction build (minutes; that belongs to boot/refresh/the
+    Schedule page): None when the week's predictions are not cached yet."""
+    try:
+        base = _SCHED_PRED.get((season, week))
+        if base is None:
+            base = _slate_load(season, week)
+            if base is None:
+                return None
+            _SCHED_PRED[(season, week)] = base
+        games, _ = _finalize_slate(base)
+        _overlay_locked(season, games)
+        for g in games:
+            if g.get("game_id") == game_id:
+                return {k: g.get(k) for k in _BOARD_FIELDS}
+    except Exception as e:
+        print(f"[matchup] board row failed {game_id}: {e}", flush=True)
+    return None
 
 
 def _slate(season: int, week: int) -> dict:
@@ -2565,6 +2660,10 @@ def api_props():
     if not home or not away or home == away:
         return jsonify({"error": "pick two different teams"}), 400
     neutral = request.args.get('neutral') == '1'
+    row = _scheduled_row(home.upper(), away.upper())    # a listed neutral site is neutral regardless of the checkbox
+    if row is not None:
+        from ml.context import game_context
+        neutral = neutral or bool(game_context(home.upper(), away.upper(), row)["neutral"])
     data = player_props(home, away, neutral=neutral)
     if request.args.get('lines') == '1':                 # merge real book lines (spends odds credits)
         from ml.odds import event_props, have_key, _namekey
