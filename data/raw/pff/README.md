@@ -4,8 +4,11 @@
 
 After each week's games (Mon/Tue), tell Claude: **"refresh my PFF grades"**. What happens:
 1. Claude opens pff.com in the Browser pane — log in there if it asks (session usually persists).
-2. Claude pulls all 32 rosters + the team overview and runs `pff_assemble.py` → the two parquets
-   in `data/processed/`.
+2. Claude pulls all 32 rosters + the team table and runs `pff_assemble.py --week N` → the two
+   grade parquets in `data/processed/` (+ a dated copy in `pff_history/`); then, from the
+   premium app's own calls, the nine unit reports (`pff_facets.py --through N`) and the two
+   man/zone coverage-scheme tables that feed the matchup coverage clash
+   (`pff_scheme.py --through N`; the season being replaced is kept as `pff_scheme_*_<season>`).
 3. Claude runs `railway up`. The parquets ship inside the deploy (`.railwayignore` lets them
    through while `.gitignore` keeps them off public GitHub), and `dashboard/seed.py` syncs them
    onto the server volume at boot — the site is current the moment the deploy finishes.
