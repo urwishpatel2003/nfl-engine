@@ -236,7 +236,13 @@ def _offense_vs_defense(off_t, def_t, tab) -> tuple:
 _COV_SCHEME = None
 _COV_MIN_ROUTES = 50        # receiver needs real 2025 route volume to inform the split
 _COV_PTS_SCALE = 0.45       # pts per (man-rate deviation × grade differential)
-_COV_PTS_CAP = 1.5
+# Cap per offense. Was 1.5 (±3 on a margin) from 2026-08-26 to 2026-10-26. Shrunk to 0.5
+# after the first stability check: across the 32 teams the receivers' man−zone grade
+# differential correlates −0.04 between full-2025 and 2026-through-wk7 (noise), the defense
+# man rate 0.41, and ~40% of game sides sat at the old cap — swapping the tables moved
+# wk7/wk8 margins 1.6 pts on average and flipped three picks. At 0.5 the term keeps its
+# direction but can no longer decide a pick on its own. Owner's call, 2026-10-26.
+_COV_PTS_CAP = 0.5
 
 
 def _coverage_scheme() -> dict:

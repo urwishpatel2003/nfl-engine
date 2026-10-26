@@ -1919,6 +1919,7 @@ def _slate_sig() -> str:
     names = [RAW / n for n in ("injuries.parquet", "rosters_2026.parquet", "depth_2026_current.parquet",
                                "pbp_2026.parquet", "pbp_2025.parquet", "schedules.parquet")]
     names += [PROC / n for n in ("team_styles.parquet", "pff_grades.parquet", "pff_grades_2025.parquet",
+                                 "pff_scheme_receiving.parquet", "pff_scheme_defense.parquet",   # coverage clash inputs
                                  "composite_scores.parquet", "coaching_scores.parquet", "situational_stats.parquet")]
     # content digests, not mtimes: every deploy re-copies the curated files onto the volume
     # with fresh timestamps, which would invalidate the cache on each deploy for nothing
