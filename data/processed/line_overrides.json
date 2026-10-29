@@ -57,6 +57,64 @@
     "source": "circa",
     "spread": 3.0
    }
+  },
+  "8": {
+   "2026_08_ARI_DAL": {
+    "source": "circa",
+    "spread": 7.0
+   },
+   "2026_08_ATL_TB": {
+    "source": "circa",
+    "spread": 2.5
+   },
+   "2026_08_BAL_BUF": {
+    "source": "circa",
+    "spread": 3.0
+   },
+   "2026_08_CAR_GB": {
+    "source": "circa",
+    "spread": 3.5
+   },
+   "2026_08_CHI_SEA": {
+    "source": "circa",
+    "spread": 3.0
+   },
+   "2026_08_CLE_PIT": {
+    "source": "circa",
+    "spread": 3.0
+   },
+   "2026_08_IND_JAX": {
+    "source": "circa",
+    "spread": 10.0
+   },
+   "2026_08_KC_DEN": {
+    "source": "circa",
+    "spread": -1.5
+   },
+   "2026_08_LAC_LA": {
+    "source": "circa",
+    "spread": 6.5
+   },
+   "2026_08_LV_NYJ": {
+    "source": "circa",
+    "spread": 1.5
+   },
+   "2026_08_MIN_DET": {
+    "source": "circa",
+    "spread": 3.5
+   },
+   "2026_08_NE_MIA": {
+    "source": "circa",
+    "spread": -7.0
+   },
+   "2026_08_PHI_WAS": {
+    "source": "circa",
+    "spread": 6.0
+   },
+   "2026_08_TEN_CIN": {
+    "source": "circa",
+    "spread": 12.5
+   }
   }
  }
 }
