@@ -52,6 +52,20 @@ INTL_VENUES = {
     "Melbourne Cricket Ground": (-37.8200, 144.9834),
 }
 
+# Visitor travel. The home-field constant (ml.squad.HFA = 2.0) is the FULL 2021-25 average
+# home margin, which already contains the average effect of the visitor's trip. From
+# 2026-08 to 2026-10-29 this module ALSO charged every domestic visitor
+# min(1.5, miles/2500*0.8 + tz_east*0.3) — mean 0.43 pts over 2021-25 (80% of games), so the
+# model's average home edge was ~2.4 against the market's ~1.6, and the weeks 1-7 review of
+# 2026 found that lean to be the one model-specific miss (home-side picks 31-39-4; the model
+# sat 1.5-3 pts closer to the home DOG than the market in away-favorite games). Measured on
+# 1,333 games 2021-25 the trip has no positive value beyond the line either: actual-minus-
+# market = -1.36 x penalty (corr -0.04). So domestic travel is NOT charged any more; the trip
+# is only noted. International trips are charged only for their EXCESS over a normal
+# domestic trip (TRAVEL_BASE). Rest (+0.085/day beyond the line on 291 games, model 0.12)
+# and Denver altitude (+2.2 beyond the line on 43 games, model 0.4) stay.
+TRAVEL_BASE = 0.43
+
 # Cold-weather teams that play OUTDOORS (used only as a late-season prior when no
 # forecast exists; dome teams are excluded by the roof check regardless).
 COLD_OUTDOOR = {"GB", "BUF", "CHI", "NE", "CLE", "PIT", "CIN", "BAL", "KC",
@@ -91,7 +105,7 @@ def game_context(home: str, away: str, row) -> dict:
             dist = haversine(ac, venue)
             tz_east = max(0.0, (venue[1] - ac[1]) / 15.0)
             pen = min(1.5, dist / 2500.0 * 0.8 + tz_east * 0.3)
-            ad -= pen
+            ad -= max(0.0, pen - TRAVEL_BASE)          # only the excess over a normal trip
             notes.append(f"{away} travels {dist:,.0f} mi" + (f", {tz_east:.0f} TZ east" if tz_east >= 1 else ""))
     elif neutral:
         notes.append(f"Neutral site — {stadium}" if stadium else "Neutral site")
@@ -103,15 +117,13 @@ def game_context(home: str, away: str, row) -> dict:
             hd += diff; ad -= diff
             notes.append(f"Travel: {home} {hdist:,.0f} mi · {away} {adist:,.0f} mi")
     else:
-        # domestic: only the visitor travels (to the home city); east-ward trips hurt more
+        # domestic: the visitor's trip is NOTED, not charged — its average is already inside
+        # the home-field constant and it carries nothing beyond the line (see TRAVEL_BASE)
         if home in coords and away in coords:
             hc, ac = coords[home][:2], coords[away][:2]
             dist = haversine(ac, hc)
-            # eastward travel (venue east of the visitor's home) hurts the body clock most
             tz_east = max(0.0, (hc[1] - ac[1]) / 15.0)
-            pen = min(1.5, dist / 2500.0 * 0.8 + tz_east * 0.3)
-            if pen > 0.15:
-                ad -= pen
+            if dist >= 1500:
                 notes.append(f"{away} travels {dist:,.0f} mi" + (f", {tz_east:.0f} TZ east" if tz_east >= 1 else ""))
         if home == "DEN":                                              # thin air tires the visitor
             ad -= 0.4; notes.append("Altitude (Denver)")
