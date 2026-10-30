@@ -1060,6 +1060,12 @@ async function viewPffCompare(){
     return;
   }
   const T=d.teams;
+  // the grade vintage comes from the server (the season stamped on pff_team_grades.parquet):
+  // in-season 2026 once the weekly PFF pull has run, the completed 2025 season before that
+  const yy=T?String(T.season).slice(2):'', inSeason=!!(T&&T.season>=2026);
+  const vintage=T?(inSeason
+      ?`our 2026 roster-talent rank vs PFF's ${T.season} in-season team grade rank${T.through_games?` (through ${T.through_games} games)`:''} — gaps = where the roster model and the grades disagree`
+      :`our 2026 roster-talent rank vs PFF's ${T.season} season grade rank — different vintages, so gaps ≈ how much we think the roster changed`):'';
   const teamRows=(T?T.rows:[]).map(t=>{
     const dl=t.delta, c=dl>1?'var(--good)':dl<-1?'var(--bad)':'var(--muted)';
     return `<tr onclick="go('#/team/${t.team}')" style="cursor:pointer">
@@ -1074,11 +1080,11 @@ async function viewPffCompare(){
     <div class="note"><b>PFF vs Model</b> — where our numbers and PFF's disagree. Player comparison is
       <b>percentile vs percentile</b> (our 0–100 rating is a position percentile; PFF grades are converted to
       percentiles within their position group — raw PFF grades shown in parentheses). Starters &amp; primary
-      backups with measured 2025 ratings only. Big gaps are the scouting questions worth digging into.</div>
+      backups with measured ratings only. Big gaps are the scouting questions worth digging into.</div>
     ${T?`<div class="pad"><div class="card">
-      <h2>Team ranking: ours vs PFF <span>our 2026 roster-talent rank vs PFF's 2025 season grade rank — different vintages, so gaps ≈ how much we think the roster changed</span></h2>
+      <h2>Team ranking: ours vs PFF <span>${vintage}</span></h2>
       <div class="lstat-wrap"><table class="lstat" style="min-width:520px">
-        <thead><tr><th>Ours</th><th class="tmh">Team</th><th>PFF '25</th><th>Δ</th><th>PFF grade</th><th>'25 record</th></tr></thead>
+        <thead><tr><th>Ours</th><th class="tmh">Team</th><th>PFF '${yy}</th><th>Δ</th><th>PFF grade</th><th>'${yy} record</th></tr></thead>
         <tbody>${teamRows}</tbody></table></div>
     </div></div>`:''}
     <div class="pad"><div class="box" style="margin-top:0">

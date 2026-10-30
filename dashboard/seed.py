@@ -32,6 +32,13 @@ SEED = ROOT / "data_seed"
 # stale labels forever. A live refresh still rebuilds it at runtime; that output simply persists
 # until the next redeploy re-syncs the committed baseline.
 _REFRESH_NAMES = {"injuries.parquet", "schedules.parquet", "situational_stats.parquet",
+                  # the rest of the light availability pull (ml/refresh.py LIGHT_FILES + the
+                  # roster release + its 2026 roster rebuild). Until 2026-10-30 these were
+                  # treated as curated, so EVERY deploy overwrote the server's fresh copies
+                  # with whatever the laptop had pulled last — a deploy regressed IR moves and
+                  # depth-chart changes until the next 2-4-hourly pull (McLaurin's IR listing
+                  # vanished from the site for a few hours after the week-8 deploys).
+                  "depth_2026_current.parquet", "rosters_2026.parquet", "rosters_weekly.parquet",
                   "last_refresh.json", "season_2026.json",
                   "picks_ledger.parquet",      # the site's own pre-kickoff pick record — never clobber
                   "props_ledger.parquet",      # the player-prop record (ml/props_ledger.py) — same rule

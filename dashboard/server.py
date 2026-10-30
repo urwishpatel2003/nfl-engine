@@ -632,7 +632,13 @@ def api_pff_compare():
                           "pff_overall": float(r.grades_overall),
                           "record": f"{int(r.wins)}-{int(r.losses)}" + (f"-{int(r.ties)}" if r.ties else "")})
         teams.sort(key=lambda x: x["our_rank"])
-        payload["teams"] = {"season": 2025, "rows": teams}
+        # The vintage comes from the FILE: pff_team_grades.parquet is the in-season 2026 table
+        # once the weekly PFF pull has run (season column + wins/losses so far). It was
+        # hard-coded 2025 until 2026-10-29, so the page kept saying "PFF '25" over 2026 grades.
+        season_tg = int(tg["season"].max()) if "season" in tg.columns and tg["season"].notna().any() else 2025
+        played = int((tg["wins"] + tg["losses"] + (tg["ties"] if "ties" in tg.columns else 0)).max()) \
+            if {"wins", "losses"} <= set(tg.columns) else None
+        payload["teams"] = {"season": season_tg, "through_games": played, "rows": teams}
     _PFF_COMPARE = payload
     return jsonify(_native(payload))
 
@@ -3203,7 +3209,8 @@ def clear_caches(scope: str = "full"):
                       ("ml.squad", "_PCT_CACHE"),
                       ("ml.squad", "_META_CACHE"), ("ml.squad", "_PBP_AGG"), ("ml.squad", "_SKILL_CACHE"),
                       ("ml.projections", "_PROFILE_CACHE"), ("ml.projections", "_QBDEPTH_CACHE"),
-                      ("ml.projections", "_RANK_CACHE"), ("ml.projections", "_TV_CACHE")]:
+                      ("ml.projections", "_RANK_CACHE"), ("ml.projections", "_TV_CACHE"),
+                      ("ml.projections", "_USAGE_CACHE"), ("ml.projections", "_RESERVE_CACHE")]:
         try:
             import importlib
             setattr(importlib.import_module(mod), attr, None)

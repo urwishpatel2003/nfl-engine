@@ -145,6 +145,47 @@ def _depth_rank() -> dict:
     return _RANK_CACHE
 
 
+_USAGE_CACHE = None
+_RESERVE_CACHE = None
+
+# Touches (targets + carries) per TEAM game this season that make a reserve-list player a
+# lost STARTER for injury_impact regardless of his depth-chart rank (see injury_impact).
+# A WR3 / change-of-pace back sits at 3-5; a WR1 at 7+.
+RESERVE_USAGE_PG = 2.5
+
+
+def _season_usage() -> dict:
+    """{gsis_id: targets + carries per TEAM game THIS season} — a player's real role this
+    year, over the games his current team has played (not appearing counts as zero)."""
+    global _USAGE_CACHE
+    if _USAGE_CACHE is None:
+        from ml.current import state
+        st = state()
+        out = {}
+        try:
+            if st["in_progress"]:
+                box, _, _ = _player_box(st["season"])
+                if len(box):
+                    team_of = pd.read_parquet(RAW / "rosters_2026.parquet", columns=["player_id", "team"]) \
+                        .dropna(subset=["player_id"]).drop_duplicates("player_id").set_index("player_id")["team"]
+                    b = box.set_index("player_id")
+                    touches = b["targets"].fillna(0) + b["carries"].fillna(0) if "targets" in b.columns else b["carries"].fillna(0)
+                    tg = team_of.reindex(b.index).map(st["games"]).fillna(0).astype(float)
+                    out = {str(pid): float(t / g) for pid, t, g in zip(b.index, touches, tg) if g > 0}
+        except Exception:
+            out = {}
+        _USAGE_CACHE = out
+    return _USAGE_CACHE
+
+
+def _reserve_cached() -> dict:
+    """reserve_ids() memoised for the process (cleared with the other caches on refresh)."""
+    global _RESERVE_CACHE
+    if _RESERVE_CACHE is None:
+        _RESERVE_CACHE = reserve_ids()
+    return _RESERVE_CACHE
+
+
 def _available_qb(team: str, unavail: set):
     """First depth-chart QB who isn't ruled out (falls back to QB1 if all are)."""
     qs = _depth_qbs().get(team, [])
@@ -497,12 +538,26 @@ def injury_impact(team: str, unavail: set = None) -> dict:
     # with the player, so a back who carried 9/g elsewhere and now sits 4th on this chart
     # (Pacheco, IR, on DET's chart at RB4) was charging DET for a share it never planned on.
     rank = _depth_rank()
+    reserve = _reserve_cached()
+    usage = _season_usage()
     for _, p in r[r.player_id.isin(unavail)].iterrows():
-        if p.position in ("RB", "WR", "TE") and (rank.get(p.player_id) or 9) <= 2:
-            share = float(p.get("target_share", 0) or 0) + float(p.get("carry_share", 0) or 0)
-            loss = min(2.0, share * 6.0 * 0.35)
-            if loss > 0.2:
-                pen += loss; who.append(f"{p.player_name} ({p.position})")
+        if p.position not in ("RB", "WR", "TE"):
+            continue
+        starter = (rank.get(p.player_id) or 9) <= 2
+        # A player placed on a reserve list (IR/PUP/NFI) drops to the BOTTOM of nflverse's
+        # depth chart the day he is listed — McLaurin, IR in 2026 week 8, showed as WR6 on a
+        # chart he had led for seven weeks, and the rank rule above skipped him entirely. For
+        # a reserve-list player the chart says nothing; his usage THIS season for THIS team
+        # does. Imported usage from a previous team (the Pacheco case the rank rule exists
+        # for) is zero here, so that guard still holds.
+        if not starter and str(p.player_id) in reserve and usage.get(str(p.player_id), 0.0) >= RESERVE_USAGE_PG:
+            starter = True
+        if not starter:
+            continue
+        share = float(p.get("target_share", 0) or 0) + float(p.get("carry_share", 0) or 0)
+        loss = min(2.0, share * 6.0 * 0.35)
+        if loss > 0.2:
+            pen += loss; who.append(f"{p.player_name} ({p.position})")
     return {"pts": round(min(pen, 10.0), 1), "players": who}
 
 
