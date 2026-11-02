@@ -944,7 +944,9 @@ _TENDENCY_SPEC = [
     ("pace",                 "Fast tempo",                "Slow tempo",          0.16),
     ("play_action_rate",     "High play-action",          None,                  0.16),
     ("motion_rate",          "Heavy pre-snap motion",     None,                  0.16),
-    ("qb_rush_rate",         "Mobile QB",                 None,                  0.16),
+    # "Mobile QB" is NOT a team column any more: it is the current QB1's own scramble share
+    # (ml.matchup_context.qb_mobility), appended below with the same top-16% cut, so the chip
+    # follows the quarterback (Hurts to IR → McKee: no chip) and agrees with the scheme rule.
     ("avg_blitzers",         "Blitz-heavy defense",       None,                  0.16),
     ("off_epa_per_play",     "Explosive offense",         None,                  0.12),
     ("rz_td_rate",           "Elite red-zone offense",    None,                  0.12),
@@ -973,6 +975,12 @@ def _tendencies(team: str, season: int) -> list:
             tags.append(hi)
         elif lo and p <= frac:
             tags.append(lo)
+    try:                                              # the quarterback himself, not the team rate
+        from ml.matchup_context import qb_mobility
+        if qb_mobility().get(team, 0.5) >= 1 - 0.16:
+            tags.append("Mobile QB")
+    except Exception:
+        pass
     return tags
 
 
@@ -3210,7 +3218,8 @@ def clear_caches(scope: str = "full"):
                       ("ml.squad", "_META_CACHE"), ("ml.squad", "_PBP_AGG"), ("ml.squad", "_SKILL_CACHE"),
                       ("ml.projections", "_PROFILE_CACHE"), ("ml.projections", "_QBDEPTH_CACHE"),
                       ("ml.projections", "_RANK_CACHE"), ("ml.projections", "_TV_CACHE"),
-                      ("ml.projections", "_USAGE_CACHE"), ("ml.projections", "_RESERVE_CACHE")]:
+                      ("ml.projections", "_USAGE_CACHE"), ("ml.projections", "_RESERVE_CACHE"),
+                      ("ml.squad", "_COACH_CUR")]:          # in-season coaching score moves with games played
         try:
             import importlib
             setattr(importlib.import_module(mod), attr, None)

@@ -300,6 +300,69 @@ def build_coaching_metrics(seasons: list) -> pd.DataFrame:
     return coaching
 
 
+def inseason_scores(season: int, through_week: int | None = None) -> pd.DataFrame:
+    """The CURRENT season's coaching signals so far, scored on the stored seasons' scale.
+
+    The two signals the slim play-by-play supports are the ATS cover rate and the ref-crew-
+    adjusted penalty rate (the quarter-based signals need a `qtr` column the fetch does not
+    keep, so the stored 2021-25 scores are built from these two as well — same recipe, same
+    weights: ATS 0.30, discipline 0.20, rescaled to a 0-100 composite). Each signal is min-max
+    scaled against the 2021-25 TEAM-SEASON range in coaching_scores.parquet, not against the
+    partial season itself (a 7-game 80% cover rate would otherwise be the all-time maximum),
+    and clipped. Returns [team, season, games, ats_cover_pct, adjusted_penalty_rate,
+    coaching_score]; empty before the first game. ml.squad._coaching blends it toward the
+    multi-year prior by games played (ml.current's K rule) — until 2026-11-02 the model used
+    the multi-year mean alone, so a staff that was good last year and is not this year was
+    still paid for last year all season (Philadelphia: +1.2 z from 2022-25 through a 2-5
+    start). `through_week` limits both inputs for walk-forward tests."""
+    sched = pd.read_parquet(RAW / "schedules.parquet")
+    sched = sched[(pd.to_numeric(sched["season"], errors="coerce") == season)
+                  & (sched["game_type"].astype(str).str.upper().str.strip() == "REG")
+                  & sched["home_score"].notna() & sched["spread_line"].notna()]
+    if through_week is not None:
+        sched = sched[sched["week"] <= through_week]
+    if sched.empty:
+        return pd.DataFrame(columns=["team", "season", "games", "ats_cover_pct", "adjusted_penalty_rate", "coaching_score"])
+    rows = []
+    for g in sched.itertuples():
+        margin, spread = float(g.home_score) - float(g.away_score), float(g.spread_line)
+        rows.append({"team": g.home_team, "covered": margin > spread})
+        rows.append({"team": g.away_team, "covered": margin < spread})
+    ats = pd.DataFrame(rows).groupby("team").agg(ats_cover_pct=("covered", "mean"), games=("covered", "size"))
+
+    pen = None
+    p = RAW / f"pbp_{season}.parquet"
+    if p.exists():
+        pb = pd.read_parquet(p, columns=["game_id", "week", "posteam", "penalty", "epa"])
+        pb = pb[pb["week"] <= (through_week if through_week is not None else 18)]
+        pb["penalty"] = pd.to_numeric(pb["penalty"], errors="coerce").fillna(0)
+        base = pb.groupby("game_id")["penalty"].mean().rename("game_penalty_rate")
+        pb = pb.merge(base, on="game_id", how="left")
+        pen = pb.groupby("posteam").agg(team_penalty_rate=("penalty", "mean"), game_baseline=("game_penalty_rate", "mean"))
+        pen["adjusted_penalty_rate"] = pen["team_penalty_rate"] - pen["game_baseline"]
+        pen = pen["adjusted_penalty_rate"]
+
+    hist = pd.read_parquet(PROC / "coaching_scores.parquet")
+
+    def scale(x: pd.Series, col: str, reverse: bool = False) -> pd.Series:
+        lo, hi = float(hist[col].min()), float(hist[col].max())
+        if hi == lo:
+            return pd.Series(50.0, index=x.index)
+        out = ((x - lo) / (hi - lo) * 100).clip(0, 100)
+        return 100 - out if reverse else out
+
+    out = ats.copy()
+    out["adjusted_penalty_rate"] = pen.reindex(out.index) if pen is not None else 0.0
+    score = pd.Series(50.0, index=out.index)
+    total = 0.0
+    score += (scale(out["ats_cover_pct"].fillna(0.5), "ats_cover_pct") - 50) * 0.30; total += 0.30
+    if "adjusted_penalty_rate" in hist.columns:
+        score += (scale(out["adjusted_penalty_rate"].fillna(0.0), "adjusted_penalty_rate", reverse=True) - 50) * 0.20; total += 0.20
+    out["coaching_score"] = ((score - 50) / total + 50).clip(0, 100).round(1)
+    out["season"] = season
+    return out.reset_index()[["team", "season", "games", "ats_cover_pct", "adjusted_penalty_rate", "coaching_score"]]
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--seasons", nargs="+", type=int,

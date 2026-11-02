@@ -517,11 +517,45 @@ def _def_team():
     return pd.Series(dtype=float)
 
 
+_COACH_CUR = None     # this season's coaching scores (coaching_metrics.inseason_scores), per process
+
+
 def _coaching():
-    # multi-year (2023-2025) mean, so a single strong season doesn't spike a team
+    """Coaching score per team: the multi-year (2023-25) mean — a single strong season must not
+    spike a team — blended toward THIS season's score by games played, the same K rule every
+    in-season view uses (ml.current: w = g / (g + 4)). Until 2026-11-02 it was the multi-year
+    mean alone, so a staff that was good last year and is not this year kept last year's
+    credit all season (Philadelphia carried +1.2 z from 2022-25 through a 2-5 start). The
+    in-season score is coaching_metrics.inseason_scores (ATS cover rate + ref-adjusted
+    penalty rate, scaled to the stored seasons' range); computed once per process and dropped
+    with the other caches on refresh."""
+    global _COACH_CUR
     c = pd.read_parquet(PROC / "coaching_scores.parquet")
-    c = c[c.season.isin([2023, 2024, 2025])]
-    return c.groupby("team")["coaching_score"].mean()
+    prior = c[c.season.isin([2023, 2024, 2025])].groupby("team")["coaching_score"].mean()
+    try:
+        from ml.current import state, weights
+        st = state()
+        if not st["in_progress"]:
+            return prior
+        if _COACH_CUR is None:
+            import sys
+            root = str(Path(__file__).parent.parent)
+            if root not in sys.path:
+                sys.path.insert(0, root)                      # coaching_metrics.py lives at the repo root
+            import coaching_metrics as cm
+            cur = cm.inseason_scores(st["season"])
+            _COACH_CUR = cur.set_index("team")["coaching_score"] if len(cur) else pd.Series(dtype=float)
+        w = weights()
+        if not len(_COACH_CUR) or not len(w):
+            return prior
+        out = prior.copy()
+        for t in prior.index:
+            wt = float(w.get(t, 0.0))
+            if t in _COACH_CUR.index and wt > 0:
+                out[t] = (1 - wt) * prior[t] + wt * float(_COACH_CUR[t])
+        return out
+    except Exception:
+        return prior
 
 
 # ── PFF overlay on the unit scores ──────────────────────────────────

@@ -153,6 +153,57 @@ def unit_injury_deltas(team: str) -> dict:
     return d
 
 
+# ── mobile QB: the QUARTERBACK's own scramble share, not the team's ──────────────────
+# The "mobile QB vs contain" rule read team_styles.qb_rush_rate, a TEAM season stat. When the
+# starter changes mid-season that rate keeps describing the old starter: Hurts went to IR in
+# 2026 week 6 and Philadelphia stayed at the 88th percentile under McKee, a pocket passer, so
+# the rule kept paying the Eagles +0.9 for a quarterback who was not playing. It now reads
+# the CURRENT QB1's own scramble share — scrambles over (pass attempts + scrambles) on his
+# own dropbacks, this season plus the two before — as a league percentile among quarterbacks
+# with QB_MOB_MIN_DB dropbacks. A quarterback without that history sits at the median, so
+# the rule stays silent for him instead of inheriting the team's number. (2026-11-02)
+QB_MOB_MIN_DB = 100
+_QBMOB = None
+
+
+def qb_mobility() -> dict:
+    """{team: percentile (0-1) of its current available QB1's own scramble share}; 0.5 when
+    the quarterback has no qualifying history. The same dict feeds the matchup page's
+    'Mobile QB' chip (dashboard._tendencies), so the chip and the rule cannot disagree."""
+    global _QBMOB
+    if _QBMOB is not None:
+        return _QBMOB
+    out = {}
+    try:
+        from ml.current import state
+        from ml.projections import _depth_qbs, unavailable_ids
+        st = state()
+        seasons = [s for s in (st["season"] - 2, st["season"] - 1, st["season"])
+                   if (RAW / f"pbp_{s}.parquet").exists()]
+        att, scr = {}, {}
+        for s in seasons:
+            p = pd.read_parquet(RAW / f"pbp_{s}.parquet",
+                                columns=["week", "passer_player_id", "pass_attempt", "qb_scramble", "rusher_player_id"])
+            p = p[p["week"] <= 18]
+            a = p[(p["pass_attempt"] == 1) & p["passer_player_id"].notna()].groupby("passer_player_id").size()
+            sc = p[(p["qb_scramble"] == 1) & p["rusher_player_id"].notna()].groupby("rusher_player_id").size()
+            for k, v in a.items():
+                att[k] = att.get(k, 0) + int(v)
+            for k, v in sc.items():
+                scr[k] = scr.get(k, 0) + int(v)
+        share = {k: scr.get(k, 0) / (att[k] + scr.get(k, 0))
+                 for k in att if att[k] + scr.get(k, 0) >= QB_MOB_MIN_DB}
+        pct = pd.Series(share).rank(pct=True) if share else pd.Series(dtype=float)
+        unavail = unavailable_ids()
+        for team, qs in _depth_qbs().items():
+            qb = next((g for g, _ in qs if g not in unavail), qs[0][0] if qs else None)
+            out[team] = float(pct.get(qb, 0.5)) if qb is not None else 0.5
+    except Exception:
+        out = {}
+    _QBMOB = out
+    return out
+
+
 # ── 2. scheme (play-caller) matchups ────────────────────────────────
 def _style_row(team, season=None):
     s = _styles()
@@ -210,7 +261,9 @@ def _offense_vs_defense(off_t, def_t, tab) -> tuple:
         b += 0.8; notes.append("play-action vs aggressive front")
     if p("motion_rate", o_team) > 0.65 and "Man" in dlabel:
         b += 0.6; notes.append("motion vs man coverage")
-    if p("qb_rush_rate", o_team) > 0.65:
+    # the quarterback on the field (off_t), not the coordinator's source team: mobility is
+    # the player's, not the scheme's (see qb_mobility)
+    if qb_mobility().get(off_t, 0.5) > 0.65:
         cont = p("def_qb_scramble_epa_allowed", d_team)
         if cont > 0.65:
             b += 0.9; notes.append("mobile QB vs poor contain")
@@ -336,6 +389,6 @@ def scheme_matchup(home: str, away: str, season=None) -> dict:
 
 
 def clear():
-    global _INJ, _STY, _SCHEME, _RATINGS, _COV_SCHEME
-    _INJ = _STY = _SCHEME = _COV_SCHEME = None
+    global _INJ, _STY, _SCHEME, _RATINGS, _COV_SCHEME, _QBMOB
+    _INJ = _STY = _SCHEME = _COV_SCHEME = _QBMOB = None
     _RATINGS = {}
