@@ -144,9 +144,26 @@ def game_context(home: str, away: str, row) -> dict:
                 tag.append("off bye")
             notes.append(f"Rest: {edge_team} +{abs(int(round(diff)))}d" + (f" ({', '.join(tag)})" if tag else ""))
 
-    # weather (suppresses both teams' scoring)
+    # weather (suppresses both teams' scoring). The schedule's temp/wind are EMPTY before
+    # kickoff (nflverse fills them after the game, and not always), so an unplayed game reads
+    # the kickoff-window forecast from ml/weather.py instead; a played one reads the archive.
     temp, wind = row.get("temp"), row.get("wind")
     is_dome = roof in ("dome", "closed") or (not neutral and home in coords and coords[home][2])
+    wx = None
+    if not is_dome:
+        try:
+            from ml.weather import game_weather, describe
+            wx = game_weather(row)
+        except Exception:
+            wx = None
+        if wx:
+            if wx.get("temp") is not None and not pd.isna(wx.get("temp")):
+                temp = wx["temp"]
+            if wx.get("wind") is not None and not pd.isna(wx.get("wind")):
+                wind = wx["wind"]
+            d = describe(wx)
+            if d:
+                notes.append(d)
     wpts = 0.0
     if is_dome:
         pass

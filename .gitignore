@@ -37,3 +37,6 @@ Thumbs.db
 *.log
 data/processed/social/                # rendered weekly picks posts (image/video), on the volume
 data/processed/social_posts.jsonl     # what was posted where (social/post.py)
+
+# kickoff-window forecasts (ml/weather.py) — refresh output, rewritten several times a day
+data/raw/weather_forecast.parquet

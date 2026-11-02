@@ -232,12 +232,14 @@ def _rec_markets(p):
     return rows
 
 
-def player_props(home: str, away: str, neutral: bool = False) -> dict:
+def player_props(home: str, away: str, neutral: bool = False, weather: dict | None = None) -> dict:
     """Per-player prop markets for a matchup, both teams. Each player → projected number + the
-    distribution params needed to price any line as over/under."""
+    distribution params needed to price any line as over/under. `weather` is the game's
+    ml.weather.game_weather dict: wind and rain cut the passing lines before they are priced."""
     from ml.projections import project_matchup
-    m = project_matchup(home, away, neutral=neutral)
-    out = {"home": home, "away": away, "pred": m["pred"], "teams": {}}
+    m = project_matchup(home, away, neutral=neutral, weather=weather)
+    out = {"home": home, "away": away, "pred": m["pred"], "teams": {}, "weather": weather,
+           "weather_mult": (m["teams"].get(home) or {}).get("weather")}
     for team in (home, away):
         t = m["teams"].get(team, {})
         players = []

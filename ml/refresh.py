@@ -347,6 +347,12 @@ def run(season: int, log=_default_log, skip_download: bool = False, light: bool 
         files = {} if skip_download else download_nflverse(season, log)
         files["pff_sync"] = {"status": pull_pff(log)}
         rebuild = rebuild_light(log)
+    if not skip_download:
+        try:                                             # kickoff-window forecasts for the week ahead (ml/weather.py)
+            from ml.weather import fetch_forecast
+            files["weather_forecast"] = fetch_forecast(season, log)
+        except Exception as e:
+            log(f"  weather forecast failed — {e}", "WARN")
 
     ok = (skip_download or any("rows" in v for v in files.values())) and \
          all(not str(v).startswith("error") for v in rebuild.values())

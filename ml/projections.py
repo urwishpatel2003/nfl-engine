@@ -561,9 +561,31 @@ def injury_impact(team: str, unavail: set = None) -> dict:
     return {"pts": round(min(pen, 10.0), 1), "players": who}
 
 
-def project_matchup(home: str, away: str, neutral: bool = False) -> dict:
+def _apply_weather(t: dict, wx: dict) -> None:
+    """Bend one team's projected stat lines for the game's weather (ml.weather.pass_multipliers:
+    wind and rain cut attempts, completions, yards and passing touchdowns; rushing is left
+    alone — it did not move in the 2021-25 measurement). In place; records the multipliers on
+    the team dict so the box score and the props board can say why the lines are lower."""
+    from ml.weather import pass_multipliers
+    m = pass_multipliers(wx)
+    t["weather"] = {k: (round(v, 3) if isinstance(v, float) else v) for k, v in m.items()}
+    if all(abs(m[k] - 1.0) < 1e-9 for k in ("att", "cmp", "yds", "td")):
+        return
+
+    def scale(d, key, f, nd=1):
+        if d.get(key) is not None:
+            d[key] = round(float(d[key]) * f, nd)
+    q = t.get("qb")
+    if q:
+        scale(q, "pass_att", m["att"]); scale(q, "cmp", m["cmp"]); scale(q, "pass_yds", m["yds"]); scale(q, "pass_td", m["td"], 2)
+    for p in list(t.get("rush", [])) + list(t.get("rec", [])):
+        scale(p, "targets", m["att"]); scale(p, "rec", m["cmp"]); scale(p, "rec_yds", m["yds"]); scale(p, "rec_td", m["td"], 2)
+
+
+def project_matchup(home: str, away: str, neutral: bool = False, weather: dict | None = None) -> dict:
     """Full matchup: unit-vs-unit score + opponent-adjusted player stat lines, using only
-    AVAILABLE players (injured players are excluded and their usage redistributed)."""
+    AVAILABLE players (injured players are excluded and their usage redistributed).
+    `weather` (ml.weather.game_weather of the schedule row) bends the passing lines."""
     from ml.matchup_engine import project_game, team_units
     pred = project_game(home, away, neutral=neutral)
     u = team_units()
@@ -597,8 +619,10 @@ def project_matchup(home: str, away: str, neutral: bool = False) -> dict:
         rush_factor = float(np.clip(1 + 0.14 * u.loc[opp, "z_def_rush"], 0.75, 1.30)) if opp in u.index else 1.0
         teams[team] = _distribute(team, team_pa, team_ra, off_tds, prof, pass_factor, rush_factor, unavail)
         teams[team]["excluded"] = excluded(team)
+        if weather:
+            _apply_weather(teams[team], weather)
 
-    return {"home": home, "away": away, "pred": pred, "teams": teams}
+    return {"home": home, "away": away, "pred": pred, "teams": teams, "weather": weather}
 
 
 if __name__ == "__main__":

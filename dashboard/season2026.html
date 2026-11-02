@@ -2292,6 +2292,7 @@ async function viewProps(params){
         </div>
         <div class="gc-row"><span>${esc(g.gameday||'')} ${esc(g.gametime||'')}</span><span>${g.started?'kicked off':g.lines?'<span style="color:var(--good)">● book lines</span>':'no lines yet'}</span></div>
         <div class="gc-row" style="color:var(--muted)"><span>${summary}</span></div>
+        ${g.weather?`<div class="gc-row" style="color:var(--muted)"><span title="kickoff-window forecast (Open-Meteo); wind and rain cut the passing lines before pricing">${esc(g.weather)}${g.weather_mult&&g.weather_mult.yds<1?` · passing ×${Number(g.weather_mult.yds).toFixed(2)}`:''}</span></div>`:''}
         <div class="gc-edge" style="justify-content:flex-start;gap:6px;flex-wrap:wrap"><span>${rows.length?`<b>${rows.length}</b> prop${rows.length===1?'':'s'}`:'<span style="color:var(--muted)">no props</span>'}</span>${counts}</div>
         <div class="pt-body" onclick="event.stopPropagation()">${body}
           <div class="gc-row pt-foot" style="margin-top:2px"><span></span><a href="#/matchup?home=${g.home}&away=${g.away}" style="font-size:11px">full matchup ›</a></div></div>

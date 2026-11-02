@@ -39,6 +39,7 @@ _REFRESH_NAMES = {"injuries.parquet", "schedules.parquet", "situational_stats.pa
                   # depth-chart changes until the next 2-4-hourly pull (McLaurin's IR listing
                   # vanished from the site for a few hours after the week-8 deploys).
                   "depth_2026_current.parquet", "rosters_2026.parquet", "rosters_weekly.parquet",
+                  "weather_forecast.parquet",  # kickoff forecasts (ml/weather.py), re-pulled by every refresh
                   "last_refresh.json", "season_2026.json",
                   "picks_ledger.parquet",      # the site's own pre-kickoff pick record — never clobber
                   "props_ledger.parquet",      # the player-prop record (ml/props_ledger.py) — same rule

@@ -153,11 +153,19 @@ Two hard rules for anything that runs ON the server:
 - **Never import `nfl_data_py` in the runtime path.** It pins `pandas<2`, which conflicts
   with the engine's pandas 3 and breaks the build. Runtime deps live in `requirements.txt`;
   the fetch-only libs (nfl_data_py/requests-for-fetch/tqdm) live in `requirements-fetch.txt`.
-- **The server reads local parquet only.** The one exception is `ml/refresh.py`, which
+- **The server reads local parquet only.** The exceptions are `ml/refresh.py`, which
   downloads nflverse **release** parquets directly over HTTPS (pandas + requests, no
   nfl_data_py) for a *light* current-season refresh: injuries + PBP + schedules, then
-  rebuilds `situational_stats` + `team_styles` (`python -m ml.refresh --season 2026`).
-  It does **not** rebuild composite/the full engine — that stays an offline `run_engine.py` job.
+  rebuilds `situational_stats` + `team_styles` (`python -m ml.refresh --season 2026`) —
+  it does **not** rebuild composite/the full engine, that stays an offline `run_engine.py`
+  job — and `ml/weather.py`, which every refresh (light and full) calls for the kickoff-window
+  forecast of the week's outdoor games from Open-Meteo (free, no key) into
+  `data/raw/weather_forecast.parquet` (refresh-managed, git-ignored). The schedule's own
+  temp/wind are empty before kickoff, so `ml.context.game_context` reads that forecast (the
+  slate card shows "Forecast: 52°F, wind 15 mph"), and `ml.projections.project_matchup` /
+  `ml.props.player_props` take the same `game_weather(row)` dict to cut the passing lines
+  (wind and rain multipliers measured on the 2021-25 archive, `python -m ml.weather --archive`).
+  The board's total is market-anchored, so weather moves the props and the box score, not the pick.
 
 Refresh is exposed at `POST /api/refresh` (guarded by the `REFRESH_TOKEN` env var) +
 `GET /api/refresh/status`, and can run on an in-process daily schedule (`REFRESH_DAILY=1`,

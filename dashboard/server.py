@@ -676,8 +676,10 @@ def api_matchup_players():
     key = (home, away, _avail_sig())
     if key not in _PROJ_CACHE:
         from ml.projections import project_matchup
+        from ml.weather import game_weather
         _PROJ_CACHE.clear()                            # inputs moved → every cached box is stale
-        _PROJ_CACHE[key] = project_matchup(home, away)
+        row = _scheduled_row(home, away)               # the game's weather bends the passing lines
+        _PROJ_CACHE[key] = project_matchup(home, away, weather=game_weather(row) if row is not None else None)
     return jsonify(_native(_PROJ_CACHE[key]))
 
 
@@ -1931,7 +1933,8 @@ def _slate_sig() -> str:
     """Everything a slate prediction depends on: the availability files, play-by-play, the
     schedule, the built styles / grades, and the model code. If any of it moved, recompute."""
     names = [RAW / n for n in ("injuries.parquet", "rosters_2026.parquet", "depth_2026_current.parquet",
-                               "pbp_2026.parquet", "pbp_2025.parquet", "schedules.parquet")]
+                               "pbp_2026.parquet", "pbp_2025.parquet", "schedules.parquet",
+                               "weather_forecast.parquet")]       # kickoff forecasts enter the context deltas
     names += [PROC / n for n in ("team_styles.parquet", "pff_grades.parquet", "pff_grades_2025.parquet",
                                  "pff_scheme_receiving.parquet", "pff_scheme_defense.parquet",   # coverage clash inputs
                                  "composite_scores.parquet", "coaching_scores.parquet", "situational_stats.parquet")]
@@ -2676,10 +2679,13 @@ def api_props():
         return jsonify({"error": "pick two different teams"}), 400
     neutral = request.args.get('neutral') == '1'
     row = _scheduled_row(home.upper(), away.upper())    # a listed neutral site is neutral regardless of the checkbox
+    wx = None
     if row is not None:
         from ml.context import game_context
+        from ml.weather import game_weather
         neutral = neutral or bool(game_context(home.upper(), away.upper(), row)["neutral"])
-    data = player_props(home, away, neutral=neutral)
+        wx = game_weather(row)                            # the same weather the slate card shows
+    data = player_props(home, away, neutral=neutral, weather=wx)
     if request.args.get('lines') == '1':                 # merge real book lines (spends odds credits)
         from ml.odds import event_props, have_key, _namekey
         if not have_key():
@@ -2873,9 +2879,13 @@ def _build_props_slate(season: int, week: int, key: tuple) -> None:
                 "vegas_total": safe_json(g.get("total_line")), "vegas_spread": safe_json(g.get("spread_line")),
             }
             try:
-                pp = player_props(home, away, neutral=ctx["neutral"])
+                from ml.weather import game_weather, describe
+                wx = game_weather(g)
+                pp = player_props(home, away, neutral=ctx["neutral"], weather=wx)
                 rec["pred"] = {"home": pp["pred"]["pred_home_score"], "away": pp["pred"]["pred_away_score"]}
                 rec["teams"] = pp["teams"]
+                rec["weather"] = describe(wx)
+                rec["weather_mult"] = pp.get("weather_mult")
             except Exception as e:
                 rec["error"] = str(e)[:120]
                 rec["teams"] = {}
@@ -3225,7 +3235,7 @@ def clear_caches(scope: str = "full"):
             setattr(importlib.import_module(mod), attr, None)
         except Exception:
             pass
-    for modname in ("ml.matchup_context", "ml.current", "ml.season"):
+    for modname in ("ml.matchup_context", "ml.current", "ml.season", "ml.weather"):
         try:
             import importlib
             importlib.import_module(modname).clear()
