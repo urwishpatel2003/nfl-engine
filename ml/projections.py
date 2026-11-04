@@ -61,19 +61,30 @@ def current_reports(inj: pd.DataFrame | None = None) -> pd.DataFrame:
 
 def reserve_ids(team: str | None = None) -> dict:
     """{gsis_id: label} for players on a reserve/exempt list in the current roster release
-    (IR, PUP, NFI, exempt, retired). Optional team filter."""
+    (IR, PUP, NFI, exempt, retired), PLUS the owner-pinned overrides (ml/availability.py — a
+    transaction the daily roster release has not caught up with; Jackson's IR placement was a
+    day ahead of nflverse). Optional team filter."""
+    out = {}
     p = RAW / "rosters_2026.parquet"
-    if not p.exists():
-        return {}
-    r = pd.read_parquet(p, columns=["team", "player_id", "status", "status_description_abbr"])
-    r = r.dropna(subset=["player_id"])
-    r["_pri"] = r["status"].map(_STATUS_PRIORITY).fillna(9)
-    r = r.sort_values("_pri").drop_duplicates("player_id")        # ACT row wins across teams
-    r = r[r["status"].isin(RESERVE_STATUS)]
-    if team is not None:
-        r = r[r["team"] == team]
-    return {str(g): RESERVE_DESC.get(str(d), RESERVE_STATUS.get(str(s), "RES"))
-            for g, s, d in zip(r["player_id"], r["status"], r["status_description_abbr"])}
+    if p.exists():
+        r = pd.read_parquet(p, columns=["team", "player_id", "status", "status_description_abbr"])
+        r = r.dropna(subset=["player_id"])
+        r["_pri"] = r["status"].map(_STATUS_PRIORITY).fillna(9)
+        r = r.sort_values("_pri").drop_duplicates("player_id")        # ACT row wins across teams
+        r = r[r["status"].isin(RESERVE_STATUS)]
+        if team is not None:
+            r = r[r["team"] == team]
+        out = {str(g): RESERVE_DESC.get(str(d), RESERVE_STATUS.get(str(s), "RES"))
+               for g, s, d in zip(r["player_id"], r["status"], r["status_description_abbr"])}
+    try:
+        from ml.availability import active
+        from ml.current import state
+        for g, o in active(state()["season"]).items():
+            if team is None or o.get("team") == team:
+                out.setdefault(g, o["label"])                   # the release's own tag wins once it lands
+    except Exception:
+        pass
+    return out
 
 
 _REST_WORDS = ("rest", "not injury", "personal", "coach", "veteran")
@@ -184,6 +195,49 @@ def _reserve_cached() -> dict:
     if _RESERVE_CACHE is None:
         _RESERVE_CACHE = reserve_ids()
     return _RESERVE_CACHE
+
+
+_REGULAR_CACHE = None
+
+
+def regular_qbs() -> dict:
+    """{team: gsis_id} of each team's REGULAR starter this season: the quarterback who has
+    started the most of its games (first passer of each game in the season's play-by-play);
+    the chart's QB1 before the first game and on ties.
+
+    This is the quarterback whose games make up the team's season-to-date performance, so he
+    is the one whose absence has to be charged (injury_impact). The depth chart's QB1 is NOT
+    that player once a starter goes on a reserve list — the chart promotes the backup the same
+    day (Hurts → McKee, 2026 week 6), which is exactly when a chart-keyed rule would charge
+    nothing. The key moves to the backup on its own once he has made more starts than the
+    regular, by which time the performance side has absorbed his games."""
+    global _REGULAR_CACHE
+    if _REGULAR_CACHE is None:
+        out = {}
+        counts = None
+        try:
+            from ml.current import state
+            st = state()
+            path = RAW / f"pbp_{st['season']}.parquet"
+            if st["in_progress"] and path.exists():
+                p = pd.read_parquet(path, columns=["game_id", "week", "posteam", "passer_player_id",
+                                                   "pass_attempt", "play_id"])
+                p = p[(p["pass_attempt"] == 1) & p["passer_player_id"].notna() & (p["week"] <= 18)]
+                starts = p.sort_values(["game_id", "play_id"]).groupby(["posteam", "game_id"])["passer_player_id"].first()
+                counts = starts.groupby(level=0).value_counts()
+        except Exception:
+            counts = None
+        for team, qs in _depth_qbs().items():
+            chart1 = qs[0][0] if qs else None
+            pick = chart1
+            if counts is not None and team in counts.index.get_level_values(0):
+                c = counts.loc[team]
+                tied = list(c[c == c.max()].index)
+                pick = chart1 if chart1 in tied else tied[0]
+            if pick is not None:
+                out[team] = pick
+        _REGULAR_CACHE = out
+    return _REGULAR_CACHE
 
 
 def _available_qb(team: str, unavail: set):
@@ -523,16 +577,43 @@ def injury_impact(team: str, unavail: set = None) -> dict:
     prof = player_profiles()
     r = prof[prof.team == team]
     pen, who = 0.0, []
-    # QB1 out → penalty scaled by the gap to the best available backup
+    # The REGULAR starter (most starts this season, see regular_qbs) out → penalty scaled by the
+    # gap to the best available backup. Keyed on the regular starter, not the chart's QB1: when
+    # a starter goes on IR the chart promotes the backup the same day, so a chart-keyed rule
+    # charged nothing for Hurts → McKee (2026 wk6-8, Eagles over-rated ~3 pts a game) while a
+    # week-to-week Out (Jackson) was charged in full. The unit cannot carry the swap on its own —
+    # its performance side is the regular starter's season — so the gap is charged here either
+    # way. Replay of 2026 wk1-8 vs the frozen lines (scratchpad wf_qb.py): QB-change games MAE
+    # 12.7 → 11.3, 14-13 → 17-10 ATS; the 40th-pct default for an unknown backup measured better
+    # than a 10th-pct replacement default (which over-charged the TB and CHI backups).
     from ml.squad import _qb_value_table
     qbp = _qb_value_table().rank(pct=True) * 100
     qs = _depth_qbs().get(team, [])
-    if qs and qs[0][0] in unavail:
-        s = float(qbp.get(qs[0][0], 60.0))
-        b = next((float(qbp.get(g, 40.0)) for g, _ in qs[1:] if g not in unavail), 35.0)
+    reg = regular_qbs().get(team)
+    if reg and reg in unavail:
+        s = float(qbp.get(reg, 60.0))
+        # Best available backup, walking the chart. A backup with no multi-year EPA defaults to
+        # the 40th percentile (measured better than a 10th-pct replacement default, see above),
+        # BUT the chart order is information: he cannot be rated above a KNOWN quarterback
+        # listed ahead of him, and he loses 10 percentile points (~0.7 pts) for every injured
+        # backup he sits behind, floor 10. Jackson (93) on IR with Huntley (32) also out →
+        # Fagnano 22 → 5.0 pts, instead of a flat 40 → 3.7, which charged the third-stringer
+        # LESS than the second. Judgment call, not backtested: no QB3 start in the 2026 ledger.
+        ceiling, skipped, b = 40.0, 0, 35.0
+        for g, _ in qs:
+            if g == reg:
+                continue
+            known = qbp.get(g)
+            if g in unavail:
+                if known is not None and not pd.isna(known):
+                    ceiling = min(ceiling, float(known))
+                skipped += 1
+                continue
+            b = float(known) if known is not None and not pd.isna(known) else max(10.0, ceiling - 10.0 * skipped)
+            break
         d = max(0.0, (s - b) / 100.0 * 7.0)                # elite→replacement ≈ up to 7 pts
         if d > 0.1:
-            pen += d; who.append(f"{qs[0][1]} (QB)")
+            pen += d; who.append(f"{next((n for g, n in qs if g == reg), 'QB1')} (QB)")
     # skill starters out → net loss after a ~65% replacement recovers most of the share.
     # Only the top two on the CURRENT depth chart count: usage is last season's and travels
     # with the player, so a back who carried 9/g elsewhere and now sits 4th on this chart

@@ -113,6 +113,19 @@ games are not eligible (owner, 2026-10-23, after a one-day trial of including th
 `TOP5_INCLUDE_EARLY=1` lets them in), and `ml.ledger.unrank_early` strips any rank a frozen
 early row carries. A pick whose game is already final shows its result on the social post.
 
+**Pinned availability.** The injury report and the roster release lag real transactions by a
+day or more (Jackson's IR placement, 2026-11-03). `ml/availability.py` pins a player as
+unavailable from a week on (`python -m ml.availability --season 2026 --week 9 --out
+"Lamar Jackson:IR"`, `--show`, `--clear NAME`) into the git-managed
+`data/processed/availability_overrides.json`; `ml.projections.reserve_ids` merges it, so every
+layer that reads the reserve list (QB-out penalty, unit injury deltas, projections, panel) sees
+it. The QB-out penalty (`injury_impact`) keys on the season's REGULAR starter
+(`regular_qbs`: most starts from play-by-play), not the chart's QB1 — the chart promotes the
+backup the day a starter goes on IR, which is when a chart-keyed rule charged nothing (Hurts →
+McKee). Measured on the 2026 wk1-8 frozen ledger (scratchpad `wf_qb.py`): QB-change games
+MAE 12.7 → 11.3, 14-13 → 17-10 ATS; swapping the QB inside the unit instead of the penalty
+under-charges (the unit is mostly season-to-date performance).
+
 ## One game, one number
 
 Every page that predicts a SCHEDULED game (Schedule & Picks slate, Matchup page, the props

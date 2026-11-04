@@ -1464,8 +1464,9 @@ def _team_records(season: int) -> dict:
 
 def _matchup_qbs(home: str, away: str, unavail: set) -> dict:
     """Projected starters for both teams with our QB efficiency percentile and whether the
-    depth-chart QB1 is out (the QB-out penalty is the biggest single injury adjustment)."""
-    from ml.projections import _available_qb, _depth_qbs
+    REGULAR starter (most starts this season, ml.projections.regular_qbs) is out — the QB-out
+    penalty keys on him, so this panel shows the same absence the number is charging."""
+    from ml.projections import _available_qb, _depth_qbs, regular_qbs
     from ml.squad import _qb_value_table
     try:
         pct = _qb_value_table().rank(pct=True) * 100
@@ -1489,7 +1490,8 @@ def _matchup_qbs(home: str, away: str, unavail: set) -> dict:
     for t in (home, away):
         qs = _depth_qbs().get(t, [])
         gid, name = _available_qb(t, unavail)
-        qb1 = qs[0] if qs else (None, None)
+        reg = regular_qbs().get(t)
+        qb1 = next(((g, n) for g, n in qs if g == reg), qs[0] if qs else (None, None))
         sd = cur.get(gid)
         out[t] = {"name": name, "pct": round(float(pct.get(gid)), 0) if gid in pct.index else None,
                   "qb1": qb1[1], "qb1_out": bool(qb1[0] and qb1[0] in unavail),
@@ -3229,6 +3231,8 @@ def clear_caches(scope: str = "full"):
                       ("ml.projections", "_PROFILE_CACHE"), ("ml.projections", "_QBDEPTH_CACHE"),
                       ("ml.projections", "_RANK_CACHE"), ("ml.projections", "_TV_CACHE"),
                       ("ml.projections", "_USAGE_CACHE"), ("ml.projections", "_RESERVE_CACHE"),
+                      ("ml.projections", "_REGULAR_CACHE"),   # regular starter moves with each week's starts
+                      ("ml.availability", "_WEEK_CACHE"),       # pinned availability: the predicted week rolls
                       ("ml.squad", "_COACH_CUR")]:          # in-season coaching score moves with games played
         try:
             import importlib
