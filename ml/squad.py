@@ -914,6 +914,19 @@ def _pff_grades():
             q["pctl"] = q.groupby(q["position"].replace({"FB": "HB"}))["pff_grade"] \
                 .rank(pct=True) * 100
             d = d.merge(q[["pctl"]], left_index=True, right_index=True, how="left")
+            # Non-qualifying grades (a backup's 30 snaps) used to keep a badge but NOT blend, so a
+            # third-string QB with a hot cameo on our stats side (Milton, 71 on a handful of 2025
+            # attempts) sat ABOVE the starter PFF had pulled to 55 (Hurts) — two players on one
+            # card rated on two different scales. Every graded player now blends: his grade is
+            # placed against the QUALIFYING cohort of his position and shrunk halfway toward the
+            # median for the small sample (half film, half "not enough film").
+            pos_all = d["position"].replace({"FB": "HB"})
+            for p_, grp in q.groupby(q["position"].replace({"FB": "HB"})):
+                m = d["pctl"].isna() & (pos_all == p_)
+                if m.any():
+                    arr = np.sort(grp["pff_grade"].to_numpy(dtype=float))
+                    raw = np.searchsorted(arr, d.loc[m, "pff_grade"].to_numpy(dtype=float), side="left") / max(1, len(arr)) * 100
+                    d.loc[m, "pctl"] = 0.5 * raw + 25.0
             dd = d.drop_duplicates(["nm", "team"]).set_index(["nm", "team"])
             by_nt = {i: (r["pff_grade"], r["pctl"]) for i, r in dd.iterrows()}
             # key fallback is TEAM-scoped: a bare lastname+initial collides across the league
@@ -1042,8 +1055,13 @@ def team_depth_chart(team: str) -> list:
             # Measured ratings: PFF film grade dominates at the SAME global weight the team
             # units use (PFF_W). Our stats-based percentile is the remainder — it catches
             # usage/volume reality, but the film graders decide the headline number.
-            if src == "measured" and pff_pctl is not None:
+            # Any player with regular-season film this year blends toward it — including a
+            # rookie/depth player whose prior was the draft slot or the preseason: in-season
+            # film outranks August (Fagnano, 58 off a preseason grade while his 46.9 on real
+            # snaps was ignored, sat above Huntley's 42 on the Ravens' card).
+            if pff_pctl is not None and src in ("measured", "rookie", "proj"):
                 rt = int(round((1 - PFF_W) * rt + PFF_W * pff_pctl))
+                src = "measured"
             pre = None
             if pre_nt is not None:
                 pre = pre_nt.get((_norm(r.player_name), team)) or pre_key.get((_key(r.player_name), team))

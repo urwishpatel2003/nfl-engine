@@ -111,18 +111,18 @@ def qb1_2026() -> dict:
 _SQUAD = None
 
 
-@app.route('/api/power_rankings')
-def api_power_rankings():
-    """2026 team ratings. mode=preseason (default) = current roster-talent + coaching
-    (the season hasn't been played); mode=final = prior-season results-based ratings."""
+def power_table() -> pd.DataFrame:
+    """THE team table every page shows: roster-talent rating blended with this season's results
+    (rank, rating, rating_talent, rating_perf, perf_w, off_rank, def_rank, proj_wins). Built once
+    per process (cleared by clear_caches). The Power Rankings page, the Team Profile header and
+    the PFF-vs-model page all read this — until 2026-11-03 the profile and the PFF page read the
+    raw squad_ratings() talent table instead, so a team sat 21st on its own page and 31st on the
+    rankings (PHI, week 9). One table, one rank."""
     global _SQUAD
-    season = int(request.args.get('season', 2025))
-    mode = request.args.get('mode', 'preseason')
-    meta = team_meta()
-    if mode == 'preseason':
-        if _SQUAD is None:
-            from ml.squad import squad_ratings, WEIGHTS
-            bd = squad_ratings(breakdown=True)[0].copy()
+    if _SQUAD is None:
+        from ml.squad import squad_ratings, WEIGHTS
+        bd = squad_ratings(breakdown=True)[0].copy()
+        if True:  # (indentation kept from the original inline build)
             # split the rating into an offense (qb+skill+ol) and defense (def_team+rush+cover)
             # composite, then rank teams on each — far more intuitive than the raw z-score.
             bd["off"] = WEIGHTS["qb"] * bd["qb"] + WEIGHTS["skill"] * bd["skill"] + WEIGHTS["ol"] * bd["ol"]
@@ -158,7 +158,18 @@ def api_power_rankings():
             except Exception:
                 bd["proj_wins"] = None
             _SQUAD = bd
-        r = _SQUAD
+    return _SQUAD
+
+
+@app.route('/api/power_rankings')
+def api_power_rankings():
+    """2026 team ratings. mode=preseason (default) = current roster-talent + coaching blended
+    with this season's results (power_table); mode=final = prior-season results-based ratings."""
+    season = int(request.args.get('season', 2025))
+    mode = request.args.get('mode', 'preseason')
+    meta = team_meta()
+    if mode == 'preseason':
+        r = power_table()
     else:
         from ml.rank import power_ratings
         r = power_ratings(season)
@@ -566,7 +577,7 @@ def api_pff_compare():
     by_key = {(r.key, r.team): (float(r.pff_grade), float(r.pff_pctl)) for r in uniq.itertuples()}
 
     meta = team_meta()
-    ranks, _ = squad_ratings()
+    ranks = power_table()                          # "our rank" = the Power Rankings page's rank
     rows = []
     for team in ranks["team"]:
         if team not in _DEPTH_CACHE:
@@ -1040,8 +1051,8 @@ def api_team_profile():
     row = ss.iloc[0]
 
     meta = team_meta().get(team, {})
-    from ml.squad import squad_ratings, team_depth_chart
-    ranks, _ = squad_ratings()
+    from ml.squad import team_depth_chart
+    ranks = power_table()                          # the Power Rankings page's own table, same rank
     rr = ranks[ranks["team"] == team]
 
     style_keys = ["offense_label", "defense_label", "pass_rate_overall", "pass_rate_early_down",
