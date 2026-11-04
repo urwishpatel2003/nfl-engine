@@ -2519,7 +2519,7 @@ function schCard(g){
     ${edgeRow}
     <div class="gc-row"><span>Total${g.vegas_total!=null&&!g.total_pick?' <span style="color:var(--muted);font-size:9.5px" title="the model total is anchored to the market total — its own total carried no signal against the line (25-37 through week 4), so no totals pick is issued">· market-anchored, no pick</span>':' · model / Vegas'}</span><b>${pred?g.pred_total.toFixed(1):'—'}${g.vegas_total!=null&&!g.total_pick?'':` / ${g.vegas_total??'—'}`}</b></div>
     ${totalRow}
-    ${injPts>0?`<div class="gc-row"><span>⚕ injury adjust</span><b>−${injPts.toFixed(1)} pts</b></div>`:''}
+    ${injPts>0?`<div class="gc-row"><span>⚕ injury adjust</span><b>${[[g.home,g.inj_home],[g.away,g.inj_away]].filter(x=>x[1]&&x[1].pts>0).map(x=>`${x[0]} −${x[1].pts.toFixed(1)}`).join(' · ')} pts</b></div>`:''}
     ${fin}
     ${g.context_notes&&g.context_notes.length?`<div class="gc-ctx">${g.neutral?'🌍':'✈️'} ${esc(g.context_notes.join(' · '))}</div>`:''}
     <div class="gc-row" style="margin-top:6px"><span>${esc(g.gameday||'')} ${esc(g.gametime||'')}</span><span>details ›</span></div>

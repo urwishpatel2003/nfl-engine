@@ -102,6 +102,15 @@ This was inverted across the entire ATS/picks layer at one point, which faked an
 backtest cover rate (true OOS rate is ~49%). `tests/test_spread_convention.py` guards it —
 run `python tests/test_spread_convention.py` after touching any spread/cover logic.
 
+**Cover probability = prediction + mirrored line residuals** (`ml/spreads.py`, `_resid`):
+actual-minus-closing-line 2015+, mirrored, so P(cover) is exactly 50% at zero edge, the same
+edge prices the same on either side, and the pick ALWAYS follows the edge sign. Until
+2026-11-03 it recentred the raw home-margin history by its mean; raw margins are skewed (mean
++2.3, median +3.0), so a line sitting on the prediction read as a 52% HOME cover and every
+game the model leaned away by < 0.6 pts was picked home (7 of 91 ledger picks, all home,
+against the model's own edge), and the top-5 order (ranked by cover prob) tilted the other
+way. Never recentre an unconditional margin distribution on a prediction.
+
 **Pinned contest lines.** The owner's real picks go into the Circa Million contest, whose
 spreads are fixed on Wednesday. `ml/line_overrides.py` pins a week's sheet
 (`python -m ml.line_overrides --season 2026 --week 7 --source circa CHI:-3 NO:+3 …`, tokens
